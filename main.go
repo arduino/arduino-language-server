@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"io"
 	"log"
@@ -10,7 +9,7 @@ import (
 	"os/user"
 	"strings"
 
-	"github.com/sourcegraph/jsonrpc2"
+	"github.com/bcmi-labs/arduino-language-server/handler"
 )
 
 var enableLogging bool
@@ -41,15 +40,8 @@ func main() {
 		go io.Copy(clangderrLog, clangdErr)
 	}
 
-	inoHandler := newInoHandler()
-	clangdStream := jsonrpc2.NewBufferedStream(StreamReadWrite{clangdIn, clangdOut, clangdinLog, clangdoutLog}, jsonrpc2.VSCodeObjectCodec{})
-	clangdHandler := jsonrpc2.HandlerWithError(inoHandler.FromClangd)
-	inoHandler.clangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
-	stdStream := jsonrpc2.NewBufferedStream(StreamReadWrite{os.Stdin, os.Stdout, stdinLog, stdoutLog}, jsonrpc2.VSCodeObjectCodec{})
-	stdHandler := jsonrpc2.HandlerWithError(inoHandler.FromStdio)
-	inoHandler.stdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler)
-
-	<-inoHandler.stdioConn.DisconnectNotify()
+	inoHandler := handler.NewInoHandler(os.Stdin, os.Stdout, stdinLog, stdoutLog, clangdIn, clangdOut, clangdinLog, clangdoutLog, enableLogging)
+	<-inoHandler.StdioConn.DisconnectNotify()
 }
 
 func createLogFiles() (logFile, stdinLog, stdoutLog, clangdinLog, clangdoutLog, clangderrLog *os.File) {

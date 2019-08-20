@@ -1,9 +1,10 @@
-package main
+package handler
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/url"
 	"path/filepath"
@@ -13,16 +14,29 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-func newInoHandler() *InoHandler {
-	return &InoHandler{
+var enableLogging bool
+
+// NewInoHandler creates and configures an InoHandler.
+func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, stdinLog, stdoutLog io.Writer,
+	clangdIn io.ReadCloser, clangdOut io.WriteCloser, clangdinLog, clangdoutLog io.Writer,
+	logging bool) *InoHandler {
+	enableLogging = logging
+	handler := &InoHandler{
 		data: make(map[lsp.DocumentURI]*FileData),
 	}
+	clangdStream := jsonrpc2.NewBufferedStream(StreamReadWrite{clangdIn, clangdOut, clangdinLog, clangdoutLog}, jsonrpc2.VSCodeObjectCodec{})
+	clangdHandler := jsonrpc2.HandlerWithError(handler.FromClangd)
+	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
+	stdStream := jsonrpc2.NewBufferedStream(StreamReadWrite{stdin, stdout, stdinLog, stdoutLog}, jsonrpc2.VSCodeObjectCodec{})
+	stdHandler := jsonrpc2.HandlerWithError(handler.FromStdio)
+	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler)
+	return handler
 }
 
 // InoHandler is a JSON-RPC handler that delegates messages to clangd.
 type InoHandler struct {
-	stdioConn  *jsonrpc2.Conn
-	clangdConn *jsonrpc2.Conn
+	StdioConn  *jsonrpc2.Conn
+	ClangdConn *jsonrpc2.Conn
 	data       map[lsp.DocumentURI]*FileData
 }
 
@@ -44,9 +58,9 @@ func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, r
 	}
 	var result interface{}
 	if req.Notif {
-		err = handler.clangdConn.Notify(ctx, req.Method, params)
+		err = handler.ClangdConn.Notify(ctx, req.Method, params)
 	} else {
-		result, err = sendRequest(ctx, handler.clangdConn, req.Method, params)
+		result, err = sendRequest(ctx, handler.ClangdConn, req.Method, params)
 	}
 	if err != nil {
 		log.Println("From stdio: Method:", req.Method, "Params:", params, "Error:", err)
@@ -304,9 +318,9 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 	}
 	var result interface{}
 	if req.Notif {
-		err = handler.stdioConn.Notify(ctx, req.Method, params)
+		err = handler.StdioConn.Notify(ctx, req.Method, params)
 	} else {
-		result, err = sendRequest(ctx, handler.stdioConn, req.Method, params)
+		result, err = sendRequest(ctx, handler.StdioConn, req.Method, params)
 	}
 	if err != nil {
 		log.Println("From clangd: Method:", req.Method, "Params:", params, "Error:", err)
