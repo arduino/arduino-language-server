@@ -6,15 +6,15 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"os/user"
-	"strings"
 
 	"github.com/bcmi-labs/arduino-language-server/handler"
 )
 
+var clangdPath string
 var enableLogging bool
 
 func main() {
+	flag.StringVar(&clangdPath, "clangd", "clangd", "path to clangd executable")
 	flag.BoolVar(&enableLogging, "log", false, "enable logging to files")
 	flag.Parse()
 
@@ -28,7 +28,6 @@ func main() {
 		defer clangdoutLogFile.Close()
 		defer clangderrLogFile.Close()
 		log.SetOutput(logFile)
-		log.Println("Starting clangd...")
 		stdinLog, stdoutLog, clangdinLog, clangdoutLog, clangderrLog = stdinLogFile, stdoutLogFile, clangdinLogFile, clangdoutLogFile, clangderrLogFile
 	} else {
 		log.SetOutput(os.Stderr)
@@ -73,20 +72,17 @@ func createLogFiles() (logFile, stdinLog, stdoutLog, clangdinLog, clangdoutLog, 
 	return
 }
 
-const clangdExec = "clangd"
-
 func startClangd() (clangdOut io.ReadCloser, clangdIn io.WriteCloser, clangdErr io.ReadCloser) {
-	usr, err := user.Current()
-	if err != nil {
-		panic(err)
+	if enableLogging {
+		log.Println("Starting C++ language server:", clangdPath)
 	}
-	clangdCmd := exec.Command(strings.Replace(clangdExec, "~", usr.HomeDir, 1))
+	clangdCmd := exec.Command(clangdPath)
 	clangdIn, _ = clangdCmd.StdinPipe()
 	clangdOut, _ = clangdCmd.StdoutPipe()
 	if enableLogging {
 		clangdErr, _ = clangdCmd.StderrPipe()
 	}
-	err = clangdCmd.Start()
+	err := clangdCmd.Start()
 	if err != nil {
 		panic(err)
 	}
