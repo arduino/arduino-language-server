@@ -11,8 +11,6 @@ import (
 	"strings"
 )
 
-const arduinoCLI = "arduino-cli"
-
 func generateCpp(inoCode []byte, name, fqbn string) (cppPath string, cppCode []byte, err error) {
 	tempDir, err := ioutil.TempDir("", "ino2cpp-")
 	if err != nil {
@@ -42,9 +40,10 @@ func generateCpp(inoCode []byte, name, fqbn string) (cppPath string, cppCode []b
 	}
 
 	// Generate target file
-	preprocessCmd := exec.Command(arduinoCLI, "compile", "--fqbn", fqbn, "--preprocess", inoPath)
+	preprocessCmd := exec.Command(globalCliPath, "compile", "--fqbn", fqbn, "--preprocess", inoPath)
 	cppCode, err = preprocessCmd.Output()
 	if err != nil {
+		logCommandErr(globalCliPath, cppCode, err)
 		return
 	}
 
@@ -66,9 +65,10 @@ func updateCpp(inoCode []byte, fqbn, cppPath string) (cppCode []byte, err error)
 	}
 
 	// Generate target file
-	preprocessCmd := exec.Command(arduinoCLI, "compile", "--fqbn", fqbn, "--preprocess", inoPath)
+	preprocessCmd := exec.Command(globalCliPath, "compile", "--fqbn", fqbn, "--preprocess", inoPath)
 	cppCode, err = preprocessCmd.Output()
 	if err != nil {
+		logCommandErr(globalCliPath, cppCode, err)
 		return
 	}
 
@@ -78,9 +78,10 @@ func updateCpp(inoCode []byte, fqbn, cppPath string) (cppCode []byte, err error)
 }
 
 func generateCompileFlags(tempDir, inoPath, fqbn string) (string, error) {
-	propertiesCmd := exec.Command(arduinoCLI, "compile", "--fqbn", fqbn, "--show-properties", inoPath)
+	propertiesCmd := exec.Command(globalCliPath, "compile", "--fqbn", fqbn, "--show-properties", inoPath)
 	output, err := propertiesCmd.Output()
 	if err != nil {
+		logCommandErr(globalCliPath, output, err)
 		return "", err
 	}
 	properties, err := readProperties(bytes.NewReader(output))
@@ -118,4 +119,17 @@ func generateCompileFlags(tempDir, inoPath, fqbn string) (string, error) {
 
 	writer.Flush()
 	return flagsPath, nil
+}
+
+func logCommandErr(command string, stdout []byte, err error) {
+	log.Println("Command error:", command, err)
+	if len(stdout) > 0 {
+		log.Println("------------------------------BEGIN STDOUT\n", string(stdout), "\n------------------------------END STDOUT")
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		stderr := exitErr.Stderr
+		if len(stderr) > 0 {
+			log.Println("------------------------------BEGIN STDERR\n", string(stderr), "\n------------------------------END STDERR")
+		}
+	}
 }

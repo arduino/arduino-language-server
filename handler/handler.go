@@ -14,13 +14,18 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
+var globalCliPath string
 var enableLogging bool
+
+// Setup initializes global variables.
+func Setup(cliPath string, _enableLogging bool) {
+	globalCliPath = cliPath
+	enableLogging = _enableLogging
+}
 
 // NewInoHandler creates and configures an InoHandler.
 func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, stdinLog, stdoutLog io.Writer,
-	clangdIn io.ReadCloser, clangdOut io.WriteCloser, clangdinLog, clangdoutLog io.Writer,
-	logging bool) *InoHandler {
-	enableLogging = logging
+	clangdIn io.ReadCloser, clangdOut io.WriteCloser, clangdinLog, clangdoutLog io.Writer) *InoHandler {
 	handler := &InoHandler{
 		data: make(map[lsp.DocumentURI]*FileData),
 	}
@@ -128,7 +133,8 @@ func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMes
 func (handler *InoHandler) createFileData(sourceURI lsp.DocumentURI, sourceText string) (*FileData, []byte, error) {
 	sourcePath := uriToPath(sourceURI)
 	// TODO get board from sketch config
-	targetPath, targetBytes, err := generateCpp([]byte(sourceText), filepath.Base(sourcePath), "arduino:avr:uno")
+	fqbn := "arduino:avr:uno"
+	targetPath, targetBytes, err := generateCpp([]byte(sourceText), filepath.Base(sourcePath), fqbn)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -158,7 +164,8 @@ func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocume
 			newSourceText = applyTextChange(data.sourceText, *rang, change.Text)
 		}
 		// TODO get board from sketch config
-		targetBytes, err := updateCpp([]byte(newSourceText), "arduino:avr:uno", uriToPath(data.targetURI))
+		fqbn := "arduino:avr:uno"
+		targetBytes, err := updateCpp([]byte(newSourceText), fqbn, uriToPath(data.targetURI))
 		if err != nil {
 			return err
 		}

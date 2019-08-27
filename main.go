@@ -11,11 +11,13 @@ import (
 )
 
 var clangdPath string
+var cliPath string
 var enableLogging bool
 
 func main() {
-	flag.StringVar(&clangdPath, "clangd", "clangd", "path to clangd executable")
-	flag.BoolVar(&enableLogging, "log", false, "enable logging to files")
+	flag.StringVar(&clangdPath, "clangd", "clangd", "Path to clangd executable")
+	flag.StringVar(&cliPath, "cli", "arduino-cli", "Path to arduino-cli executable")
+	flag.BoolVar(&enableLogging, "log", false, "Enable logging to files")
 	flag.Parse()
 
 	var stdinLog, stdoutLog, clangdinLog, clangdoutLog, clangderrLog io.Writer
@@ -39,7 +41,8 @@ func main() {
 		go io.Copy(clangderrLog, clangdErr)
 	}
 
-	inoHandler := handler.NewInoHandler(os.Stdin, os.Stdout, stdinLog, stdoutLog, clangdIn, clangdOut, clangdinLog, clangdoutLog, enableLogging)
+	handler.Setup(cliPath, enableLogging)
+	inoHandler := handler.NewInoHandler(os.Stdin, os.Stdout, stdinLog, stdoutLog, clangdIn, clangdOut, clangdinLog, clangdoutLog)
 	<-inoHandler.StdioConn.DisconnectNotify()
 }
 
