@@ -12,47 +12,38 @@ variables:
   ExecutableName: 'arduino-language-server'
 
 jobs:
-  - job: Linux_Build
+  - job: Build
+    strategy:
+      matrix:
+        linux:
+          imageName: 'ubuntu-16.04'
+        mac:
+          imageName: 'macos-10.13'
+        windows:
+          imageName: 'vs2017-win2016'
     pool:
-      vmImage: 'ubuntu-16.04'
+      vmImage: $(imageName)
     steps:
       - task: GoTool@0
         inputs:
           version: '1.12'
       - script: |
-          go build -o "$(Build.ArtifactStagingDirectory)/$(ExecutableName)_linux_amd64"
+          go build -o "$(Build.BinariesDirectory)/$(Agent.OS)_amd64/$(ExecutableName)"
           go test ./...
-        displayName: 'Generate builds'
-      - task: PublishBuildArtifacts@1
-        displayName: 'Publish Artifacts'
-        condition: succeededOrFailed()
-
-  - job: MacOS_Build
-    pool:
-      vmImage: 'xcode9-macos10.13'
-    steps:
-      - task: GoTool@0
+        displayName: 'Build and Test'
+      - task: ArchiveFiles@2
         inputs:
-          version: '1.12'
-      - script: |
-          go build -o "$(Build.ArtifactStagingDirectory)/$(ExecutableName)_darwin_amd64"
-          go test ./...
-        displayName: 'Generate builds'
-      - task: PublishBuildArtifacts@1
-        displayName: 'Publish Artifacts'
-        condition: succeededOrFailed()
-
-  - job: Windows_Build
-    pool:
-      vmImage: 'vs2017-win2016'
-    steps:
-      - task: GoTool@0
+          rootFolderOrFile: '$(Build.BinariesDirectory)/$(Agent.OS)_amd64'
+          includeRootFolder: false
+          archiveFile: '$(Build.BinariesDirectory)/archive/$(ExecutableName)_$(Agent.OS)_amd64.zip'
+          archiveType: 'zip'
+      - publish: '$(Build.BinariesDirectory)/archive'
+        artifact: 'binary_$(Agent.OS)'
+      - task: S3Upload@1
+        condition: in(variables['Build.Reason'], 'Manual', 'Schedule')
         inputs:
-          version: '1.12'
-      - script: |
-          go build -o "$(Build.ArtifactStagingDirectory)/$(ExecutableName)_windows_amd64.exe"
-          go test ./...
-        displayName: 'Generate builds'
-      - task: PublishBuildArtifacts@1
-        displayName: 'Publish Artifacts'
-        condition: succeededOrFailed()
+          awsCredentials: 'language-server-s3-upload'
+          bucketName: 'arduino-downloads-prod-beagle'
+          sourceFolder: '$(Build.BinariesDirectory)/archive'
+          globExpressions: '*.zip'
+          targetFolder: 'arduino-language-server/nightly'
