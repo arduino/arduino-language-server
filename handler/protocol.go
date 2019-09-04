@@ -11,27 +11,27 @@ import (
 func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 	switch method {
 	case "textDocument/didOpen":
-		params := &lsp.DidOpenTextDocumentParams{}
+		params := new(lsp.DidOpenTextDocumentParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/didChange":
-		params := &lsp.DidChangeTextDocumentParams{}
+		params := new(lsp.DidChangeTextDocumentParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/didSave":
-		params := &lsp.DidSaveTextDocumentParams{}
+		params := new(lsp.DidSaveTextDocumentParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/didClose":
-		params := &lsp.DidCloseTextDocumentParams{}
+		params := new(lsp.DidCloseTextDocumentParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/completion":
-		params := &lsp.CompletionParams{}
+		params := new(lsp.CompletionParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/codeAction":
-		params := &lsp.CodeActionParams{}
+		params := new(lsp.CodeActionParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/hover":
@@ -43,11 +43,15 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 	case "textDocument/implementation":
 		fallthrough
 	case "textDocument/documentHighlight":
-		params := &lsp.TextDocumentPositionParams{}
+		params := new(lsp.TextDocumentPositionParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
+	case "textDocument/references":
+		params := new(lsp.ReferenceParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/publishDiagnostics":
-		params := &lsp.PublishDiagnosticsParams{}
+		params := new(lsp.PublishDiagnosticsParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	}
@@ -57,19 +61,19 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params interface{}) (interface{}, error) {
 	switch method {
 	case "initialize":
-		result := &lsp.InitializeResult{}
+		result := new(lsp.InitializeResult)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/completion":
-		result := &lsp.CompletionList{}
+		result := new(lsp.CompletionList)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "completionItem/resolve":
-		result := &lsp.CompletionItem{}
+		result := new(lsp.CompletionItem)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/hover":
-		result := &Hover{}
+		result := new(Hover)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/definition":
@@ -77,15 +81,17 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 	case "textDocument/typeDefinition":
 		fallthrough
 	case "textDocument/implementation":
-		result := &[]lsp.Location{}
+		fallthrough
+	case "textDocument/references":
+		result := new([]lsp.Location)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/documentHighlight":
-		result := &[]lsp.DocumentHighlight{}
+		result := new([]lsp.DocumentHighlight)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "window/showMessageRequest":
-		result := &lsp.MessageActionItem{}
+		result := new(lsp.MessageActionItem)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	}

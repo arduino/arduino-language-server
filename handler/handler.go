@@ -126,6 +126,10 @@ func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMes
 		p := params.(*lsp.TextDocumentPositionParams)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(p)
+	case "textDocument/references":
+		p := params.(*lsp.ReferenceParams)
+		uri = p.TextDocument.URI
+		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
 	}
 	return
 }
@@ -266,6 +270,8 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	case "textDocument/typeDefinition":
 		fallthrough
 	case "textDocument/implementation":
+		fallthrough
+	case "textDocument/references":
 		r := result.(*[]lsp.Location)
 		for index := range *r {
 			handler.cpp2inoLocation(&(*r)[index])
