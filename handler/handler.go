@@ -262,6 +262,11 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	case "textDocument/completion":
 		r := result.(*lsp.CompletionList)
 		handler.cpp2inoCompletionList(r, uri)
+	case "textDocument/codeAction":
+		r := result.(*[]CodeAction)
+		for index := range *r {
+			handler.cpp2inoCodeAction(&(*r)[index], uri)
+		}
 	case "textDocument/hover":
 		r := result.(*Hover)
 		handler.cpp2inoHover(r, uri)
@@ -293,6 +298,36 @@ func (handler *InoHandler) cpp2inoCompletionList(list *lsp.CompletionList, uri l
 				r.Start.Line = data.sourceLineMap[r.Start.Line]
 				r.End.Line = data.sourceLineMap[r.End.Line]
 			}
+		}
+	}
+}
+
+func (handler *InoHandler) cpp2inoCodeAction(codeAction *CodeAction, uri lsp.DocumentURI) {
+	newEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
+	for uri, edit := range codeAction.Edit.Changes {
+		if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
+			newValue := make([]lsp.TextEdit, len(edit))
+			for index := range edit {
+				r := edit[index].Range
+				newValue[index] = lsp.TextEdit{
+					NewText: edit[index].NewText,
+					Range: lsp.Range{
+						Start: lsp.Position{Line: data.sourceLineMap[r.Start.Line], Character: r.Start.Character},
+						End:   lsp.Position{Line: data.sourceLineMap[r.End.Line], Character: r.End.Character},
+					},
+				}
+			}
+			newEdit.Changes[string(data.sourceURI)] = newValue
+		} else {
+			newEdit.Changes[uri] = edit
+		}
+	}
+	codeAction.Edit = &newEdit
+	if data, ok := handler.data[uri]; ok {
+		for index := range codeAction.Diagnostics {
+			r := &codeAction.Diagnostics[index].Range
+			r.Start.Line = data.sourceLineMap[r.Start.Line]
+			r.End.Line = data.sourceLineMap[r.End.Line]
 		}
 	}
 }

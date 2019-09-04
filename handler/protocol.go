@@ -68,6 +68,10 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		result := new(lsp.CompletionList)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
+	case "textDocument/codeAction":
+		result := new([]CodeAction)
+		err := conn.Call(ctx, method, params, result)
+		return result, err
 	case "completionItem/resolve":
 		result := new(lsp.CompletionItem)
 		err := conn.Call(ctx, method, params, result)
@@ -100,11 +104,22 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 	return result, err
 }
 
+// CodeAction structure according to LSP
+type CodeAction struct {
+	Title       string             `json:"title"`
+	Kind        string             `json:"kind,omitempty"`
+	Diagnostics []lsp.Diagnostic   `json:"diagnostics,omitempty"`
+	Edit        *lsp.WorkspaceEdit `json:"edit,omitempty"`
+	Command     *lsp.Command       `json:"command,omitempty"`
+}
+
+// Hover structure according to LSP
 type Hover struct {
 	Contents MarkupContent `json:"contents"`
 	Range    *lsp.Range    `json:"range,omitempty"`
 }
 
+// MarkupContent structure according to LSP
 type MarkupContent struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`

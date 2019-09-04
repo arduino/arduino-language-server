@@ -12,6 +12,7 @@ type StreamReadWrite struct {
 	outLog    io.Writer
 }
 
+// Read reads from the stream.
 func (srw StreamReadWrite) Read(p []byte) (int, error) {
 	n, err := srw.inStream.Read(p)
 	if n > 0 && srw.inLog != nil {
@@ -20,6 +21,7 @@ func (srw StreamReadWrite) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// Write writes to the stream.
 func (srw StreamReadWrite) Write(p []byte) (int, error) {
 	if srw.outLog != nil {
 		srw.outLog.Write(p)
@@ -27,6 +29,7 @@ func (srw StreamReadWrite) Write(p []byte) (int, error) {
 	return srw.outStream.Write(p)
 }
 
+// Close closes the stream.
 func (srw StreamReadWrite) Close() error {
 	err1 := srw.inStream.Close()
 	err2 := srw.outStream.Close()
