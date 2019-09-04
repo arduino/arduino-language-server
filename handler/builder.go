@@ -12,7 +12,11 @@ import (
 )
 
 func generateCpp(inoCode []byte, name, fqbn string) (cppPath string, cppCode []byte, err error) {
-	tempDir, err := ioutil.TempDir("", "ino2cpp-")
+	rawTempDir, err := ioutil.TempDir("", "ino2cpp-")
+	if err != nil {
+		return
+	}
+	tempDir, err := filepath.EvalSymlinks(rawTempDir)
 	if err != nil {
 		return
 	}
