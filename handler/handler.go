@@ -68,7 +68,7 @@ func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, r
 		result, err = sendRequest(ctx, handler.ClangdConn, req.Method, params)
 	}
 	if err != nil {
-		log.Println("From stdio: Method:", req.Method, "Params:", params, "Error:", err)
+		log.Println("From stdio: Method:", req.Method, "Error:", err)
 		return nil, err
 	}
 	if enableLogging {
@@ -130,6 +130,14 @@ func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMes
 		p := params.(*lsp.ReferenceParams)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
+	case "textDocument/formatting":
+		p := params.(*lsp.DocumentFormattingParams)
+		uri = p.TextDocument.URI
+		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
+	case "textDocument/rangeFormatting":
+		// TODO
+	case "textDocument/onTypeFormatting":
+		// TODO
 	}
 	return
 }
@@ -286,6 +294,15 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		for index := range *r {
 			handler.cpp2inoDocumentHighlight(&(*r)[index], uri)
 		}
+	case "textDocument/formatting":
+		fallthrough
+	case "textDocument/rangeFormatting":
+		fallthrough
+	case "textDocument/onTypeFormatting":
+		r := result.(*[]lsp.TextEdit)
+		for index := range *r {
+			handler.cpp2inoTextEdit(&(*r)[index], uri)
+		}
 	}
 	return result
 }
@@ -357,6 +374,13 @@ func (handler *InoHandler) cpp2inoDocumentHighlight(highlight *lsp.DocumentHighl
 	}
 }
 
+func (handler *InoHandler) cpp2inoTextEdit(edit *lsp.TextEdit, uri lsp.DocumentURI) {
+	if data, ok := handler.data[uri]; ok {
+		edit.Range.Start.Line = data.sourceLineMap[edit.Range.Start.Line]
+		edit.Range.End.Line = data.sourceLineMap[edit.Range.End.Line]
+	}
+}
+
 // FromClangd handles a message received from clangd.
 func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
 	params, _, err := handler.transformStdioParams(req.Method, req.Params)
@@ -371,7 +395,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 		result, err = sendRequest(ctx, handler.StdioConn, req.Method, params)
 	}
 	if err != nil {
-		log.Println("From clangd: Method:", req.Method, "Params:", params, "Error:", err)
+		log.Println("From clangd: Method:", req.Method, "Error:", err)
 		return nil, err
 	}
 	if enableLogging {

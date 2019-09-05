@@ -4,6 +4,13 @@ trigger:
     include:
     - master
 
+schedules:
+- cron: "0 4 * * Mon-Fri"
+  displayName: Nightly Build
+  branches:
+    include:
+    - master
+
 pr:
   - master
 

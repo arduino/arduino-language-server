@@ -42,12 +42,24 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 		fallthrough
 	case "textDocument/implementation":
 		fallthrough
+	case "textDocument/references":
+		params := new(lsp.ReferenceParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
 	case "textDocument/documentHighlight":
 		params := new(lsp.TextDocumentPositionParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
-	case "textDocument/references":
-		params := new(lsp.ReferenceParams)
+	case "textDocument/formatting":
+		params := new(lsp.DocumentFormattingParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
+	case "textDocument/rangeFormatting":
+		params := new(lsp.DocumentRangeFormattingParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
+	case "textDocument/onTypeFormatting":
+		params := new(lsp.DocumentOnTypeFormattingParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/publishDiagnostics":
@@ -92,6 +104,14 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		return result, err
 	case "textDocument/documentHighlight":
 		result := new([]lsp.DocumentHighlight)
+		err := conn.Call(ctx, method, params, result)
+		return result, err
+	case "textDocument/formatting":
+		fallthrough
+	case "textDocument/rangeFormatting":
+		fallthrough
+	case "textDocument/onTypeFormatting":
+		result := new([]lsp.TextEdit)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "window/showMessageRequest":
