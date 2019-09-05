@@ -142,6 +142,10 @@ func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMes
 		p := params.(*lsp.DocumentOnTypeFormattingParams)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDocumentOnTypeFormattingParams(p)
+	case "textDocument/documentSymbol":
+		p := params.(*lsp.DocumentSymbolParams)
+		uri = p.TextDocument.URI
+		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
 	}
 	return
 }
@@ -324,6 +328,9 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		for index := range *r {
 			handler.cpp2inoTextEdit(&(*r)[index], uri)
 		}
+	case "textDocument/documentSymbol":
+		r := result.(*[]DocumentSymbol)
+		handler.cpp2inoDocumentSymbol(r, uri)
 	}
 	return result
 }
@@ -399,6 +406,31 @@ func (handler *InoHandler) cpp2inoTextEdit(edit *lsp.TextEdit, uri lsp.DocumentU
 	if data, ok := handler.data[uri]; ok {
 		edit.Range.Start.Line = data.sourceLineMap[edit.Range.Start.Line]
 		edit.Range.End.Line = data.sourceLineMap[edit.Range.End.Line]
+	}
+}
+
+func (handler *InoHandler) cpp2inoDocumentSymbol(symbols *[]DocumentSymbol, uri lsp.DocumentURI) {
+	if data, ok := handler.data[uri]; ok {
+		for i := 0; i < len(*symbols); {
+			symbol := &(*symbols)[i]
+			symbol.Range.Start.Line = data.sourceLineMap[symbol.Range.Start.Line]
+			symbol.Range.End.Line = data.sourceLineMap[symbol.Range.End.Line]
+			symbol.SelectionRange.Start.Line = data.sourceLineMap[symbol.SelectionRange.Start.Line]
+			symbol.SelectionRange.End.Line = data.sourceLineMap[symbol.SelectionRange.End.Line]
+
+			duplicate := false
+			for j := 0; j < i; j++ {
+				if symbol.Name == (*symbols)[j].Name && symbol.Range.Start.Line == (*symbols)[j].Range.Start.Line {
+					duplicate = true
+					break
+				}
+			}
+			if duplicate {
+				*symbols = (*symbols)[:i+copy((*symbols)[i:], (*symbols)[i+1:])]
+			} else {
+				i++
+			}
+		}
 	}
 }
 

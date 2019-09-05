@@ -62,6 +62,10 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 		params := new(lsp.DocumentOnTypeFormattingParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
+	case "textDocument/documentSymbol":
+		params := new(lsp.DocumentSymbolParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
 	case "textDocument/publishDiagnostics":
 		params := new(lsp.PublishDiagnosticsParams)
 		err := json.Unmarshal(*raw, params)
@@ -114,6 +118,10 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		result := new([]lsp.TextEdit)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
+	case "textDocument/documentSymbol":
+		result := new([]DocumentSymbol)
+		err := conn.Call(ctx, method, params, result)
+		return result, err
 	case "window/showMessageRequest":
 		result := new(lsp.MessageActionItem)
 		err := conn.Call(ctx, method, params, result)
@@ -143,4 +151,15 @@ type Hover struct {
 type MarkupContent struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
+}
+
+// DocumentSymbol structure according to LSP
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           lsp.SymbolKind   `json:"kind"`
+	Deprecated     bool             `json:"deprecated,omitempty"`
+	Range          lsp.Range        `json:"range"`
+	SelectionRange lsp.Range        `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
 }
