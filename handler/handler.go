@@ -114,6 +114,8 @@ func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMes
 		p := params.(*lsp.CodeActionParams)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppCodeActionParams(p)
+	case "textDocument/signatureHelp":
+		fallthrough
 	case "textDocument/hover":
 		fallthrough
 	case "textDocument/definition":

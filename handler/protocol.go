@@ -34,6 +34,8 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 		params := new(lsp.CodeActionParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
+	case "textDocument/signatureHelp":
+		fallthrough
 	case "textDocument/hover":
 		fallthrough
 	case "textDocument/definition":
@@ -94,6 +96,10 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		return result, err
 	case "completionItem/resolve":
 		result := new(lsp.CompletionItem)
+		err := conn.Call(ctx, method, params, result)
+		return result, err
+	case "textDocument/signatureHelp":
+		result := new(lsp.SignatureHelp)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/hover":
