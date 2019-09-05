@@ -348,6 +348,11 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	case "textDocument/rename":
 		r := result.(*lsp.WorkspaceEdit)
 		result = handler.cpp2inoWorkspaceEdit(r)
+	case "workspace/symbol":
+		r := result.(*[]lsp.SymbolInformation)
+		for index := range *r {
+			handler.cpp2inoLocation(&(*r)[index].Location)
+		}
 	}
 	return result
 }

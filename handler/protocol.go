@@ -72,6 +72,10 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 		params := new(lsp.RenameParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
+	case "workspace/symbol":
+		params := new(lsp.WorkspaceSymbolParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
 	case "textDocument/publishDiagnostics":
 		params := new(lsp.PublishDiagnosticsParams)
 		err := json.Unmarshal(*raw, params)
@@ -134,6 +138,10 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		return result, err
 	case "textDocument/rename":
 		result := new(lsp.WorkspaceEdit)
+		err := conn.Call(ctx, method, params, result)
+		return result, err
+	case "workspace/symbol":
+		result := new([]lsp.SymbolInformation)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "window/showMessageRequest":
