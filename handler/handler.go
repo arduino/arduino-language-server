@@ -146,6 +146,10 @@ func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMes
 		p := params.(*lsp.DocumentSymbolParams)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
+	case "textDocument/rename":
+		p := params.(*lsp.RenameParams)
+		uri = p.TextDocument.URI
+		err = handler.ino2cppRenameParams(p)
 	}
 	return
 }
@@ -290,6 +294,14 @@ func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.Doc
 	return nil
 }
 
+func (handler *InoHandler) ino2cppRenameParams(params *lsp.RenameParams) error {
+	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
+	if data, ok := handler.data[params.TextDocument.URI]; ok {
+		params.Position.Line = data.targetLineMap[params.Position.Line]
+	}
+	return nil
+}
+
 func (handler *InoHandler) transformClangdResult(method string, uri lsp.DocumentURI, result interface{}) interface{} {
 	switch method {
 	case "textDocument/completion":
@@ -330,7 +342,10 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		}
 	case "textDocument/documentSymbol":
 		r := result.(*[]DocumentSymbol)
-		handler.cpp2inoDocumentSymbol(r, uri)
+		result = handler.cpp2inoDocumentSymbols(*r, uri)
+	case "textDocument/rename":
+		r := result.(*lsp.WorkspaceEdit)
+		result = handler.cpp2inoWorkspaceEdit(r)
 	}
 	return result
 }
@@ -348,8 +363,19 @@ func (handler *InoHandler) cpp2inoCompletionList(list *lsp.CompletionList, uri l
 }
 
 func (handler *InoHandler) cpp2inoCodeAction(codeAction *CodeAction, uri lsp.DocumentURI) {
+	codeAction.Edit = handler.cpp2inoWorkspaceEdit(codeAction.Edit)
+	if data, ok := handler.data[uri]; ok {
+		for index := range codeAction.Diagnostics {
+			r := &codeAction.Diagnostics[index].Range
+			r.Start.Line = data.sourceLineMap[r.Start.Line]
+			r.End.Line = data.sourceLineMap[r.End.Line]
+		}
+	}
+}
+
+func (handler *InoHandler) cpp2inoWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
 	newEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
-	for uri, edit := range codeAction.Edit.Changes {
+	for uri, edit := range origEdit.Changes {
 		if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
 			newValue := make([]lsp.TextEdit, len(edit))
 			for index := range edit {
@@ -367,14 +393,7 @@ func (handler *InoHandler) cpp2inoCodeAction(codeAction *CodeAction, uri lsp.Doc
 			newEdit.Changes[uri] = edit
 		}
 	}
-	codeAction.Edit = &newEdit
-	if data, ok := handler.data[uri]; ok {
-		for index := range codeAction.Diagnostics {
-			r := &codeAction.Diagnostics[index].Range
-			r.Start.Line = data.sourceLineMap[r.Start.Line]
-			r.End.Line = data.sourceLineMap[r.End.Line]
-		}
-	}
+	return &newEdit
 }
 
 func (handler *InoHandler) cpp2inoHover(hover *Hover, uri lsp.DocumentURI) {
@@ -409,29 +428,34 @@ func (handler *InoHandler) cpp2inoTextEdit(edit *lsp.TextEdit, uri lsp.DocumentU
 	}
 }
 
-func (handler *InoHandler) cpp2inoDocumentSymbol(symbols *[]DocumentSymbol, uri lsp.DocumentURI) {
-	if data, ok := handler.data[uri]; ok {
-		for i := 0; i < len(*symbols); {
-			symbol := &(*symbols)[i]
-			symbol.Range.Start.Line = data.sourceLineMap[symbol.Range.Start.Line]
-			symbol.Range.End.Line = data.sourceLineMap[symbol.Range.End.Line]
-			symbol.SelectionRange.Start.Line = data.sourceLineMap[symbol.SelectionRange.Start.Line]
-			symbol.SelectionRange.End.Line = data.sourceLineMap[symbol.SelectionRange.End.Line]
+func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []DocumentSymbol, uri lsp.DocumentURI) []DocumentSymbol {
+	data, ok := handler.data[uri]
+	if !ok || len(origSymbols) == 0 {
+		return origSymbols
+	}
+	newSymbols := make([]DocumentSymbol, len(origSymbols))
+	j := 0
+	for i := 0; i < len(origSymbols); i++ {
+		symbol := &origSymbols[i]
+		symbol.Range.Start.Line = data.sourceLineMap[symbol.Range.Start.Line]
+		symbol.Range.End.Line = data.sourceLineMap[symbol.Range.End.Line]
 
-			duplicate := false
-			for j := 0; j < i; j++ {
-				if symbol.Name == (*symbols)[j].Name && symbol.Range.Start.Line == (*symbols)[j].Range.Start.Line {
-					duplicate = true
-					break
-				}
-			}
-			if duplicate {
-				*symbols = (*symbols)[:i+copy((*symbols)[i:], (*symbols)[i+1:])]
-			} else {
-				i++
+		duplicate := false
+		for k := 0; k < j; k++ {
+			if symbol.Name == newSymbols[k].Name && symbol.Range.Start.Line == newSymbols[k].Range.Start.Line {
+				duplicate = true
+				break
 			}
 		}
+		if !duplicate {
+			symbol.SelectionRange.Start.Line = data.sourceLineMap[symbol.SelectionRange.Start.Line]
+			symbol.SelectionRange.End.Line = data.sourceLineMap[symbol.SelectionRange.End.Line]
+			symbol.Children = handler.cpp2inoDocumentSymbols(symbol.Children, uri)
+			newSymbols[j] = *symbol
+			j++
+		}
 	}
+	return newSymbols[:j]
 }
 
 // FromClangd handles a message received from clangd.
