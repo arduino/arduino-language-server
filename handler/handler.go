@@ -135,9 +135,13 @@ func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMes
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
 	case "textDocument/rangeFormatting":
-		// TODO
+		p := params.(*lsp.DocumentRangeFormattingParams)
+		uri = p.TextDocument.URI
+		err = handler.ino2cppDocumentRangeFormattingParams(p)
 	case "textDocument/onTypeFormatting":
-		// TODO
+		p := params.(*lsp.DocumentOnTypeFormattingParams)
+		uri = p.TextDocument.URI
+		err = handler.ino2cppDocumentOnTypeFormattingParams(p)
 	}
 	return
 }
@@ -209,6 +213,13 @@ func (handler *InoHandler) deleteFileData(sourceURI lsp.DocumentURI) {
 	}
 }
 
+func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc *lsp.TextDocumentIdentifier) error {
+	if data, ok := handler.data[doc.URI]; ok {
+		doc.URI = data.targetURI
+	}
+	return nil
+}
+
 func (handler *InoHandler) ino2cppTextDocumentItem(doc *lsp.TextDocumentItem) error {
 	if strings.HasSuffix(string(doc.URI), ".ino") {
 		data, targetBytes, err := handler.createFileData(doc.URI, doc.Text)
@@ -258,9 +269,19 @@ func (handler *InoHandler) ino2cppCodeActionParams(params *lsp.CodeActionParams)
 	return nil
 }
 
-func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc *lsp.TextDocumentIdentifier) error {
-	if data, ok := handler.data[doc.URI]; ok {
-		doc.URI = data.targetURI
+func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.DocumentRangeFormattingParams) error {
+	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
+	if data, ok := handler.data[params.TextDocument.URI]; ok {
+		params.Range.Start.Line = data.targetLineMap[params.Range.Start.Line]
+		params.Range.End.Line = data.targetLineMap[params.Range.End.Line]
+	}
+	return nil
+}
+
+func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
+	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
+	if data, ok := handler.data[params.TextDocument.URI]; ok {
+		params.Position.Line = data.targetLineMap[params.Position.Line]
 	}
 	return nil
 }

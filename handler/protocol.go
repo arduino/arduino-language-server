@@ -42,12 +42,12 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 		fallthrough
 	case "textDocument/implementation":
 		fallthrough
-	case "textDocument/references":
-		params := new(lsp.ReferenceParams)
-		err := json.Unmarshal(*raw, params)
-		return params, err
 	case "textDocument/documentHighlight":
 		params := new(lsp.TextDocumentPositionParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
+	case "textDocument/references":
+		params := new(lsp.ReferenceParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/formatting":
