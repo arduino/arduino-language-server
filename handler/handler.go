@@ -8,8 +8,10 @@ import (
 	"log"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 
+	"github.com/pkg/errors"
 	lsp "github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
@@ -162,8 +164,7 @@ func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.Doc
 	fqbn := "arduino:avr:uno"
 	targetPath, targetBytes, err := generateCpp([]byte(sourceText), filepath.Base(sourcePath), fqbn)
 	if err != nil {
-		message := "Could not start editor support:\n" + err.Error()
-		go handler.showMessage(ctx, lsp.MTError, message)
+		handler.handleError(ctx, err, fqbn)
 		return nil, nil, err
 	}
 
@@ -225,6 +226,23 @@ func (handler *InoHandler) deleteFileData(sourceURI lsp.DocumentURI) {
 	}
 }
 
+func (handler *InoHandler) handleError(ctx context.Context, err error, fqbn string) {
+	errorStr := err.Error()
+	var message string
+	if strings.Contains(errorStr, "platform not installed") {
+		message = "Editor support is disabled because the platform `" + fqbn + "` is not installed."
+		message += " Use the Boards Manager to install it."
+	} else if strings.Contains(errorStr, "No such file or directory") {
+		exp, _ := regexp.Compile("([\\w\\.\\-]+)\\.h: No such file or directory")
+		submatch := exp.FindStringSubmatch(errorStr)
+		message = "Editor support is disabled because the library `" + submatch[1] + "` is not installed."
+		message += " Use the Library Manager to install it"
+	} else {
+		message = "Could not start editor support.\n" + errorStr
+	}
+	go handler.showMessage(ctx, lsp.MTError, message)
+}
+
 func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc *lsp.TextDocumentIdentifier) error {
 	if data, ok := handler.data[doc.URI]; ok {
 		doc.URI = data.targetURI
@@ -254,8 +272,9 @@ func (handler *InoHandler) ino2cppDidChangeTextDocumentParams(params *lsp.DidCha
 				return err
 			}
 		}
+		return nil
 	}
-	return nil
+	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDocumentPositionParams) error {
@@ -263,8 +282,9 @@ func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDoc
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		targetLine := data.targetLineMap[params.Position.Line]
 		params.Position.Line = targetLine
+		return nil
 	}
-	return nil
+	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppCodeActionParams(params *lsp.CodeActionParams) error {
@@ -277,8 +297,9 @@ func (handler *InoHandler) ino2cppCodeActionParams(params *lsp.CodeActionParams)
 			r.Start.Line = data.targetLineMap[r.Start.Line]
 			r.End.Line = data.targetLineMap[r.End.Line]
 		}
+		return nil
 	}
-	return nil
+	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.DocumentRangeFormattingParams) error {
@@ -286,24 +307,27 @@ func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.Docu
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		params.Range.Start.Line = data.targetLineMap[params.Range.Start.Line]
 		params.Range.End.Line = data.targetLineMap[params.Range.End.Line]
+		return nil
 	}
-	return nil
+	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
 	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		params.Position.Line = data.targetLineMap[params.Position.Line]
+		return nil
 	}
-	return nil
+	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppRenameParams(params *lsp.RenameParams) error {
 	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		params.Position.Line = data.targetLineMap[params.Position.Line]
+		return nil
 	}
-	return nil
+	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) transformClangdResult(method string, uri lsp.DocumentURI, result interface{}) interface{} {
@@ -537,4 +561,8 @@ func uriToPath(uri lsp.DocumentURI) string {
 
 func pathToURI(path string) lsp.DocumentURI {
 	return "file://" + lsp.DocumentURI(filepath.ToSlash(path))
+}
+
+func unknownURI(uri lsp.DocumentURI) error {
+	return errors.New("Document is not available: " + string(uri))
 }

@@ -141,18 +141,21 @@ func logCommandErr(command string, stdout []byte, err error, filter func(string)
 	log.Println("Command error:", command, err)
 	if len(stdout) > 0 {
 		stdoutStr := string(stdout)
-		log.Println("------------------------------BEGIN STDOUT\n", stdoutStr, "\n------------------------------END STDOUT")
+		log.Println("------------------------------BEGIN STDOUT\n", stdoutStr, "------------------------------END STDOUT")
 		message += filter(stdoutStr)
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		stderr := exitErr.Stderr
 		if len(stderr) > 0 {
 			stderrStr := string(stderr)
-			log.Println("------------------------------BEGIN STDERR\n", stderrStr, "\n------------------------------END STDERR")
+			log.Println("------------------------------BEGIN STDERR\n", stderrStr, "------------------------------END STDERR")
 			message += filter(stderrStr)
 		}
 	}
-	return errors.Wrap(err, message)
+	if len(message) == 0 {
+		return err
+	}
+	return errors.New(message)
 }
 
 func errMsgFilter(tempDir string) func(string) string {
