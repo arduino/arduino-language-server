@@ -56,7 +56,7 @@ type FileData struct {
 
 // FromStdio handles a message received from the client (via stdio).
 func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
-	params, uri, err := handler.transformClangdParams(req.Method, req.Params)
+	params, uri, err := handler.transformClangdParams(ctx, req.Method, req.Params)
 	if err != nil {
 		log.Println("From stdio: Method:", req.Method, "Error:", err)
 		return nil, err
@@ -80,7 +80,7 @@ func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, r
 	return result, err
 }
 
-func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMessage) (params interface{}, uri lsp.DocumentURI, err error) {
+func (handler *InoHandler) transformClangdParams(ctx context.Context, method string, raw *json.RawMessage) (params interface{}, uri lsp.DocumentURI, err error) {
 	params, err = readParams(method, raw)
 	if err != nil {
 		return
@@ -92,7 +92,7 @@ func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMes
 	case "textDocument/didOpen":
 		p := params.(*lsp.DidOpenTextDocumentParams)
 		uri = p.TextDocument.URI
-		err = handler.ino2cppTextDocumentItem(&p.TextDocument)
+		err = handler.ino2cppTextDocumentItem(ctx, &p.TextDocument)
 	case "textDocument/didChange":
 		p := params.(*lsp.DidChangeTextDocumentParams)
 		uri = p.TextDocument.URI
@@ -156,12 +156,14 @@ func (handler *InoHandler) transformClangdParams(method string, raw *json.RawMes
 	return
 }
 
-func (handler *InoHandler) createFileData(sourceURI lsp.DocumentURI, sourceText string) (*FileData, []byte, error) {
+func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.DocumentURI, sourceText string) (*FileData, []byte, error) {
 	sourcePath := uriToPath(sourceURI)
 	// TODO get board from sketch config
 	fqbn := "arduino:avr:uno"
 	targetPath, targetBytes, err := generateCpp([]byte(sourceText), filepath.Base(sourcePath), fqbn)
 	if err != nil {
+		message := "Could not start editor support:\n" + err.Error()
+		go handler.showMessage(ctx, lsp.MTError, message)
 		return nil, nil, err
 	}
 
@@ -230,9 +232,9 @@ func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc *lsp.TextDocumentId
 	return nil
 }
 
-func (handler *InoHandler) ino2cppTextDocumentItem(doc *lsp.TextDocumentItem) error {
+func (handler *InoHandler) ino2cppTextDocumentItem(ctx context.Context, doc *lsp.TextDocumentItem) error {
 	if strings.HasSuffix(string(doc.URI), ".ino") {
-		data, targetBytes, err := handler.createFileData(doc.URI, doc.Text)
+		data, targetBytes, err := handler.createFileData(ctx, doc.URI, doc.Text)
 		if err != nil {
 			return err
 		}
@@ -515,6 +517,14 @@ func (handler *InoHandler) cpp2inoPublishDiagnosticsParams(params *lsp.PublishDi
 		}
 	}
 	return nil
+}
+
+func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {
+	params := lsp.ShowMessageParams{
+		Type:    msgType,
+		Message: strings.ReplaceAll(message, "\n", "<br>"),
+	}
+	handler.StdioConn.Notify(ctx, "window/showMessage", &params)
 }
 
 func uriToPath(uri lsp.DocumentURI) string {
