@@ -76,6 +76,10 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 		params := new(lsp.WorkspaceSymbolParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
+	case "workspace/didChangeWatchedFiles":
+		params := new(lsp.DidChangeWatchedFilesParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
 	case "textDocument/publishDiagnostics":
 		params := new(lsp.PublishDiagnosticsParams)
 		err := json.Unmarshal(*raw, params)

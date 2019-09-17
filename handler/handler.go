@@ -6,12 +6,10 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
 
-	"github.com/pkg/errors"
 	lsp "github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
@@ -154,6 +152,9 @@ func (handler *InoHandler) transformClangdParams(ctx context.Context, method str
 		p := params.(*lsp.RenameParams)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppRenameParams(p)
+	case "workspace/didChangeWatchedFiles":
+		p := params.(*lsp.DidChangeWatchedFilesParams)
+		err = handler.ino2cppDidChangeWatchedFilesParams(p)
 	}
 	return
 }
@@ -233,7 +234,10 @@ func (handler *InoHandler) handleError(ctx context.Context, err error, fqbn stri
 		message = "Editor support is disabled because the platform `" + fqbn + "` is not installed."
 		message += " Use the Boards Manager to install it."
 	} else if strings.Contains(errorStr, "No such file or directory") {
-		exp, _ := regexp.Compile("([\\w\\.\\-]+)\\.h: No such file or directory")
+		exp, regexpErr := regexp.Compile("([\\w\\.\\-]+)\\.h: No such file or directory")
+		if regexpErr != nil {
+			panic(regexpErr)
+		}
 		submatch := exp.FindStringSubmatch(errorStr)
 		message = "Editor support is disabled because the library `" + submatch[1] + "` is not installed."
 		message += " Use the Library Manager to install it"
@@ -246,8 +250,9 @@ func (handler *InoHandler) handleError(ctx context.Context, err error, fqbn stri
 func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc *lsp.TextDocumentIdentifier) error {
 	if data, ok := handler.data[doc.URI]; ok {
 		doc.URI = data.targetURI
+		return nil
 	}
-	return nil
+	return unknownURI(doc.URI)
 }
 
 func (handler *InoHandler) ino2cppTextDocumentItem(ctx context.Context, doc *lsp.TextDocumentItem) error {
@@ -328,6 +333,16 @@ func (handler *InoHandler) ino2cppRenameParams(params *lsp.RenameParams) error {
 		return nil
 	}
 	return unknownURI(params.TextDocument.URI)
+}
+
+func (handler *InoHandler) ino2cppDidChangeWatchedFilesParams(params *lsp.DidChangeWatchedFilesParams) error {
+	for index := range params.Changes {
+		fileEvent := &params.Changes[index]
+		if data, ok := handler.data[fileEvent.URI]; ok {
+			fileEvent.URI = data.targetURI
+		}
+	}
+	return nil
 }
 
 func (handler *InoHandler) transformClangdResult(method string, uri lsp.DocumentURI, result interface{}) interface{} {
@@ -532,6 +547,8 @@ func (handler *InoHandler) transformStdioParams(method string, raw *json.RawMess
 }
 
 func (handler *InoHandler) cpp2inoPublishDiagnosticsParams(params *lsp.PublishDiagnosticsParams) error {
+	log.Println("diagnostics", *params)
+	log.Println("data", handler.data)
 	if data, ok := handler.data[params.URI]; ok {
 		params.URI = data.sourceURI
 		for index := range params.Diagnostics {
@@ -549,20 +566,4 @@ func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageT
 		Message: strings.ReplaceAll(message, "\n", "<br>"),
 	}
 	handler.StdioConn.Notify(ctx, "window/showMessage", &params)
-}
-
-func uriToPath(uri lsp.DocumentURI) string {
-	url, err := url.Parse(string(uri))
-	if err != nil {
-		return string(uri)
-	}
-	return filepath.FromSlash(url.Path)
-}
-
-func pathToURI(path string) lsp.DocumentURI {
-	return "file://" + lsp.DocumentURI(filepath.ToSlash(path))
-}
-
-func unknownURI(uri lsp.DocumentURI) error {
-	return errors.New("Document is not available: " + string(uri))
 }
