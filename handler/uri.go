@@ -41,7 +41,9 @@ func pathToURI(path string) lsp.DocumentURI {
 	}
 	segments := strings.Split(path, string(filepath.Separator))
 	for _, segment := range segments {
-		urlObj.Path += "/" + url.PathEscape(segment)
+		if len(segment) > 0 {
+			urlObj.Path += "/" + url.PathEscape(segment)
+		}
 	}
 	return lsp.DocumentURI(urlObj.String())
 }
