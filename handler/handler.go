@@ -221,7 +221,7 @@ func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.Doc
 			return nil, nil, err
 		}
 		// Fallback: use the source text unchanged
-		targetBytes, err = copyIno2Cpp([]byte(sourceText), targetPath)
+		targetBytes, err = copyIno2Cpp(sourceText, targetPath)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -256,7 +256,7 @@ func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocume
 		if err != nil {
 			if rang == nil {
 				// Fallback: use the source text unchanged
-				targetBytes, err = copyIno2Cpp([]byte(newSourceText), uriToPath(data.targetURI))
+				targetBytes, err = copyIno2Cpp(newSourceText, uriToPath(data.targetURI))
 				if err != nil {
 					return err
 				}
