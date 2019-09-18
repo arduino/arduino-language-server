@@ -102,31 +102,11 @@ func generateCompileFlags(tempDir, inoPath, fqbn string) (string, error) {
 		return flagsPath, errors.Wrap(err, "Error while creating output file for compile flags.")
 	}
 	defer outFile.Close()
-	writer := bufio.NewWriter(outFile)
 
-	// TODO support other architectures
-	writer.WriteString("--target=avr\n")
-	cppFlags := expandProperty(properties, "compiler.cpp.flags")
-	writer.WriteString(strings.ReplaceAll(cppFlags, " ", "\n") + "\n")
-	mcu := expandProperty(properties, "build.mcu")
-	writer.WriteString("-mmcu=" + mcu + "\n")
-	fcpu := expandProperty(properties, "build.f_cpu")
-	writer.WriteString("-DF_CPU=" + fcpu + "\n")
-	ideVersion := expandProperty(properties, "runtime.ide.version")
-	writer.WriteString("-DARDUINO=" + ideVersion + "\n")
-	board := expandProperty(properties, "build.board")
-	writer.WriteString("-DARDUINO_" + board + "\n")
-	arch := expandProperty(properties, "build.arch")
-	writer.WriteString("-DARDUINO_ARCH_" + arch + "\n")
-	corePath := expandProperty(properties, "build.core.path")
-	writer.WriteString("-I" + corePath + "\n")
-	variantPath := expandProperty(properties, "build.variant.path")
-	writer.WriteString("-I" + variantPath + "\n")
-	avrgccPath := expandProperty(properties, "runtime.tools.avr-gcc.path")
-	writer.WriteString("-I" + filepath.Join(avrgccPath, "avr", "include") + "\n")
-
-	writer.Flush()
-	return flagsPath, nil
+	printer := Printer{Writer: bufio.NewWriter(outFile)}
+	printCompileFlags(properties, &printer, fqbn)
+	printer.Flush()
+	return flagsPath, printer.Err
 }
 
 func generateTargetFile(tempDir, inoPath, cppPath, fqbn string) (cppCode []byte, err error) {
@@ -152,8 +132,10 @@ func generateTargetFile(tempDir, inoPath, cppPath, fqbn string) (cppCode []byte,
 	return
 }
 
-func copyIno2Cpp(inoCode []byte, cppPath string) (cppCode []byte, err error) {
-	cppCode = inoCode
+func copyIno2Cpp(inoCode string, cppPath string) (cppCode []byte, err error) {
+	inoPath := strings.TrimSuffix(cppPath, ".cpp")
+	filePrefix := "#include <Arduino.h>\n#line 1 \"" + inoPath + "\"\n"
+	cppCode = []byte(filePrefix + inoCode)
 	err = ioutil.WriteFile(cppPath, cppCode, 0600)
 	if err != nil {
 		err = errors.Wrap(err, "Error while writing target file to temporary directory.")
@@ -163,6 +145,66 @@ func copyIno2Cpp(inoCode []byte, cppPath string) (cppCode []byte, err error) {
 		log.Println("Target file written to", cppPath)
 	}
 	return
+}
+
+func printCompileFlags(properties map[string]string, printer *Printer, fqbn string) {
+	if strings.Contains(fqbn, ":avr:") {
+		printer.Println("--target=avr")
+	} else if strings.Contains(fqbn, ":sam:") {
+		printer.Println("--target=arm-none-eabi")
+	}
+	cppFlags := expandProperty(properties, "compiler.cpp.flags")
+	printer.Println(strings.ReplaceAll(cppFlags, " ", "\n"))
+	mcu := expandProperty(properties, "build.mcu")
+	if strings.Contains(fqbn, ":avr:") {
+		printer.Println("-mmcu=" + mcu)
+	} else if strings.Contains(fqbn, ":sam:") {
+		printer.Println("-mcpu=" + mcu)
+	}
+	fcpu := expandProperty(properties, "build.f_cpu")
+	printer.Println("-DF_CPU=" + fcpu)
+	ideVersion := expandProperty(properties, "runtime.ide.version")
+	printer.Println("-DARDUINO=" + ideVersion)
+	board := expandProperty(properties, "build.board")
+	printer.Println("-DARDUINO_" + board)
+	arch := expandProperty(properties, "build.arch")
+	printer.Println("-DARDUINO_ARCH_" + arch)
+	if strings.Contains(fqbn, ":sam:") {
+		libSamFlags := expandProperty(properties, "compiler.libsam.c.flags")
+		printer.Println(strings.ReplaceAll(libSamFlags, " ", "\n"))
+	}
+	extraFlags := expandProperty(properties, "build.extra_flags")
+	printer.Println(strings.ReplaceAll(extraFlags, " ", "\n"))
+	corePath := expandProperty(properties, "build.core.path")
+	printer.Println("-I" + corePath)
+	variantPath := expandProperty(properties, "build.variant.path")
+	printer.Println("-I" + variantPath)
+	avrgccPath := expandProperty(properties, "runtime.tools.avr-gcc.path")
+	printer.Println("-I" + filepath.Join(avrgccPath, "avr", "include"))
+}
+
+// Printer prints to a Writer and stores the first error.
+type Printer struct {
+	Writer *bufio.Writer
+	Err    error
+}
+
+// Println prints the given text followed by a line break.
+func (printer *Printer) Println(text string) {
+	if len(text) > 0 {
+		_, err := printer.Writer.WriteString(text + "\n")
+		if err != nil && printer.Err == nil {
+			printer.Err = err
+		}
+	}
+}
+
+// Flush flushes the underlying writer.
+func (printer *Printer) Flush() {
+	err := printer.Writer.Flush()
+	if err != nil && printer.Err == nil {
+		printer.Err = err
+	}
 }
 
 func logCommandErr(command string, stdout []byte, err error, filter func(string) string) error {
