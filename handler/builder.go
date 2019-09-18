@@ -40,6 +40,7 @@ func generateCpp(inoCode []byte, name, fqbn string) (cppPath string, cppCode []b
 	}
 
 	// Generate compile_flags.txt
+	cppPath = filepath.Join(tempDir, name+".cpp")
 	flagsPath, err := generateCompileFlags(tempDir, inoPath, fqbn)
 	if err != nil {
 		return
@@ -49,51 +50,43 @@ func generateCpp(inoCode []byte, name, fqbn string) (cppPath string, cppCode []b
 	}
 
 	// Generate target file
-	preprocessCmd := exec.Command(globalCliPath, "compile", "--fqbn", fqbn, "--preprocess", inoPath)
-	cppCode, err = preprocessCmd.Output()
-	if err != nil {
-		err = logCommandErr(globalCliPath, cppCode, err, errMsgFilter(tempDir))
-		return
-	}
-
-	// Write target file to temp dir
-	cppPath = filepath.Join(tempDir, name+".cpp")
-	err = ioutil.WriteFile(cppPath, cppCode, 0600)
-	if err != nil {
-		err = errors.Wrap(err, "Error while writing target file to temporary directory.")
-	} else if enableLogging {
-		log.Println("Target file written to", cppPath)
-	}
+	cppCode, err = generateTargetFile(tempDir, inoPath, cppPath, fqbn)
 	return
 }
 
-func updateCpp(inoCode []byte, fqbn, cppPath string) (cppCode []byte, err error) {
-	// Write source file to temp dir
+func updateCpp(inoCode []byte, fqbn string, fqbnChanged bool, cppPath string) (cppCode []byte, err error) {
+	tempDir := filepath.Dir(cppPath)
 	inoPath := strings.TrimSuffix(cppPath, ".cpp")
-	err = ioutil.WriteFile(inoPath, inoCode, 0600)
-	if err != nil {
-		err = errors.Wrap(err, "Error while writing source file to temporary directory.")
-		return
+	if inoCode != nil {
+		// Write source file to temp dir
+		err = ioutil.WriteFile(inoPath, inoCode, 0600)
+		if err != nil {
+			err = errors.Wrap(err, "Error while writing source file to temporary directory.")
+			return
+		}
+	}
+
+	if fqbnChanged {
+		// Generate compile_flags.txt
+		_, err = generateCompileFlags(tempDir, inoPath, fqbn)
+		if err != nil {
+			return
+		}
 	}
 
 	// Generate target file
-	preprocessCmd := exec.Command(globalCliPath, "compile", "--fqbn", fqbn, "--preprocess", inoPath)
-	cppCode, err = preprocessCmd.Output()
-	if err != nil {
-		err = logCommandErr(globalCliPath, cppCode, err, errMsgFilter(filepath.Dir(inoPath)))
-		return
-	}
-
-	// Write target file to temp dir
-	err = ioutil.WriteFile(cppPath, cppCode, 0600)
-	if err != nil {
-		err = errors.Wrap(err, "Error while writing target file to temporary directory.")
-	}
+	cppCode, err = generateTargetFile(tempDir, inoPath, cppPath, fqbn)
 	return
 }
 
 func generateCompileFlags(tempDir, inoPath, fqbn string) (string, error) {
-	propertiesCmd := exec.Command(globalCliPath, "compile", "--fqbn", fqbn, "--show-properties", inoPath)
+	var cliArgs []string
+	if len(fqbn) > 0 {
+		cliArgs = []string{"compile", "--fqbn", fqbn, "--show-properties", inoPath}
+	} else {
+		cliArgs = []string{"compile", "--show-properties", inoPath}
+	}
+	propertiesCmd := exec.Command(globalCliPath, cliArgs...)
 	output, err := propertiesCmd.Output()
 	if err != nil {
 		err = logCommandErr(globalCliPath, output, err, errMsgFilter(tempDir))
@@ -134,6 +127,42 @@ func generateCompileFlags(tempDir, inoPath, fqbn string) (string, error) {
 
 	writer.Flush()
 	return flagsPath, nil
+}
+
+func generateTargetFile(tempDir, inoPath, cppPath, fqbn string) (cppCode []byte, err error) {
+	var cliArgs []string
+	if len(fqbn) > 0 {
+		cliArgs = []string{"compile", "--fqbn", fqbn, "--preprocess", inoPath}
+	} else {
+		cliArgs = []string{"compile", "--preprocess", inoPath}
+	}
+	preprocessCmd := exec.Command(globalCliPath, cliArgs...)
+	cppCode, err = preprocessCmd.Output()
+	if err != nil {
+		err = logCommandErr(globalCliPath, cppCode, err, errMsgFilter(tempDir))
+		return
+	}
+
+	err = ioutil.WriteFile(cppPath, cppCode, 0600)
+	if err != nil {
+		err = errors.Wrap(err, "Error while writing target file to temporary directory.")
+	} else if enableLogging {
+		log.Println("Target file written to", cppPath)
+	}
+	return
+}
+
+func copyIno2Cpp(inoCode []byte, cppPath string) (cppCode []byte, err error) {
+	cppCode = inoCode
+	err = ioutil.WriteFile(cppPath, cppCode, 0600)
+	if err != nil {
+		err = errors.Wrap(err, "Error while writing target file to temporary directory.")
+		return
+	}
+	if enableLogging {
+		log.Println("Target file written to", cppPath)
+	}
+	return
 }
 
 func logCommandErr(command string, stdout []byte, err error, filter func(string) string) error {

@@ -41,12 +41,43 @@ func createSourceMaps(targetFile io.Reader) (sourceLineMap, targetLineMap map[in
 	return
 }
 
-func updateSourceMaps(sourceLineMap, targetLineMap map[int]int, insertLine int, insertText string) {
+func updateSourceMaps(sourceLineMap, targetLineMap map[int]int, deletedLines, insertLine int, insertText string) {
+	for i := 1; i <= deletedLines; i++ {
+		sourceLine := insertLine + 1
+		targetLine := targetLineMap[sourceLine]
+
+		// Shift up all following lines by one and put them into a new map
+		newMappings := make(map[int]int)
+		maxSourceLine, maxTargetLine := 0, 0
+		for t, s := range sourceLineMap {
+			if t > targetLine && s > sourceLine {
+				newMappings[t-1] = s - 1
+			} else if s > sourceLine {
+				newMappings[t] = s - 1
+			} else if t > targetLine {
+				newMappings[t-1] = s
+			}
+			if s > maxSourceLine {
+				maxSourceLine = s
+			}
+			if t > maxTargetLine {
+				maxTargetLine = t
+			}
+		}
+
+		// Remove mappings for the deleted line
+		delete(sourceLineMap, maxTargetLine)
+		delete(targetLineMap, maxSourceLine)
+
+		// Copy the mappings from the intermediate map
+		copyMappings(sourceLineMap, targetLineMap, newMappings)
+	}
+
 	addedLines := strings.Count(insertText, "\n")
 	if addedLines > 0 {
 		targetLine := targetLineMap[insertLine]
 
-		// Shift all following lines and put them into a new map
+		// Shift down all following lines and put them into a new map
 		newMappings := make(map[int]int)
 		for t, s := range sourceLineMap {
 			if t > targetLine && s > insertLine {
@@ -65,15 +96,19 @@ func updateSourceMaps(sourceLineMap, targetLineMap map[int]int, insertLine int, 
 		}
 
 		// Copy the mappings from the intermediate map
-		for t, s := range newMappings {
-			sourceLineMap[t] = s
+		copyMappings(sourceLineMap, targetLineMap, newMappings)
+	}
+}
+
+func copyMappings(sourceLineMap, targetLineMap, newMappings map[int]int) {
+	for t, s := range newMappings {
+		sourceLineMap[t] = s
+		targetLineMap[s] = t
+	}
+	for t, s := range newMappings {
+		// In case multiple target lines are present for a source line, use the last one
+		if t > targetLineMap[s] {
 			targetLineMap[s] = t
-		}
-		for t, s := range newMappings {
-			// In case multiple target lines are present for a source line, use the last one
-			if t > targetLineMap[s] {
-				targetLineMap[s] = t
-			}
 		}
 	}
 }

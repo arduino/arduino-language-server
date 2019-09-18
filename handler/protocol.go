@@ -84,6 +84,10 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 		params := new(lsp.PublishDiagnosticsParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
+	case "arduino/selectedBoard":
+		params := new(BoardConfig)
+		err := json.Unmarshal(*raw, params)
+		return params, err
 	}
 	return nil, nil
 }
@@ -188,4 +192,16 @@ type DocumentSymbol struct {
 	Range          lsp.Range        `json:"range"`
 	SelectionRange lsp.Range        `json:"selectionRange"`
 	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+// BoardConfig describes the board and port selected by the user.
+type BoardConfig struct {
+	SelectedBoard Board  `json:"selectedBoard"`
+	SelectedPort  string `json:"selectedPort"`
+}
+
+// Board structure.
+type Board struct {
+	Name string `json:"name"`
+	Fqbn string `json:"fqbn"`
 }

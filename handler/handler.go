@@ -14,6 +14,9 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
+// DefaultBoard is the fully qualified board name used when the client does not specify any board.
+const DefaultBoard = "arduino:avr:uno"
+
 var globalCliPath string
 var enableLogging bool
 
@@ -28,6 +31,9 @@ func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, stdinLog, stdoutL
 	clangdIn io.ReadCloser, clangdOut io.WriteCloser, clangdinLog, clangdoutLog io.Writer) *InoHandler {
 	handler := &InoHandler{
 		data: make(map[lsp.DocumentURI]*FileData),
+		config: BoardConfig{
+			SelectedBoard: Board{Fqbn: DefaultBoard},
+		},
 	}
 	clangdStream := jsonrpc2.NewBufferedStream(StreamReadWrite{clangdIn, clangdOut, clangdinLog, clangdoutLog}, jsonrpc2.VSCodeObjectCodec{})
 	clangdHandler := jsonrpc2.HandlerWithError(handler.FromClangd)
@@ -43,6 +49,7 @@ type InoHandler struct {
 	StdioConn  *jsonrpc2.Conn
 	ClangdConn *jsonrpc2.Conn
 	data       map[lsp.DocumentURI]*FileData
+	config     BoardConfig
 }
 
 // FileData gathers information on a .ino source file.
@@ -52,42 +59,88 @@ type FileData struct {
 	targetURI     lsp.DocumentURI
 	sourceLineMap map[int]int
 	targetLineMap map[int]int
+	version       int
 }
 
 // FromStdio handles a message received from the client (via stdio).
-func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
-	params, uri, err := handler.transformClangdParams(ctx, req.Method, req.Params)
+func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (result interface{}, err error) {
+	params, err := readParams(req.Method, req.Params)
 	if err != nil {
-		log.Println("From stdio: Method:", req.Method, "Error:", err)
-		return nil, err
+		return
 	}
-	var result interface{}
+
+	// Handle special methods (non-LSP)
+	switch req.Method {
+	case "arduino/selectedBoard":
+		p := params.(*BoardConfig)
+		err = handler.changeBoardConfig(ctx, p)
+		return
+	}
+
+	// Handle LSP methods: transform and send to clangd
+	var uri lsp.DocumentURI
+	if params == nil {
+		params = req.Params
+	} else {
+		uri, err = handler.transformClangdParams(ctx, req.Method, params)
+	}
+	if err != nil {
+		return
+	}
 	if req.Notif {
 		err = handler.ClangdConn.Notify(ctx, req.Method, params)
 	} else {
 		result, err = sendRequest(ctx, handler.ClangdConn, req.Method, params)
 	}
 	if err != nil {
-		log.Println("From stdio: Method:", req.Method, "Error:", err)
-		return nil, err
+		return
 	}
 	if enableLogging {
 		log.Println("From stdio:", req.Method)
 	}
 	if result != nil {
-		return handler.transformClangdResult(req.Method, uri, result), nil
+		result = handler.transformClangdResult(req.Method, uri, result)
 	}
-	return result, err
+	return
 }
 
-func (handler *InoHandler) transformClangdParams(ctx context.Context, method string, raw *json.RawMessage) (params interface{}, uri lsp.DocumentURI, err error) {
-	params, err = readParams(method, raw)
-	if err != nil {
-		return
-	} else if params == nil {
-		params = raw
-		return
+func (handler *InoHandler) changeBoardConfig(ctx context.Context, config *BoardConfig) (resultErr error) {
+	handler.config = *config
+	if enableLogging {
+		log.Println("New board configuration:", *config)
 	}
+	for uri, data := range handler.data {
+		if uri != data.sourceURI {
+			continue
+		}
+		params := lsp.DidChangeTextDocumentParams{
+			TextDocument: lsp.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: data.targetURI},
+				Version:                data.version,
+			},
+			ContentChanges: make([]lsp.TextDocumentContentChangeEvent, 1),
+		}
+
+		targetBytes, err := updateCpp([]byte(data.sourceText), config.SelectedBoard.Fqbn, true, uriToPath(data.targetURI))
+		if err != nil {
+			if resultErr == nil {
+				handler.handleError(ctx, err)
+				resultErr = err
+			}
+			continue
+		}
+
+		sourceLineMap, targetLineMap := createSourceMaps(bytes.NewReader(targetBytes))
+		data.sourceLineMap = sourceLineMap
+		data.targetLineMap = targetLineMap
+
+		params.ContentChanges[0].Text = string(targetBytes)
+		handler.ClangdConn.Notify(ctx, "textDocument/didChange", params)
+	}
+	return
+}
+
+func (handler *InoHandler) transformClangdParams(ctx context.Context, method string, params interface{}) (uri lsp.DocumentURI, err error) {
 	switch method {
 	case "textDocument/didOpen":
 		p := params.(*lsp.DidOpenTextDocumentParams)
@@ -104,8 +157,8 @@ func (handler *InoHandler) transformClangdParams(ctx context.Context, method str
 	case "textDocument/didClose":
 		p := params.(*lsp.DidCloseTextDocumentParams)
 		uri = p.TextDocument.URI
-		handler.deleteFileData(uri)
 		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
+		handler.deleteFileData(uri)
 	case "textDocument/completion":
 		p := params.(*lsp.CompletionParams)
 		uri = p.TextDocument.URI
@@ -159,14 +212,19 @@ func (handler *InoHandler) transformClangdParams(ctx context.Context, method str
 	return
 }
 
-func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.DocumentURI, sourceText string) (*FileData, []byte, error) {
+func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.DocumentURI, sourceText string, version int) (*FileData, []byte, error) {
 	sourcePath := uriToPath(sourceURI)
-	// TODO get board from sketch config
-	fqbn := "arduino:avr:uno"
-	targetPath, targetBytes, err := generateCpp([]byte(sourceText), filepath.Base(sourcePath), fqbn)
+	targetPath, targetBytes, err := generateCpp([]byte(sourceText), filepath.Base(sourcePath), handler.config.SelectedBoard.Fqbn)
 	if err != nil {
-		handler.handleError(ctx, err, fqbn)
-		return nil, nil, err
+		handler.handleError(ctx, err)
+		if len(targetPath) == 0 {
+			return nil, nil, err
+		}
+		// Fallback: use the source text unchanged
+		targetBytes, err = copyIno2Cpp([]byte(sourceText), targetPath)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	targetURI := pathToURI(targetPath)
@@ -177,6 +235,7 @@ func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.Doc
 		targetURI,
 		sourceLineMap,
 		targetLineMap,
+		version,
 	}
 	handler.data[sourceURI] = data
 	handler.data[targetURI] = data
@@ -193,11 +252,24 @@ func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocume
 		} else {
 			newSourceText = applyTextChange(data.sourceText, *rang, change.Text)
 		}
-		// TODO get board from sketch config
-		fqbn := "arduino:avr:uno"
-		targetBytes, err := updateCpp([]byte(newSourceText), fqbn, uriToPath(data.targetURI))
+		targetBytes, err := updateCpp([]byte(newSourceText), handler.config.SelectedBoard.Fqbn, false, uriToPath(data.targetURI))
 		if err != nil {
-			return err
+			if rang == nil {
+				// Fallback: use the source text unchanged
+				targetBytes, err = copyIno2Cpp([]byte(newSourceText), uriToPath(data.targetURI))
+				if err != nil {
+					return err
+				}
+			} else {
+				// Fallback: try to apply a multi-line update
+				targetStartLine := data.targetLineMap[rang.Start.Line]
+				targetEndLine := data.targetLineMap[rang.End.Line]
+				data.sourceText = newSourceText
+				updateSourceMaps(data.sourceLineMap, data.targetLineMap, rang.End.Line-rang.Start.Line, rang.Start.Line, change.Text)
+				rang.Start.Line = targetStartLine
+				rang.End.Line = targetEndLine
+				return nil
+			}
 		}
 
 		sourceLineMap, targetLineMap := createSourceMaps(bytes.NewReader(targetBytes))
@@ -212,7 +284,7 @@ func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocume
 		// Apply an update to a single line both to the source and the target text
 		targetLine := data.targetLineMap[rang.Start.Line]
 		data.sourceText = applyTextChange(data.sourceText, *rang, change.Text)
-		updateSourceMaps(data.sourceLineMap, data.targetLineMap, rang.Start.Line, change.Text)
+		updateSourceMaps(data.sourceLineMap, data.targetLineMap, 0, rang.Start.Line, change.Text)
 
 		rang.Start.Line = targetLine
 		rang.End.Line = targetLine
@@ -227,19 +299,29 @@ func (handler *InoHandler) deleteFileData(sourceURI lsp.DocumentURI) {
 	}
 }
 
-func (handler *InoHandler) handleError(ctx context.Context, err error, fqbn string) {
+func (handler *InoHandler) handleError(ctx context.Context, err error) {
 	errorStr := err.Error()
 	var message string
-	if strings.Contains(errorStr, "platform not installed") {
-		message = "Editor support is disabled because the platform `" + fqbn + "` is not installed."
-		message += " Use the Boards Manager to install it."
+	if strings.Contains(errorStr, "platform not installed") || strings.Contains(errorStr, "no FQBN provided") {
+		var board string
+		if len(handler.config.SelectedBoard.Name) > 0 {
+			board = handler.config.SelectedBoard.Name
+		} else {
+			board = handler.config.SelectedBoard.Fqbn
+		}
+		if len(board) > 0 {
+			message = "Editor support may be inaccurate because the board `" + board + "` is not installed."
+			message += " Use the Boards Manager to install it."
+		} else {
+			message = "Editor support may be inaccurate because the selected board is unkown."
+		}
 	} else if strings.Contains(errorStr, "No such file or directory") {
 		exp, regexpErr := regexp.Compile("([\\w\\.\\-]+)\\.h: No such file or directory")
 		if regexpErr != nil {
 			panic(regexpErr)
 		}
 		submatch := exp.FindStringSubmatch(errorStr)
-		message = "Editor support is disabled because the library `" + submatch[1] + "` is not installed."
+		message = "Editor support may be inaccurate because the library `" + submatch[1] + "` is not installed."
 		message += " Use the Library Manager to install it"
 	} else {
 		message = "Could not start editor support.\n" + errorStr
@@ -257,7 +339,7 @@ func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc *lsp.TextDocumentId
 
 func (handler *InoHandler) ino2cppTextDocumentItem(ctx context.Context, doc *lsp.TextDocumentItem) error {
 	if strings.HasSuffix(string(doc.URI), ".ino") {
-		data, targetBytes, err := handler.createFileData(ctx, doc.URI, doc.Text)
+		data, targetBytes, err := handler.createFileData(ctx, doc.URI, doc.Text, doc.Version)
 		if err != nil {
 			return err
 		}
@@ -277,6 +359,7 @@ func (handler *InoHandler) ino2cppDidChangeTextDocumentParams(params *lsp.DidCha
 				return err
 			}
 		}
+		data.version = params.TextDocument.Version
 		return nil
 	}
 	return unknownURI(params.TextDocument.URI)
@@ -547,8 +630,6 @@ func (handler *InoHandler) transformStdioParams(method string, raw *json.RawMess
 }
 
 func (handler *InoHandler) cpp2inoPublishDiagnosticsParams(params *lsp.PublishDiagnosticsParams) error {
-	log.Println("diagnostics", *params)
-	log.Println("data", handler.data)
 	if data, ok := handler.data[params.URI]; ok {
 		params.URI = data.sourceURI
 		for index := range params.Diagnostics {

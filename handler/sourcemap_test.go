@@ -41,17 +41,32 @@ void loop() {
 	}
 }
 
-func TestUpdateSourceMaps(t *testing.T) {
+func TestUpdateSourceMaps1(t *testing.T) {
 	targetLineMap := map[int]int{0: 1, 1: 2, 2: 0, 3: 5, 4: 3, 5: 4}
 	sourceLineMap := make(map[int]int)
 	for s, t := range targetLineMap {
 		sourceLineMap[t] = s
 	}
-	updateSourceMaps(sourceLineMap, targetLineMap, 1, "foo\nbar\nbaz")
+	updateSourceMaps(sourceLineMap, targetLineMap, 0, 1, "foo\nbar\nbaz")
 	if !reflect.DeepEqual(targetLineMap, map[int]int{0: 1, 1: 2, 2: 3, 3: 4, 4: 0, 5: 7, 6: 5, 7: 6}) {
 		t.Error(targetLineMap)
 	}
 	if !reflect.DeepEqual(sourceLineMap, map[int]int{0: 4, 1: 0, 2: 1, 3: 2, 4: 3, 5: 6, 6: 7, 7: 5}) {
+		t.Error(sourceLineMap)
+	}
+}
+
+func TestUpdateSourceMaps2(t *testing.T) {
+	targetLineMap := map[int]int{0: 1, 1: 2, 2: 0, 3: 5, 4: 3, 5: 4}
+	sourceLineMap := make(map[int]int)
+	for s, t := range targetLineMap {
+		sourceLineMap[t] = s
+	}
+	updateSourceMaps(sourceLineMap, targetLineMap, 2, 1, "foo")
+	if !reflect.DeepEqual(targetLineMap, map[int]int{0: 0, 1: 1, 2: 2, 3: 3}) {
+		t.Error(targetLineMap)
+	}
+	if !reflect.DeepEqual(sourceLineMap, map[int]int{0: 0, 1: 1, 2: 2, 3: 3}) {
 		t.Error(sourceLineMap)
 	}
 }
