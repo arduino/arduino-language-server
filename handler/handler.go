@@ -5,17 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/ioutil"
 	"log"
-	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/pkg/errors"
 	lsp "github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
-
-// DefaultBoard is the fully qualified board name used when the client does not specify any board.
-const DefaultBoard = "arduino:avr:uno"
 
 var globalCliPath string
 var enableLogging bool
@@ -28,19 +26,27 @@ func Setup(cliPath string, _enableLogging bool) {
 
 // NewInoHandler creates and configures an InoHandler.
 func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, stdinLog, stdoutLog io.Writer,
-	clangdIn io.ReadCloser, clangdOut io.WriteCloser, clangdinLog, clangdoutLog io.Writer) *InoHandler {
+	startClangd func() (io.WriteCloser, io.ReadCloser, io.ReadCloser),
+	clangdinLog, clangdoutLog, clangderrLog io.Writer, board Board) *InoHandler {
 	handler := &InoHandler{
+		clangdProc: ClangdProc{
+			Start:  startClangd,
+			inLog:  clangdinLog,
+			outLog: clangdoutLog,
+			errLog: clangderrLog,
+		},
 		data: make(map[lsp.DocumentURI]*FileData),
 		config: BoardConfig{
-			SelectedBoard: Board{Fqbn: DefaultBoard},
+			SelectedBoard: board,
 		},
 	}
-	clangdStream := jsonrpc2.NewBufferedStream(StreamReadWrite{clangdIn, clangdOut, clangdinLog, clangdoutLog}, jsonrpc2.VSCodeObjectCodec{})
-	clangdHandler := jsonrpc2.HandlerWithError(handler.FromClangd)
-	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
+	handler.StartClangd()
 	stdStream := jsonrpc2.NewBufferedStream(StreamReadWrite{stdin, stdout, stdinLog, stdoutLog}, jsonrpc2.VSCodeObjectCodec{})
 	stdHandler := jsonrpc2.HandlerWithError(handler.FromStdio)
 	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler)
+	if enableLogging {
+		log.Println("Initial board configuration:", board)
+	}
 	return handler
 }
 
@@ -48,8 +54,16 @@ func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, stdinLog, stdoutL
 type InoHandler struct {
 	StdioConn  *jsonrpc2.Conn
 	ClangdConn *jsonrpc2.Conn
+	clangdProc ClangdProc
 	data       map[lsp.DocumentURI]*FileData
 	config     BoardConfig
+}
+
+// ClangdProc contains the process input / output streams for clangd.
+type ClangdProc struct {
+	Start                 func() (io.WriteCloser, io.ReadCloser, io.ReadCloser)
+	inLog, outLog, errLog io.Writer
+	initParams            lsp.InitializeParams
 }
 
 // FileData gathers information on a .ino source file.
@@ -60,6 +74,24 @@ type FileData struct {
 	sourceLineMap map[int]int
 	targetLineMap map[int]int
 	version       int
+}
+
+// StartClangd starts the clangd process and connects its input / output streams.
+func (handler *InoHandler) StartClangd() {
+	clangdWrite, clangdRead, clangdErr := handler.clangdProc.Start()
+	if enableLogging {
+		go io.Copy(handler.clangdProc.errLog, clangdErr)
+	}
+	srw := StreamReadWrite{clangdRead, clangdWrite, handler.clangdProc.inLog, handler.clangdProc.outLog}
+	clangdStream := jsonrpc2.NewBufferedStream(srw, jsonrpc2.VSCodeObjectCodec{})
+	clangdHandler := jsonrpc2.HandlerWithError(handler.FromClangd)
+	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
+}
+
+// StopClangd closes the connection to the clangd process.
+func (handler *InoHandler) StopClangd() {
+	handler.ClangdConn.Close()
+	handler.ClangdConn = nil
 }
 
 // FromStdio handles a message received from the client (via stdio).
@@ -87,6 +119,9 @@ func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, r
 	if err != nil {
 		return
 	}
+	if handler.ClangdConn == nil {
+		panic("Illegal state: handler.ClangdConn is nil")
+	}
 	if req.Notif {
 		err = handler.ClangdConn.Notify(ctx, req.Method, params)
 	} else {
@@ -105,43 +140,67 @@ func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, r
 }
 
 func (handler *InoHandler) changeBoardConfig(ctx context.Context, config *BoardConfig) (resultErr error) {
+	previousFqbn := handler.config.SelectedBoard.Fqbn
 	handler.config = *config
+	if config.SelectedBoard.Fqbn == previousFqbn || len(handler.data) == 0 {
+		return
+	}
 	if enableLogging {
 		log.Println("New board configuration:", *config)
 	}
+
+	// Stop the clangd process and update all file data with the new board
+	handler.StopClangd()
+	openFileData := make(map[*FileData][]byte)
 	for uri, data := range handler.data {
 		if uri != data.sourceURI {
 			continue
 		}
-		params := lsp.DidChangeTextDocumentParams{
-			TextDocument: lsp.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: data.targetURI},
-				Version:                data.version,
-			},
-			ContentChanges: make([]lsp.TextDocumentContentChangeEvent, 1),
-		}
-
-		targetBytes, err := updateCpp([]byte(data.sourceText), config.SelectedBoard.Fqbn, true, uriToPath(data.targetURI))
+		targetBytes, err := updateCpp([]byte(data.sourceText), uriToPath(data.sourceURI), config.SelectedBoard.Fqbn, true, uriToPath(data.targetURI))
 		if err != nil {
 			if resultErr == nil {
-				handler.handleError(ctx, err)
-				resultErr = err
+				resultErr = handler.handleError(ctx, err)
 			}
-			continue
+			targetBytes, _ = ioutil.ReadFile(uriToPath(data.targetURI))
 		}
-
 		sourceLineMap, targetLineMap := createSourceMaps(bytes.NewReader(targetBytes))
 		data.sourceLineMap = sourceLineMap
 		data.targetLineMap = targetLineMap
+		openFileData[data] = targetBytes
+	}
 
-		params.ContentChanges[0].Text = string(targetBytes)
-		handler.ClangdConn.Notify(ctx, "textDocument/didChange", params)
+	// Restart the clangd process, initialize it and reopen the files
+	handler.StartClangd()
+	initResult := new(lsp.InitializeResult)
+	err := handler.ClangdConn.Call(ctx, "initialize", &handler.clangdProc.initParams, initResult)
+	if err != nil {
+		resultErr = err
+		return
+	}
+	for data, targetBytes := range openFileData {
+		if enableLogging {
+			log.Println("Reopening file: ", data.sourceURI)
+		}
+		openParams := lsp.DidOpenTextDocumentParams{
+			TextDocument: lsp.TextDocumentItem{
+				LanguageID: "cpp",
+				URI:        data.targetURI,
+				Version:    data.version,
+				Text:       string(targetBytes),
+			},
+		}
+		err := handler.ClangdConn.Notify(ctx, "textDocument/didOpen", openParams)
+		if err != nil && resultErr == nil {
+			resultErr = err
+		}
 	}
 	return
 }
 
 func (handler *InoHandler) transformClangdParams(ctx context.Context, method string, params interface{}) (uri lsp.DocumentURI, err error) {
 	switch method {
+	case "initialize":
+		handler.clangdProc.initParams = *params.(*lsp.InitializeParams)
 	case "textDocument/didOpen":
 		p := params.(*lsp.DidOpenTextDocumentParams)
 		uri = p.TextDocument.URI
@@ -214,9 +273,9 @@ func (handler *InoHandler) transformClangdParams(ctx context.Context, method str
 
 func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.DocumentURI, sourceText string, version int) (*FileData, []byte, error) {
 	sourcePath := uriToPath(sourceURI)
-	targetPath, targetBytes, err := generateCpp([]byte(sourceText), filepath.Base(sourcePath), handler.config.SelectedBoard.Fqbn)
+	targetPath, targetBytes, err := generateCpp([]byte(sourceText), sourcePath, handler.config.SelectedBoard.Fqbn)
 	if err != nil {
-		handler.handleError(ctx, err)
+		err = handler.handleError(ctx, err)
 		if len(targetPath) == 0 {
 			return nil, nil, err
 		}
@@ -252,7 +311,7 @@ func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocume
 		} else {
 			newSourceText = applyTextChange(data.sourceText, *rang, change.Text)
 		}
-		targetBytes, err := updateCpp([]byte(newSourceText), handler.config.SelectedBoard.Fqbn, false, uriToPath(data.targetURI))
+		targetBytes, err := updateCpp([]byte(newSourceText), uriToPath(data.sourceURI), handler.config.SelectedBoard.Fqbn, false, uriToPath(data.targetURI))
 		if err != nil {
 			if rang == nil {
 				// Fallback: use the source text unchanged
@@ -299,10 +358,17 @@ func (handler *InoHandler) deleteFileData(sourceURI lsp.DocumentURI) {
 	}
 }
 
-func (handler *InoHandler) handleError(ctx context.Context, err error) {
+func (handler *InoHandler) handleError(ctx context.Context, err error) error {
 	errorStr := err.Error()
 	var message string
-	if strings.Contains(errorStr, "platform not installed") || strings.Contains(errorStr, "no FQBN provided") {
+	if strings.Contains(errorStr, "#error") {
+		exp, regexpErr := regexp.Compile("#error \"(.*)\"")
+		if regexpErr != nil {
+			panic(regexpErr)
+		}
+		submatch := exp.FindStringSubmatch(errorStr)
+		message = submatch[1]
+	} else if strings.Contains(errorStr, "platform not installed") || strings.Contains(errorStr, "no FQBN provided") {
 		var board string
 		if len(handler.config.SelectedBoard.Name) > 0 {
 			board = handler.config.SelectedBoard.Name
@@ -310,7 +376,7 @@ func (handler *InoHandler) handleError(ctx context.Context, err error) {
 			board = handler.config.SelectedBoard.Fqbn
 		}
 		if len(board) > 0 {
-			message = "Editor support may be inaccurate because the board `" + board + "` is not installed."
+			message = "Editor support may be inaccurate because the core for the board `" + board + "` is not installed."
 			message += " Use the Boards Manager to install it."
 		} else {
 			message = "Editor support may be inaccurate because the selected board is unkown."
@@ -327,6 +393,7 @@ func (handler *InoHandler) handleError(ctx context.Context, err error) {
 		message = "Could not start editor support.\n" + errorStr
 	}
 	go handler.showMessage(ctx, lsp.MTError, message)
+	return errors.New(message)
 }
 
 func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc *lsp.TextDocumentIdentifier) error {

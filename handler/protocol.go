@@ -10,6 +10,10 @@ import (
 
 func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 	switch method {
+	case "initialize":
+		params := new(lsp.InitializeParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
 	case "textDocument/didOpen":
 		params := new(lsp.DidOpenTextDocumentParams)
 		err := json.Unmarshal(*raw, params)

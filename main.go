@@ -12,12 +12,21 @@ import (
 
 var clangdPath string
 var cliPath string
+var initialFqbn string
+var initialBoardName string
 var enableLogging bool
 
 func main() {
-	flag.StringVar(&clangdPath, "clangd", "clangd", "Path to clangd executable")
-	flag.StringVar(&cliPath, "cli", "arduino-cli", "Path to arduino-cli executable")
-	flag.BoolVar(&enableLogging, "log", false, "Enable logging to files")
+	flag.StringVar(&clangdPath, "clangd", "clangd",
+		"Path to clangd executable")
+	flag.StringVar(&cliPath, "cli", "arduino-cli",
+		"Path to arduino-cli executable")
+	flag.StringVar(&initialFqbn, "fqbn", "arduino:avr:uno",
+		"Fully qualified board name to use initially (can be changed via JSON-RPC)")
+	flag.StringVar(&initialBoardName, "board-name", "",
+		"User-friendly board name to use initially (can be changed via JSON-RPC)")
+	flag.BoolVar(&enableLogging, "log", false,
+		"Enable logging to files")
 	flag.Parse()
 
 	var stdinLog, stdoutLog, clangdinLog, clangdoutLog, clangderrLog io.Writer
@@ -30,19 +39,17 @@ func main() {
 		defer clangdoutLogFile.Close()
 		defer clangderrLogFile.Close()
 		log.SetOutput(logFile)
-		stdinLog, stdoutLog, clangdinLog, clangdoutLog, clangderrLog = stdinLogFile, stdoutLogFile, clangdinLogFile, clangdoutLogFile, clangderrLogFile
+		stdinLog, stdoutLog, clangdinLog, clangdoutLog, clangderrLog = stdinLogFile, stdoutLogFile,
+			clangdinLogFile, clangdoutLogFile, clangderrLogFile
 	} else {
 		log.SetOutput(os.Stderr)
 	}
 
-	clangdIn, clangdOut, clangdErr := startClangd()
-	defer clangdIn.Close()
-	if enableLogging {
-		go io.Copy(clangderrLog, clangdErr)
-	}
-
 	handler.Setup(cliPath, enableLogging)
-	inoHandler := handler.NewInoHandler(os.Stdin, os.Stdout, stdinLog, stdoutLog, clangdIn, clangdOut, clangdinLog, clangdoutLog)
+	initialBoard := handler.Board{Fqbn: initialFqbn, Name: initialBoardName}
+	inoHandler := handler.NewInoHandler(os.Stdin, os.Stdout, stdinLog, stdoutLog, startClangd,
+		clangdinLog, clangdoutLog, clangderrLog, initialBoard)
+	defer inoHandler.StopClangd()
 	<-inoHandler.StdioConn.DisconnectNotify()
 }
 
@@ -75,9 +82,9 @@ func createLogFiles() (logFile, stdinLog, stdoutLog, clangdinLog, clangdoutLog, 
 	return
 }
 
-func startClangd() (clangdOut io.ReadCloser, clangdIn io.WriteCloser, clangdErr io.ReadCloser) {
+func startClangd() (clangdIn io.WriteCloser, clangdOut io.ReadCloser, clangdErr io.ReadCloser) {
 	if enableLogging {
-		log.Println("Starting C++ language server:", clangdPath)
+		log.Println("Starting clangd process:", clangdPath)
 	}
 	clangdCmd := exec.Command(clangdPath)
 	clangdIn, _ = clangdCmd.StdinPipe()

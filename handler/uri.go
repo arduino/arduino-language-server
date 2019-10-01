@@ -11,7 +11,7 @@ import (
 	lsp "github.com/sourcegraph/go-lsp"
 )
 
-var expDriveId = regexp.MustCompile("[a-zA-Z]:")
+var expDriveID = regexp.MustCompile("[a-zA-Z]:")
 
 func uriToPath(uri lsp.DocumentURI) string {
 	urlObj, err := url.Parse(string(uri))
@@ -25,7 +25,7 @@ func uriToPath(uri lsp.DocumentURI) string {
 		if err != nil {
 			decoded = segment
 		}
-		if runtime.GOOS == "windows" && expDriveId.MatchString(decoded) {
+		if runtime.GOOS == "windows" && expDriveID.MatchString(decoded) {
 			path += strings.ToUpper(decoded)
 		} else if len(decoded) > 0 {
 			path += string(filepath.Separator) + decoded

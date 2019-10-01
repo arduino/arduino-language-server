@@ -13,7 +13,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func generateCpp(inoCode []byte, name, fqbn string) (cppPath string, cppCode []byte, err error) {
+func generateCpp(inoCode []byte, sourcePath, fqbn string) (cppPath string, cppCode []byte, err error) {
 	rawTempDir, err := ioutil.TempDir("", "ino2cpp-")
 	if err != nil {
 		err = errors.Wrap(err, "Error while creating temporary directory.")
@@ -26,6 +26,7 @@ func generateCpp(inoCode []byte, name, fqbn string) (cppPath string, cppCode []b
 	}
 
 	// Write source file to temp dir
+	name := filepath.Base(sourcePath)
 	if !strings.HasSuffix(name, ".ino") {
 		name += ".ino"
 	}
@@ -41,7 +42,7 @@ func generateCpp(inoCode []byte, name, fqbn string) (cppPath string, cppCode []b
 
 	// Generate compile_flags.txt
 	cppPath = filepath.Join(tempDir, name+".cpp")
-	flagsPath, err := generateCompileFlags(tempDir, inoPath, fqbn)
+	flagsPath, err := generateCompileFlags(tempDir, inoPath, sourcePath, fqbn)
 	if err != nil {
 		return
 	}
@@ -54,7 +55,7 @@ func generateCpp(inoCode []byte, name, fqbn string) (cppPath string, cppCode []b
 	return
 }
 
-func updateCpp(inoCode []byte, fqbn string, fqbnChanged bool, cppPath string) (cppCode []byte, err error) {
+func updateCpp(inoCode []byte, sourcePath, fqbn string, fqbnChanged bool, cppPath string) (cppCode []byte, err error) {
 	tempDir := filepath.Dir(cppPath)
 	inoPath := strings.TrimSuffix(cppPath, ".cpp")
 	if inoCode != nil {
@@ -64,13 +65,20 @@ func updateCpp(inoCode []byte, fqbn string, fqbnChanged bool, cppPath string) (c
 			err = errors.Wrap(err, "Error while writing source file to temporary directory.")
 			return
 		}
+		if enableLogging {
+			log.Println("Source file written to", inoPath)
+		}
 	}
 
 	if fqbnChanged {
 		// Generate compile_flags.txt
-		_, err = generateCompileFlags(tempDir, inoPath, fqbn)
+		var flagsPath string
+		flagsPath, err = generateCompileFlags(tempDir, inoPath, sourcePath, fqbn)
 		if err != nil {
 			return
+		}
+		if enableLogging {
+			log.Println("Compile flags written to", flagsPath)
 		}
 	}
 
@@ -79,7 +87,7 @@ func updateCpp(inoCode []byte, fqbn string, fqbnChanged bool, cppPath string) (c
 	return
 }
 
-func generateCompileFlags(tempDir, inoPath, fqbn string) (string, error) {
+func generateCompileFlags(tempDir, inoPath, sourcePath, fqbn string) (string, error) {
 	var cliArgs []string
 	if len(fqbn) > 0 {
 		cliArgs = []string{"compile", "--fqbn", fqbn, "--show-properties", inoPath}
@@ -105,6 +113,7 @@ func generateCompileFlags(tempDir, inoPath, fqbn string) (string, error) {
 
 	printer := Printer{Writer: bufio.NewWriter(outFile)}
 	printCompileFlags(properties, &printer, fqbn)
+	printLibraryPaths(sourcePath, &printer)
 	printer.Flush()
 	return flagsPath, printer.Err
 }
@@ -154,33 +163,56 @@ func printCompileFlags(properties map[string]string, printer *Printer, fqbn stri
 		printer.Println("--target=arm-none-eabi")
 	}
 	cppFlags := expandProperty(properties, "compiler.cpp.flags")
-	printer.Println(strings.ReplaceAll(cppFlags, " ", "\n"))
+	printer.Println(splitFlags(cppFlags))
 	mcu := expandProperty(properties, "build.mcu")
 	if strings.Contains(fqbn, ":avr:") {
-		printer.Println("-mmcu=" + mcu)
+		printer.Println("-mmcu=", mcu)
 	} else if strings.Contains(fqbn, ":sam:") {
-		printer.Println("-mcpu=" + mcu)
+		printer.Println("-mcpu=", mcu)
 	}
 	fcpu := expandProperty(properties, "build.f_cpu")
-	printer.Println("-DF_CPU=" + fcpu)
+	printer.Println("-DF_CPU=", fcpu)
 	ideVersion := expandProperty(properties, "runtime.ide.version")
-	printer.Println("-DARDUINO=" + ideVersion)
+	printer.Println("-DARDUINO=", ideVersion)
 	board := expandProperty(properties, "build.board")
-	printer.Println("-DARDUINO_" + board)
+	printer.Println("-DARDUINO_", board)
 	arch := expandProperty(properties, "build.arch")
-	printer.Println("-DARDUINO_ARCH_" + arch)
+	printer.Println("-DARDUINO_ARCH_", arch)
 	if strings.Contains(fqbn, ":sam:") {
 		libSamFlags := expandProperty(properties, "compiler.libsam.c.flags")
-		printer.Println(strings.ReplaceAll(libSamFlags, " ", "\n"))
+		printer.Println(splitFlags(libSamFlags))
 	}
 	extraFlags := expandProperty(properties, "build.extra_flags")
-	printer.Println(strings.ReplaceAll(extraFlags, " ", "\n"))
+	printer.Println(splitFlags(extraFlags))
 	corePath := expandProperty(properties, "build.core.path")
-	printer.Println("-I" + corePath)
+	printer.Println("-I", corePath)
 	variantPath := expandProperty(properties, "build.variant.path")
-	printer.Println("-I" + variantPath)
-	avrgccPath := expandProperty(properties, "runtime.tools.avr-gcc.path")
-	printer.Println("-I" + filepath.Join(avrgccPath, "avr", "include"))
+	printer.Println("-I", variantPath)
+	if strings.Contains(fqbn, ":avr:") {
+		avrgccPath := expandProperty(properties, "runtime.tools.avr-gcc.path")
+		printer.Println("-I", filepath.Join(avrgccPath, "avr", "include"))
+	}
+
+	printLibraryPaths(corePath, printer)
+}
+
+func printLibraryPaths(basePath string, printer *Printer) {
+	parentDir := filepath.Dir(basePath)
+	if strings.HasSuffix(parentDir, string(filepath.Separator)) || strings.HasSuffix(parentDir, ".") {
+		return
+	}
+	libsDir := filepath.Join(parentDir, "libraries")
+	if libraries, err := ioutil.ReadDir(libsDir); err == nil {
+		for _, libInfo := range libraries {
+			if libInfo.IsDir() {
+				srcDir := filepath.Join(libsDir, libInfo.Name(), "src")
+				if srcInfo, err := os.Stat(srcDir); err == nil && srcInfo.IsDir() {
+					printer.Println("-I", srcDir)
+				}
+			}
+		}
+	}
+	printLibraryPaths(parentDir, printer)
 }
 
 // Printer prints to a Writer and stores the first error.
@@ -189,10 +221,20 @@ type Printer struct {
 	Err    error
 }
 
-// Println prints the given text followed by a line break.
-func (printer *Printer) Println(text string) {
-	if len(text) > 0 {
-		_, err := printer.Writer.WriteString(text + "\n")
+// Println prints the given strings followed by a line break.
+func (printer *Printer) Println(text ...string) {
+	totalLen := 0
+	for i := range text {
+		if len(text[i]) > 0 {
+			_, err := printer.Writer.WriteString(text[i])
+			if err != nil && printer.Err == nil {
+				printer.Err = err
+			}
+			totalLen += len(text[i])
+		}
+	}
+	if totalLen > 0 {
+		_, err := printer.Writer.WriteString("\n")
 		if err != nil && printer.Err == nil {
 			printer.Err = err
 		}
@@ -205,6 +247,27 @@ func (printer *Printer) Flush() {
 	if err != nil && printer.Err == nil {
 		printer.Err = err
 	}
+}
+
+func splitFlags(flags string) string {
+	flagsBytes := []byte(flags)
+	result := make([]byte, len(flagsBytes))
+	inSingleQuotes := false
+	inDoubleQuotes := false
+	for i, b := range flagsBytes {
+		if b == '\'' && !inDoubleQuotes {
+			inSingleQuotes = !inSingleQuotes
+		}
+		if b == '"' && !inSingleQuotes {
+			inDoubleQuotes = !inDoubleQuotes
+		}
+		if b == ' ' && !inSingleQuotes && !inDoubleQuotes {
+			result[i] = '\n'
+		} else {
+			result[i] = b
+		}
+	}
+	return string(result)
 }
 
 func logCommandErr(command string, stdout []byte, err error, filter func(string) string) error {
