@@ -84,6 +84,14 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 		params := new(lsp.DidChangeWatchedFilesParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
+	case "workspace/executeCommand":
+		params := new(lsp.ExecuteCommandParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
+	case "workspace/applyEdit":
+		params := new(ApplyWorkspaceEditParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
 	case "textDocument/publishDiagnostics":
 		params := new(lsp.PublishDiagnosticsParams)
 		err := json.Unmarshal(*raw, params)
@@ -107,7 +115,7 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/codeAction":
-		result := new([]CodeAction)
+		result := new([]*commandOrCodeAction)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "completionItem/resolve":
@@ -145,7 +153,7 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/documentSymbol":
-		result := new([]DocumentSymbol)
+		result := new([]*documentSymbolOrSymbolInformation)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/rename":
@@ -158,6 +166,14 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		return result, err
 	case "window/showMessageRequest":
 		result := new(lsp.MessageActionItem)
+		err := conn.Call(ctx, method, params, result)
+		return result, err
+	case "workspace/executeCommand":
+		result := new(string)
+		err := conn.Call(ctx, method, params, result)
+		return result, err
+	case "workspace/applyEdit":
+		result := new(ApplyWorkspaceEditResponse)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	}
@@ -173,6 +189,37 @@ type CodeAction struct {
 	Diagnostics []lsp.Diagnostic   `json:"diagnostics,omitempty"`
 	Edit        *lsp.WorkspaceEdit `json:"edit,omitempty"`
 	Command     *lsp.Command       `json:"command,omitempty"`
+}
+
+type commandOrCodeAction struct {
+	Command    *lsp.Command
+	CodeAction *CodeAction
+}
+
+func (entry *commandOrCodeAction) UnmarshalJSON(raw []byte) error {
+	command := new(lsp.Command)
+	err := json.Unmarshal(raw, command)
+	if err == nil && len(command.Command) > 0 {
+		entry.Command = command
+		return nil
+	}
+	codeAction := new(CodeAction)
+	err = json.Unmarshal(raw, codeAction)
+	if err != nil {
+		return err
+	}
+	entry.CodeAction = codeAction
+	return nil
+}
+
+func (entry *commandOrCodeAction) MarshalJSON() ([]byte, error) {
+	if entry.Command != nil {
+		return json.Marshal(entry.Command)
+	}
+	if entry.CodeAction != nil {
+		return json.Marshal(entry.CodeAction)
+	}
+	return nil, nil
 }
 
 // Hover structure according to LSP
@@ -196,6 +243,51 @@ type DocumentSymbol struct {
 	Range          lsp.Range        `json:"range"`
 	SelectionRange lsp.Range        `json:"selectionRange"`
 	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+type documentSymbolOrSymbolInformation struct {
+	DocumentSymbol    *DocumentSymbol
+	SymbolInformation *lsp.SymbolInformation
+}
+
+type documentSymbolOrSymbolInformationDiscriminator struct {
+	Range    *lsp.Range    `json:"range,omitempty"`
+	Location *lsp.Location `json:"location,omitempty"`
+}
+
+func (entry *documentSymbolOrSymbolInformation) UnmarshalJSON(raw []byte) error {
+	discriminator := new(documentSymbolOrSymbolInformationDiscriminator)
+	err := json.Unmarshal(raw, discriminator)
+	if err != nil {
+		return err
+	}
+	if discriminator.Range != nil {
+		entry.DocumentSymbol = new(DocumentSymbol)
+		err = json.Unmarshal(raw, entry.DocumentSymbol)
+		if err != nil {
+			return err
+		}
+	}
+	if discriminator.Location != nil {
+		entry.SymbolInformation = new(lsp.SymbolInformation)
+		err = json.Unmarshal(raw, entry.SymbolInformation)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ApplyWorkspaceEditParams structure according to LSP
+type ApplyWorkspaceEditParams struct {
+	Label string            `json:"label,omitempty"`
+	Edit  lsp.WorkspaceEdit `json:"edit"`
+}
+
+// ApplyWorkspaceEditResponse structure according to LSP
+type ApplyWorkspaceEditResponse struct {
+	Applied       bool   `json:"applied"`
+	FailureReason string `json:"failureReason,omitempty"`
 }
 
 // BoardConfig describes the board and port selected by the user.
