@@ -398,8 +398,8 @@ func (handler *InoHandler) handleError(ctx context.Context, err error) error {
 			panic(regexpErr)
 		}
 		submatch := exp.FindStringSubmatch(errorStr)
-		message = "Editor support may be inaccurate because the library `" + submatch[1] + "` is not installed."
-		message += " Use the Library Manager to install it"
+		message = "Editor support may be inaccurate because the header `" + submatch[1] + ".h` was not found."
+		message += " If it is part of a library, use the Library Manager to install it"
 	} else {
 		message = "Could not start editor support.\n" + errorStr
 	}
@@ -783,11 +783,16 @@ func (handler *InoHandler) transformParamsToStdio(method string, raw *json.RawMe
 func (handler *InoHandler) cpp2inoPublishDiagnosticsParams(params *lsp.PublishDiagnosticsParams) error {
 	if data, ok := handler.data[params.URI]; ok {
 		params.URI = data.sourceURI
+		newDiagnostics := make([]lsp.Diagnostic, 0, len(params.Diagnostics))
 		for index := range params.Diagnostics {
 			r := &params.Diagnostics[index].Range
-			r.Start.Line = data.sourceLineMap[r.Start.Line]
-			r.End.Line = data.sourceLineMap[r.End.Line]
+			if startLine, ok := data.sourceLineMap[r.Start.Line]; ok {
+				r.Start.Line = startLine
+				r.End.Line = data.sourceLineMap[r.End.Line]
+				newDiagnostics = append(newDiagnostics, params.Diagnostics[index])
+			}
 		}
+		params.Diagnostics = newDiagnostics
 	}
 	return nil
 }

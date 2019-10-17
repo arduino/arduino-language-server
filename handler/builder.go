@@ -40,6 +40,12 @@ func generateCpp(inoCode []byte, sourcePath, fqbn string) (cppPath string, cppCo
 		log.Println("Source file written to", inoPath)
 	}
 
+	// Copy all header files to temp dir
+	err = copyHeaderFiles(filepath.Dir(sourcePath), tempDir)
+	if err != nil {
+		return
+	}
+
 	// Generate compile_flags.txt
 	cppPath = filepath.Join(tempDir, name+".cpp")
 	flagsPath, err := generateCompileFlags(tempDir, inoPath, sourcePath, fqbn)
@@ -53,6 +59,27 @@ func generateCpp(inoCode []byte, sourcePath, fqbn string) (cppPath string, cppCo
 	// Generate target file
 	cppCode, err = generateTargetFile(tempDir, inoPath, cppPath, fqbn)
 	return
+}
+
+func copyHeaderFiles(sourceDir string, destDir string) error {
+	fileInfos, err := ioutil.ReadDir(sourceDir)
+	if err != nil {
+		return err
+	}
+	for _, fileInfo := range fileInfos {
+		if !fileInfo.IsDir() && strings.HasSuffix(fileInfo.Name(), ".h") {
+			input, err := ioutil.ReadFile(filepath.Join(sourceDir, fileInfo.Name()))
+			if err != nil {
+				return err
+			}
+
+			err = ioutil.WriteFile(filepath.Join(destDir, fileInfo.Name()), input, 0644)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func updateCpp(inoCode []byte, sourcePath, fqbn string, fqbnChanged bool, cppPath string) (cppCode []byte, err error) {
@@ -132,6 +159,9 @@ func generateTargetFile(tempDir, inoPath, cppPath, fqbn string) (cppCode []byte,
 		return
 	}
 
+	// Filter lines beginning with ERROR or WARNING
+	cppCode = []byte(filterErrorsAndWarnings(cppCode))
+
 	err = ioutil.WriteFile(cppPath, cppCode, 0600)
 	if err != nil {
 		err = errors.Wrap(err, "Error while writing target file to temporary directory.")
@@ -139,6 +169,19 @@ func generateTargetFile(tempDir, inoPath, cppPath, fqbn string) (cppCode []byte,
 		log.Println("Target file written to", cppPath)
 	}
 	return
+}
+
+func filterErrorsAndWarnings(cppCode []byte) string {
+	var sb strings.Builder
+	scanner := bufio.NewScanner(bytes.NewReader(cppCode))
+	for scanner.Scan() {
+		lineStr := scanner.Text()
+		if !(strings.HasPrefix(lineStr, "ERROR:") || strings.HasPrefix(lineStr, "WARNING:")) {
+			sb.WriteString(lineStr)
+			sb.WriteRune('\n')
+		}
+	}
+	return sb.String()
 }
 
 func copyIno2Cpp(inoCode string, cppPath string) (cppCode []byte, err error) {
