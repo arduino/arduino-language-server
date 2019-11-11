@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -587,29 +588,32 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 			handler.cpp2inoTextEdit(&(*r)[index], uri)
 		}
 	case "textDocument/documentSymbol":
-		r := result.(*[]*documentSymbolOrSymbolInformation)
+		r, ok := result.(*[]*documentSymbolOrSymbolInformation)
+
+		if !ok || len(*r) == 0 {
+			return result
+		}
+
 		slice := *r
-		if len(slice) > 0 && slice[0].DocumentSymbol != nil {
+		if slice[0].DocumentSymbol != nil {
 			// Treat the input as []DocumentSymbol
 			symbols := make([]DocumentSymbol, len(slice))
 			for index := range slice {
 				symbols[index] = *slice[index].DocumentSymbol
 			}
-			result = handler.cpp2inoDocumentSymbols(symbols, uri)
-		} else if len(slice) > 0 && slice[0].SymbolInformation != nil {
+			return handler.cpp2inoDocumentSymbols(symbols, uri)
+		}
+		if slice[0].SymbolInformation != nil {
 			// Treat the input as []SymbolInformation
-			symbols := make([]lsp.SymbolInformation, len(slice))
-			for index := range slice {
-				symbols[index] = *slice[index].SymbolInformation
+			symbols := make([]*lsp.SymbolInformation, len(slice))
+			for i, s := range slice {
+				symbols[i] = s.SymbolInformation
 			}
-			for index := range symbols {
-				handler.cpp2inoLocation(&symbols[index].Location)
-			}
-			result = symbols
+			return handler.cpp2inoSymbolInformation(symbols)
 		}
 	case "textDocument/rename":
 		r := result.(*lsp.WorkspaceEdit)
-		result = handler.cpp2inoWorkspaceEdit(r)
+		return handler.cpp2inoWorkspaceEdit(r)
 	case "workspace/symbol":
 		r := result.(*[]lsp.SymbolInformation)
 		for index := range *r {
@@ -711,29 +715,61 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []DocumentSymbol, 
 	if !ok || len(origSymbols) == 0 {
 		return origSymbols
 	}
-	newSymbols := make([]DocumentSymbol, len(origSymbols))
-	j := 0
+
+	symbolIdx := make(map[string]*DocumentSymbol)
 	for i := 0; i < len(origSymbols); i++ {
 		symbol := &origSymbols[i]
 		symbol.Range.Start.Line = data.sourceLineMap[symbol.Range.Start.Line]
 		symbol.Range.End.Line = data.sourceLineMap[symbol.Range.End.Line]
 
 		duplicate := false
-		for k := 0; k < j; k++ {
-			if symbol.Name == newSymbols[k].Name && symbol.Range.Start.Line == newSymbols[k].Range.Start.Line {
-				duplicate = true
-				break
+		other, duplicate := symbolIdx[symbol.Name]
+		if duplicate {
+			// we prefer symbols later in the file due to the function header generation. E.g. if one has a function `void foo() {}` somehwre in the code
+			// the code generation will add a `void foo();` header at the beginning of the cpp file. We care about the function body later in the file, not
+			// the header early on.
+			if other.Range.Start.Line < symbol.Range.Start.Line {
+				continue
 			}
 		}
-		if !duplicate {
-			symbol.SelectionRange.Start.Line = data.sourceLineMap[symbol.SelectionRange.Start.Line]
-			symbol.SelectionRange.End.Line = data.sourceLineMap[symbol.SelectionRange.End.Line]
-			symbol.Children = handler.cpp2inoDocumentSymbols(symbol.Children, uri)
-			newSymbols[j] = *symbol
-			j++
-		}
+
+		symbol.SelectionRange.Start.Line = data.sourceLineMap[symbol.SelectionRange.Start.Line]
+		symbol.SelectionRange.End.Line = data.sourceLineMap[symbol.SelectionRange.End.Line]
+		symbol.Children = handler.cpp2inoDocumentSymbols(symbol.Children, uri)
+		symbolIdx[symbol.Name] = symbol
 	}
-	return newSymbols[:j]
+
+	newSymbols := make([]DocumentSymbol, len(symbolIdx))
+	j := 0
+	for _, s := range symbolIdx {
+		newSymbols[j] = *s
+		j++
+	}
+	return newSymbols
+}
+
+func (handler *InoHandler) cpp2inoSymbolInformation(syms []*lsp.SymbolInformation) []lsp.SymbolInformation {
+	// much like in cpp2inoDocumentSymbols we de-duplicate symbols based on file in-file location.
+	idx := make(map[string]*lsp.SymbolInformation)
+	for _, sym := range syms {
+		handler.cpp2inoLocation(&sym.Location)
+
+		nme := fmt.Sprintf("%s::%s", sym.ContainerName, sym.Name)
+		other, duplicate := idx[nme]
+		if duplicate && other.Location.Range.Start.Line < sym.Location.Range.Start.Line {
+			continue
+		}
+
+		idx[nme] = sym
+	}
+
+	var j int
+	symbols := make([]lsp.SymbolInformation, len(idx))
+	for _, sym := range idx {
+		symbols[j] = *sym
+		j++
+	}
+	return symbols
 }
 
 // FromClangd handles a message received from clangd.
