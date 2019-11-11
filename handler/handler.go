@@ -26,24 +26,23 @@ func Setup(cliPath string, _enableLogging bool) {
 	enableLogging = _enableLogging
 }
 
+// CLangdStarter starts clangd and returns its stdin/out/err
+type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser)
+
 // NewInoHandler creates and configures an InoHandler.
-func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, stdinLog, stdoutLog io.Writer,
-	startClangd func() (io.WriteCloser, io.ReadCloser, io.ReadCloser),
-	clangdinLog, clangdoutLog, clangderrLog io.Writer, board Board) *InoHandler {
+func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, logStreams *StreamLogger, startClangd CLangdStarter, board Board) *InoHandler {
 	handler := &InoHandler{
 		clangdProc: ClangdProc{
-			Start:  startClangd,
-			inLog:  clangdinLog,
-			outLog: clangdoutLog,
-			errLog: clangderrLog,
+			Start: startClangd,
+			Logs:  logStreams,
 		},
 		data: make(map[lsp.DocumentURI]*FileData),
 		config: BoardConfig{
 			SelectedBoard: board,
 		},
 	}
-	handler.StartClangd()
-	stdStream := jsonrpc2.NewBufferedStream(StreamReadWrite{stdin, stdout, stdinLog, stdoutLog}, jsonrpc2.VSCodeObjectCodec{})
+	handler.startClangd()
+	stdStream := jsonrpc2.NewBufferedStream(logStreams.AttachStdInOut(stdin, stdout), jsonrpc2.VSCodeObjectCodec{})
 	stdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromStdio))
 	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler)
 	if enableLogging {
@@ -63,9 +62,9 @@ type InoHandler struct {
 
 // ClangdProc contains the process input / output streams for clangd.
 type ClangdProc struct {
-	Start                 func() (io.WriteCloser, io.ReadCloser, io.ReadCloser)
-	inLog, outLog, errLog io.Writer
-	initParams            lsp.InitializeParams
+	Start      func() (io.WriteCloser, io.ReadCloser, io.ReadCloser)
+	Logs       *StreamLogger
+	initParams lsp.InitializeParams
 }
 
 // FileData gathers information on a .ino source file.
@@ -79,12 +78,12 @@ type FileData struct {
 }
 
 // StartClangd starts the clangd process and connects its input / output streams.
-func (handler *InoHandler) StartClangd() {
+func (handler *InoHandler) startClangd() {
 	clangdWrite, clangdRead, clangdErr := handler.clangdProc.Start()
 	if enableLogging {
-		go io.Copy(handler.clangdProc.errLog, clangdErr)
+		go io.Copy(handler.clangdProc.Logs.ClangdErr, clangdErr)
 	}
-	srw := StreamReadWrite{clangdRead, clangdWrite, handler.clangdProc.inLog, handler.clangdProc.outLog}
+	srw := handler.clangdProc.Logs.AttachClangdInOut(clangdRead, clangdWrite)
 	clangdStream := jsonrpc2.NewBufferedStream(srw, jsonrpc2.VSCodeObjectCodec{})
 	clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
 	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
@@ -178,7 +177,7 @@ func (handler *InoHandler) changeBoardConfig(ctx context.Context, config *BoardC
 	}
 
 	// Restart the clangd process, initialize it and reopen the files
-	handler.StartClangd()
+	handler.startClangd()
 	initResult := new(lsp.InitializeResult)
 	err := handler.ClangdConn.Call(ctx, "initialize", &handler.clangdProc.initParams, initResult)
 	if err != nil {
