@@ -9,4 +9,5 @@ git clone https://github.com/bcmi-labs/arduino-editor
 cd arduino-editor
 yarn
 
-echo "start an Arduino IDE with: yarn --cwd /workspace/arduino-editor/browser-app start"
+echo "starting an Arduino IDE with: yarn --cwd /workspace/arduino-editor/browser-app start"
+yarn --cwd /workspace/arduino-editor/browser-app start
