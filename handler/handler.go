@@ -312,7 +312,7 @@ func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.Doc
 	return data, targetBytes, nil
 }
 
-func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocumentContentChangeEvent) error {
+func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocumentContentChangeEvent) (err error) {
 	rang := change.Range
 	if rang == nil || rang.Start.Line != rang.End.Line {
 		// Update the source text and regenerate the cpp code
@@ -320,7 +320,10 @@ func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocume
 		if rang == nil {
 			newSourceText = change.Text
 		} else {
-			newSourceText = applyTextChange(data.sourceText, *rang, change.Text)
+			newSourceText, err = applyTextChange(data.sourceText, *rang, change.Text)
+			if err != nil {
+				return err
+			}
 		}
 		targetBytes, err := updateCpp([]byte(newSourceText), uriToPath(data.sourceURI), handler.config.SelectedBoard.Fqbn, false, uriToPath(data.targetURI))
 		if err != nil {
@@ -353,7 +356,10 @@ func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocume
 	} else {
 		// Apply an update to a single line both to the source and the target text
 		targetLine := data.targetLineMap[rang.Start.Line]
-		data.sourceText = applyTextChange(data.sourceText, *rang, change.Text)
+		data.sourceText, err = applyTextChange(data.sourceText, *rang, change.Text)
+		if err != nil {
+			return err
+		}
 		updateSourceMaps(data.sourceLineMap, data.targetLineMap, 0, rang.Start.Line, change.Text)
 
 		rang.Start.Line = targetLine

@@ -72,32 +72,157 @@ func TestUpdateSourceMaps2(t *testing.T) {
 }
 
 func TestApplyTextChange(t *testing.T) {
-	text1 := applyTextChange("foo\nbar\nbaz\n!", lsp.Range{
-		Start: lsp.Position{Line: 1, Character: 1},
-		End:   lsp.Position{Line: 2, Character: 2},
-	}, "i")
-	if text1 != "foo\nbiz\n!" {
-		t.Error(text1)
+	tests := []struct {
+		InitialText string
+		Range       lsp.Range
+		Insertion   string
+		Expectation string
+		Err         error
+	}{
+		{
+			"foo\nbar\nbaz\n!",
+			lsp.Range{
+				Start: lsp.Position{Line: 1, Character: 1},
+				End:   lsp.Position{Line: 2, Character: 2},
+			},
+			"i",
+			"foo\nbiz\n!",
+			nil,
+		},
+		{
+			"foo\nbar\nbaz\n!",
+			lsp.Range{
+				Start: lsp.Position{Line: 1, Character: 1},
+				End:   lsp.Position{Line: 1, Character: 2},
+			},
+			"ee",
+			"foo\nbeer\nbaz\n!",
+			nil,
+		},
+		{
+			"foo\nbar\nbaz\n!",
+			lsp.Range{
+				Start: lsp.Position{Line: 1, Character: 1},
+				End:   lsp.Position{Line: 1, Character: 1},
+			},
+			"eer from the st",
+			"foo\nbeer from the star\nbaz\n!",
+			nil,
+		},
+		{
+			"foo\nbar\nbaz\n!",
+			lsp.Range{
+				Start: lsp.Position{Line: 0, Character: 10},
+				End:   lsp.Position{Line: 2, Character: 20},
+			},
+			"i",
+			"fooi\n!",
+			nil,
+		},
+		{
+			"foo\nbar\nbaz\n!",
+			lsp.Range{
+				// out of range start offset
+				Start: lsp.Position{Line: 0, Character: 100},
+				End:   lsp.Position{Line: 2, Character: 0},
+			},
+			"i",
+			"fooibaz\n!",
+			nil,
+		},
+		{
+			"foo\nbar\nbaz\n!",
+			lsp.Range{
+				// out of range start offset
+				Start: lsp.Position{Line: 20, Character: 0},
+				End:   lsp.Position{Line: 2, Character: 0},
+			},
+			"i",
+			"",
+			OutOfRangeError{13, lsp.Position{Line: 20, Character: 0}},
+		},
+		{
+			"foo\nbar\nbaz\n!",
+			lsp.Range{
+				// out of range start offset
+				Start: lsp.Position{Line: 0, Character: 0},
+				End:   lsp.Position{Line: 20, Character: 0},
+			},
+			"i",
+			"",
+			OutOfRangeError{13, lsp.Position{Line: 20, Character: 0}},
+		},
 	}
-	text2 := applyTextChange("foo\nbar\nbaz\n!", lsp.Range{
-		Start: lsp.Position{Line: 1, Character: 1},
-		End:   lsp.Position{Line: 1, Character: 2},
-	}, "ee")
-	if text2 != "foo\nbeer\nbaz\n!" {
-		t.Error(text2)
+
+	for _, test := range tests {
+		initial := strings.ReplaceAll(test.InitialText, "\n", "\\n")
+		insertion := strings.ReplaceAll(test.Insertion, "\n", "\\n")
+		expectation := strings.ReplaceAll(test.Expectation, "\n", "\\n")
+
+		t.Logf("applyTextChange(\"%s\", %v, \"%s\") == \"%s\"", initial, test.Range, insertion, expectation)
+		act, err := applyTextChange(test.InitialText, test.Range, test.Insertion)
+		if act != test.Expectation {
+			t.Errorf("applyTextChange(\"%s\", %v, \"%s\") != \"%s\", got \"%s\"", initial, test.Range, insertion, expectation, strings.ReplaceAll(act, "\n", "\\n"))
+		}
+		if err != test.Err {
+			t.Errorf("applyTextChange(\"%s\", %v, \"%s\") error != %v, got %v instead", initial, test.Range, insertion, test.Err, err)
+		}
 	}
-	text3 := applyTextChange("foo\nbar\nbaz\n!", lsp.Range{
-		Start: lsp.Position{Line: 1, Character: 1},
-		End:   lsp.Position{Line: 1, Character: 1},
-	}, "eer from the st")
-	if text3 != "foo\nbeer from the star\nbaz\n!" {
-		t.Error(text3)
+}
+
+func TestGetOffset(t *testing.T) {
+	tests := []struct {
+		Text string
+		Line int
+		Char int
+		Exp  int
+		Err  error
+	}{
+		{"foo\nfoobar\nbaz", 0, 0, 0, nil},
+		{"foo\nfoobar\nbaz", 1, 0, 4, nil},
+		{"foo\nfoobar\nbaz", 1, 3, 7, nil},
+		{"foo\nba\nr\nbaz\n!", 3, 0, 9, nil},
+		{"foo\nba\nr\nbaz\n!", 1, 10, 6, nil},
+		{"foo\nba\nr\nbaz\n!", -1, 0, -1, OutOfRangeError{14, lsp.Position{Line: -1, Character: 0}}},
+		{"foo\nba\nr\nbaz\n!", 4, 20, -1, OutOfRangeError{14, lsp.Position{Line: 4, Character: 20}}},
+	}
+
+	for _, test := range tests {
+		st := strings.Replace(test.Text, "\n", "\\n", -1)
+
+		t.Logf("getOffset(\"%s\", {Line: %d, Character: %d}) == %d", st, test.Line, test.Char, test.Exp)
+		act, err := getOffset(test.Text, lsp.Position{Line: test.Line, Character: test.Char})
+		if act != test.Exp {
+			t.Errorf("getOffset(\"%s\", {Line: %d, Character: %d}) != %d, got %d instead", st, test.Line, test.Char, test.Exp, act)
+		}
+		if err != test.Err {
+			t.Errorf("getOffset(\"%s\", {Line: %d, Character: %d}) error != %v, got %v instead", st, test.Line, test.Char, test.Err, err)
+		}
 	}
 }
 
 func TestGetLineOffset(t *testing.T) {
-	offset := getLineOffset("foo\nba\nr\nbaz\n!", 3)
-	if offset != 9 {
-		t.Error(offset)
+	tests := []struct {
+		Text   string
+		Line   int
+		Offset int
+	}{
+		{"foo\nfoobar\nbaz", 0, 0},
+		{"foo\nfoobar\nbaz", 1, 4},
+		{"foo\nfoobar\nbaz", 2, 11},
+		{"foo\nfoobar\nbaz", 3, -1},
+		{"foo\nba\nr\nbaz\n!", 3, 9},
+		{"foo\nba\nr\nbaz\n!", -1, -1},
+		{"foo\nba\nr\nbaz\n!", 20, -1},
+	}
+
+	for _, test := range tests {
+		st := strings.Replace(test.Text, "\n", "\\n", -1)
+
+		t.Logf("getLineOffset(\"%s\", %d) == %d", st, test.Line, test.Offset)
+		act := getLineOffset(test.Text, test.Line)
+		if act != test.Offset {
+			t.Errorf("getLineOffset(\"%s\", %d) != %d, got %d instead", st, test.Line, test.Offset, act)
+		}
 	}
 }
