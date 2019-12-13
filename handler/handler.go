@@ -631,13 +631,18 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 
 func (handler *InoHandler) cpp2inoCompletionList(list *lsp.CompletionList, uri lsp.DocumentURI) {
 	if data, ok := handler.data[uri]; ok {
+		newItems := make([]lsp.CompletionItem, 0, len(list.Items))
 		for _, item := range list.Items {
-			if item.TextEdit != nil {
-				r := &item.TextEdit.Range
-				r.Start.Line = data.sourceLineMap[r.Start.Line]
-				r.End.Line = data.sourceLineMap[r.End.Line]
+			if (!strings.HasPrefix(item.InsertText, "_")) {
+				if item.TextEdit != nil {
+					r := &item.TextEdit.Range
+					r.Start.Line = data.sourceLineMap[r.Start.Line]
+					r.End.Line = data.sourceLineMap[r.End.Line]
+				}
+				newItems = append(newItems, item)
 			}
 		}
+		list.Items = newItems;
 	}
 }
 
@@ -731,7 +736,7 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []DocumentSymbol, 
 		duplicate := false
 		other, duplicate := symbolIdx[symbol.Name]
 		if duplicate {
-			// we prefer symbols later in the file due to the function header generation. E.g. if one has a function `void foo() {}` somehwre in the code
+			// We prefer symbols later in the file due to the function header generation. E.g. if one has a function `void foo() {}` somehwre in the code
 			// the code generation will add a `void foo();` header at the beginning of the cpp file. We care about the function body later in the file, not
 			// the header early on.
 			if other.Range.Start.Line < symbol.Range.Start.Line {
@@ -755,7 +760,7 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []DocumentSymbol, 
 }
 
 func (handler *InoHandler) cpp2inoSymbolInformation(syms []*lsp.SymbolInformation) []lsp.SymbolInformation {
-	// much like in cpp2inoDocumentSymbols we de-duplicate symbols based on file in-file location.
+	// Much like in cpp2inoDocumentSymbols we de-duplicate symbols based on file in-file location.
 	idx := make(map[string]*lsp.SymbolInformation)
 	for _, sym := range syms {
 		handler.cpp2inoLocation(&sym.Location)
