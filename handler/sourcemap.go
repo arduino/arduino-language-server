@@ -116,12 +116,13 @@ func copyMappings(sourceLineMap, targetLineMap, newMappings map[int]int) {
 
 // OutOfRangeError returned if one attempts to access text out of its range
 type OutOfRangeError struct {
-	Max int
-	Req lsp.Position
+	Type string
+	Max  int
+	Req  int
 }
 
 func (oor OutOfRangeError) Error() string {
-	return fmt.Sprintf("text access out of range: max=%d requested=%d", oor.Max, oor.Req)
+	return fmt.Sprintf("%s access out of range: max=%d requested=%d", oor.Type, oor.Max, oor.Req)
 }
 
 func applyTextChange(text string, rang lsp.Range, insertText string) (res string, err error) {
@@ -139,37 +140,41 @@ func applyTextChange(text string, rang lsp.Range, insertText string) (res string
 
 // getOffset computes the offset in the text expressed by the lsp.Position.
 // Returns OutOfRangeError if the position is out of range.
-func getOffset(text string, pos lsp.Position) (off int, err error) {
-	// find line
-	lineOffset := getLineOffset(text, pos.Line)
-	if lineOffset < 0 {
-		return -1, OutOfRangeError{len(text), pos}
+func getOffset(text string, pos lsp.Position) (int, error) {
+	// Find line
+	lineOffset, err := getLineOffset(text, pos.Line)
+	if err != nil {
+		return -1, err
 	}
-	off = lineOffset
+	character := pos.Character
+	if character == 0 {
+		return lineOffset, nil
+	}
 
-	// walk towards the character
-	var charFound bool
-	for offset, c := range text[off:] {
+	// Find the character and return its offset within the text
+	var count = len(text[lineOffset:])
+	for offset, c := range text[lineOffset:] {
+		if character == offset {
+			// We've found the character
+			return lineOffset + offset, nil
+		}
 		if c == '\n' {
 			// We've reached the end of line. LSP spec says we should default back to the line length.
 			// See https://microsoft.github.io/language-server-protocol/specifications/specification-3-14/#position
-			off += offset
-			charFound = true
-			break
-		}
-
-		// we've fond the character
-		if offset == pos.Character {
-			off += offset
-			charFound = true
+			if character > offset {
+				return lineOffset + offset, nil
+			}
+			count = offset
 			break
 		}
 	}
-	if !charFound {
-		return -1, OutOfRangeError{Max: len(text), Req: pos}
+	if character > 0 {
+		// We've reached the end of the last line. Default to the text length (see above).
+		return len(text), nil
 	}
 
-	return off, nil
+	// We haven't found the character in the text (character index was negative)
+	return -1, OutOfRangeError{"Character", count, character}
 }
 
 // getLineOffset finds the offset/position of the beginning of a line within the text.
@@ -178,27 +183,22 @@ func getOffset(text string, pos lsp.Position) (off int, err error) {
 //    getLineOffset(text, 0) == 0
 //    getLineOffset(text, 1) == 4
 //    getLineOffset(text, 2) == 11
-func getLineOffset(text string, line int) int {
-	if line < 0 {
-		return -1
-	}
+func getLineOffset(text string, line int) (int, error) {
 	if line == 0 {
-		return 0
+		return 0, nil
 	}
 
-	// find the line and return its offset within the text
+	// Find the line and return its offset within the text
 	var count int
 	for offset, c := range text {
-		if c != '\n' {
-			continue
-		}
-
-		count++
-		if count == line {
-			return offset + 1
+		if c == '\n' {
+			count++
+			if count == line {
+				return offset + 1, nil
+			}
 		}
 	}
 
-	// we didn't find the line in the text
-	return -1
+	// We haven't found the line in the text
+	return -1, OutOfRangeError{"Line", count, line}
 }

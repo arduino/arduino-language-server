@@ -42,7 +42,7 @@ func main() {
 		log.SetOutput(os.Stderr)
 	}
 
-	handler.Setup(cliPath, enableLogging)
+	handler.Setup(cliPath, enableLogging, true)
 	initialBoard := handler.Board{Fqbn: initialFqbn, Name: initialBoardName}
 	inoHandler := handler.NewInoHandler(os.Stdin, os.Stdout, logStreams, startClangd, initialBoard)
 	defer inoHandler.StopClangd()

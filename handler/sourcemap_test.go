@@ -122,7 +122,6 @@ func TestApplyTextChange(t *testing.T) {
 		{
 			"foo\nbar\nbaz\n!",
 			lsp.Range{
-				// out of range start offset
 				Start: lsp.Position{Line: 0, Character: 100},
 				End:   lsp.Position{Line: 2, Character: 0},
 			},
@@ -139,18 +138,18 @@ func TestApplyTextChange(t *testing.T) {
 			},
 			"i",
 			"",
-			OutOfRangeError{13, lsp.Position{Line: 20, Character: 0}},
+			OutOfRangeError{"Line", 3, 20},
 		},
 		{
 			"foo\nbar\nbaz\n!",
 			lsp.Range{
-				// out of range start offset
+				// out of range end offset
 				Start: lsp.Position{Line: 0, Character: 0},
 				End:   lsp.Position{Line: 20, Character: 0},
 			},
 			"i",
 			"",
-			OutOfRangeError{13, lsp.Position{Line: 20, Character: 0}},
+			OutOfRangeError{"Line", 3, 20},
 		},
 	}
 
@@ -183,8 +182,10 @@ func TestGetOffset(t *testing.T) {
 		{"foo\nfoobar\nbaz", 1, 3, 7, nil},
 		{"foo\nba\nr\nbaz\n!", 3, 0, 9, nil},
 		{"foo\nba\nr\nbaz\n!", 1, 10, 6, nil},
-		{"foo\nba\nr\nbaz\n!", -1, 0, -1, OutOfRangeError{14, lsp.Position{Line: -1, Character: 0}}},
-		{"foo\nba\nr\nbaz\n!", 4, 20, -1, OutOfRangeError{14, lsp.Position{Line: 4, Character: 20}}},
+		{"foo\nba\nr\nbaz\n!", -1, 0, -1, OutOfRangeError{"Line", 4, -1}},
+		{"foo\nba\nr\nbaz\n!", 1, -1, -1, OutOfRangeError{"Character", 2, -1}},
+		{"foo\nba\nr\nbaz\n!", 4, 20, 14, nil},
+		{"foo\nba\nr\nbaz!\n", 4, 0, 14, nil},
 	}
 
 	for _, test := range tests {
@@ -203,26 +204,30 @@ func TestGetOffset(t *testing.T) {
 
 func TestGetLineOffset(t *testing.T) {
 	tests := []struct {
-		Text   string
-		Line   int
-		Offset int
+		Text string
+		Line int
+		Exp  int
+		Err  error
 	}{
-		{"foo\nfoobar\nbaz", 0, 0},
-		{"foo\nfoobar\nbaz", 1, 4},
-		{"foo\nfoobar\nbaz", 2, 11},
-		{"foo\nfoobar\nbaz", 3, -1},
-		{"foo\nba\nr\nbaz\n!", 3, 9},
-		{"foo\nba\nr\nbaz\n!", -1, -1},
-		{"foo\nba\nr\nbaz\n!", 20, -1},
+		{"foo\nfoobar\nbaz", 0, 0, nil},
+		{"foo\nfoobar\nbaz", 1, 4, nil},
+		{"foo\nfoobar\nbaz", 2, 11, nil},
+		{"foo\nfoobar\nbaz", 3, -1, OutOfRangeError{"Line", 2, 3}},
+		{"foo\nba\nr\nbaz\n!", 3, 9, nil},
+		{"foo\nba\nr\nbaz\n!", -1, -1, OutOfRangeError{"Line", 4, -1}},
+		{"foo\nba\nr\nbaz\n!", 20, -1, OutOfRangeError{"Line", 4, 20}},
 	}
 
 	for _, test := range tests {
 		st := strings.Replace(test.Text, "\n", "\\n", -1)
 
-		t.Logf("getLineOffset(\"%s\", %d) == %d", st, test.Line, test.Offset)
-		act := getLineOffset(test.Text, test.Line)
-		if act != test.Offset {
-			t.Errorf("getLineOffset(\"%s\", %d) != %d, got %d instead", st, test.Line, test.Offset, act)
+		t.Logf("getLineOffset(\"%s\", %d) == %d", st, test.Line, test.Exp)
+		act, err := getLineOffset(test.Text, test.Line)
+		if act != test.Exp {
+			t.Errorf("getLineOffset(\"%s\", %d) != %d, got %d instead", st, test.Line, test.Exp, act)
+		}
+		if err != test.Err {
+			t.Errorf("getLineOffset(\"%s\", %d) error != %v, got %v instead", st, test.Line, test.Err, err)
 		}
 	}
 }

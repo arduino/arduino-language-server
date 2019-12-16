@@ -20,11 +20,13 @@ import (
 
 var globalCliPath string
 var enableLogging bool
+var asyncProcessing bool
 
 // Setup initializes global variables.
-func Setup(cliPath string, _enableLogging bool) {
+func Setup(cliPath string, _enableLogging bool, _asyncProcessing bool) {
 	globalCliPath = cliPath
 	enableLogging = _enableLogging
+	asyncProcessing = _asyncProcessing
 }
 
 // CLangdStarter starts clangd and returns its stdin/out/err
@@ -44,7 +46,10 @@ func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, logStreams *Strea
 	}
 	handler.startClangd()
 	stdStream := jsonrpc2.NewBufferedStream(logStreams.AttachStdInOut(stdin, stdout), jsonrpc2.VSCodeObjectCodec{})
-	stdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromStdio))
+	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.FromStdio)
+	if asyncProcessing {
+		stdHandler = jsonrpc2.AsyncHandler(stdHandler)
+	}
 	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler)
 	if enableLogging {
 		log.Println("Initial board configuration:", board)
@@ -633,7 +638,7 @@ func (handler *InoHandler) cpp2inoCompletionList(list *lsp.CompletionList, uri l
 	if data, ok := handler.data[uri]; ok {
 		newItems := make([]lsp.CompletionItem, 0, len(list.Items))
 		for _, item := range list.Items {
-			if (!strings.HasPrefix(item.InsertText, "_")) {
+			if !strings.HasPrefix(item.InsertText, "_") {
 				if item.TextEdit != nil {
 					r := &item.TextEdit.Range
 					r.Start.Line = data.sourceLineMap[r.Start.Line]
@@ -642,7 +647,7 @@ func (handler *InoHandler) cpp2inoCompletionList(list *lsp.CompletionList, uri l
 				newItems = append(newItems, item)
 			}
 		}
-		list.Items = newItems;
+		list.Items = newItems
 	}
 }
 
