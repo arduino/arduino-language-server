@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"regexp"
@@ -48,7 +47,10 @@ func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, logStreams *Strea
 	stdStream := jsonrpc2.NewBufferedStream(logStreams.AttachStdInOut(stdin, stdout), jsonrpc2.VSCodeObjectCodec{})
 	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.FromStdio)
 	if asyncProcessing {
-		stdHandler = jsonrpc2.AsyncHandler(stdHandler)
+		stdHandler = AsyncHandler{
+			handler:      stdHandler,
+			synchronizer: &handler.synchronizer,
+		}
 	}
 	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler)
 	if enableLogging {
@@ -59,11 +61,12 @@ func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, logStreams *Strea
 
 // InoHandler is a JSON-RPC handler that delegates messages to clangd.
 type InoHandler struct {
-	StdioConn  *jsonrpc2.Conn
-	ClangdConn *jsonrpc2.Conn
-	clangdProc ClangdProc
-	data       map[lsp.DocumentURI]*FileData
-	config     BoardConfig
+	StdioConn    *jsonrpc2.Conn
+	ClangdConn   *jsonrpc2.Conn
+	clangdProc   ClangdProc
+	data         map[lsp.DocumentURI]*FileData
+	config       BoardConfig
+	synchronizer Synchronizer
 }
 
 // ClangdProc contains the process input / output streams for clangd.
@@ -108,15 +111,7 @@ func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, r
 		return
 	}
 
-	// Handle special methods (non-LSP)
-	switch req.Method {
-	case "arduino/selectedBoard":
-		p := params.(*BoardConfig)
-		err = handler.changeBoardConfig(ctx, p)
-		return
-	}
-
-	// Handle LSP methods: transform and send to clangd
+	// Handle LSP methods: transform parameters and send to clangd
 	var uri lsp.DocumentURI
 	if params == nil {
 		params = req.Params
@@ -128,89 +123,53 @@ func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, r
 	}
 	if req.Notif {
 		err = handler.ClangdConn.Notify(ctx, req.Method, params)
+		if enableLogging {
+			log.Println("From stdio:", req.Method)
+		}
 	} else {
 		ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
 		defer cancel()
 		result, err = sendRequest(ctx, handler.ClangdConn, req.Method, params)
+		if enableLogging {
+			log.Println("From stdio:", req.Method, "id", req.ID)
+		}
 	}
 	if err != nil {
+		// Exit the process and trigger a restart by the client in case of a severe error
 		if err.Error() == "context deadline exceeded" {
-			// Exit the process and trigger a restart by the client
-			log.Println("Timeout exceeded while waiting for a reply from clangd:", req.Method)
-			log.Println("Please restart the language server.")
-			handler.StopClangd()
-			os.Exit(1)
+			log.Println("Timeout exceeded while waiting for a reply from clangd.")
+			handler.exit()
+		}
+		if strings.Contains(err.Error(), "non-added document") || strings.Contains(err.Error(), "non-added file") {
+			log.Println("The clangd process has lost track of the open document.")
+			handler.exit()
 		}
 		return
 	}
-	if enableLogging {
-		log.Println("From stdio:", req.Method)
-	}
+
+	// Transform and return the result
 	if result != nil {
 		result = handler.transformClangdResult(req.Method, uri, result)
 	}
 	return
 }
 
-func (handler *InoHandler) changeBoardConfig(ctx context.Context, config *BoardConfig) (resultErr error) {
-	previousFqbn := handler.config.SelectedBoard.Fqbn
-	handler.config = *config
-	if config.SelectedBoard.Fqbn == previousFqbn || len(handler.data) == 0 {
-		return
-	}
-	if enableLogging {
-		log.Println("New board configuration:", *config)
-	}
-
-	// Stop the clangd process and update all file data with the new board
+func (handler *InoHandler) exit() {
+	log.Println("Please restart the language server.")
 	handler.StopClangd()
-	openFileData := make(map[*FileData][]byte)
-	for uri, data := range handler.data {
-		if uri != data.sourceURI {
-			continue
-		}
-		targetBytes, err := updateCpp([]byte(data.sourceText), uriToPath(data.sourceURI), config.SelectedBoard.Fqbn, true, uriToPath(data.targetURI))
-		if err != nil {
-			if resultErr == nil {
-				resultErr = handler.handleError(ctx, err)
-			}
-			targetBytes, _ = ioutil.ReadFile(uriToPath(data.targetURI))
-		}
-		sourceLineMap, targetLineMap := createSourceMaps(bytes.NewReader(targetBytes))
-		data.sourceLineMap = sourceLineMap
-		data.targetLineMap = targetLineMap
-		openFileData[data] = targetBytes
-	}
-
-	// Restart the clangd process, initialize it and reopen the files
-	handler.startClangd()
-	initResult := new(lsp.InitializeResult)
-	err := handler.ClangdConn.Call(ctx, "initialize", &handler.clangdProc.initParams, initResult)
-	if err != nil {
-		resultErr = err
-		return
-	}
-	for data, targetBytes := range openFileData {
-		if enableLogging {
-			log.Println("Reopening file: ", data.sourceURI)
-		}
-		openParams := lsp.DidOpenTextDocumentParams{
-			TextDocument: lsp.TextDocumentItem{
-				LanguageID: "cpp",
-				URI:        data.targetURI,
-				Version:    data.version,
-				Text:       string(targetBytes),
-			},
-		}
-		err := handler.ClangdConn.Notify(ctx, "textDocument/didOpen", openParams)
-		if err != nil && resultErr == nil {
-			resultErr = err
-		}
-	}
-	return
+	os.Exit(1)
 }
 
 func (handler *InoHandler) transformParamsToClangd(ctx context.Context, method string, params interface{}) (uri lsp.DocumentURI, err error) {
+	needsWriteLock := method == "textDocument/didOpen" || method == "textDocument/didChange" || method == "textDocument/didClose"
+	if needsWriteLock {
+		handler.synchronizer.DataMux.Lock()
+		defer handler.synchronizer.DataMux.Unlock()
+	} else {
+		handler.synchronizer.DataMux.RLock()
+		defer handler.synchronizer.DataMux.RUnlock()
+	}
+
 	switch method {
 	case "initialize":
 		handler.clangdProc.initParams = *params.(*lsp.InitializeParams)
@@ -221,7 +180,7 @@ func (handler *InoHandler) transformParamsToClangd(ctx context.Context, method s
 	case "textDocument/didChange":
 		p := params.(*lsp.DidChangeTextDocumentParams)
 		uri = p.TextDocument.URI
-		err = handler.ino2cppDidChangeTextDocumentParams(p)
+		err = handler.ino2cppDidChangeTextDocumentParams(ctx, p)
 	case "textDocument/didSave":
 		p := params.(*lsp.DidSaveTextDocumentParams)
 		uri = p.TextDocument.URI
@@ -317,7 +276,7 @@ func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.Doc
 	return data, targetBytes, nil
 }
 
-func (handler *InoHandler) updateFileData(data *FileData, change *lsp.TextDocumentContentChangeEvent) (err error) {
+func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, change *lsp.TextDocumentContentChangeEvent) (err error) {
 	rang := change.Range
 	if rang == nil || rang.Start.Line != rang.End.Line {
 		// Update the source text and regenerate the cpp code
@@ -439,11 +398,11 @@ func (handler *InoHandler) ino2cppTextDocumentItem(ctx context.Context, doc *lsp
 	return nil
 }
 
-func (handler *InoHandler) ino2cppDidChangeTextDocumentParams(params *lsp.DidChangeTextDocumentParams) error {
+func (handler *InoHandler) ino2cppDidChangeTextDocumentParams(ctx context.Context, params *lsp.DidChangeTextDocumentParams) error {
 	handler.ino2cppTextDocumentIdentifier(&params.TextDocument.TextDocumentIdentifier)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		for index := range params.ContentChanges {
-			err := handler.updateFileData(data, &params.ContentChanges[index])
+			err := handler.updateFileData(ctx, data, &params.ContentChanges[index])
 			if err != nil {
 				return err
 			}
@@ -551,6 +510,9 @@ func (handler *InoHandler) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *ls
 }
 
 func (handler *InoHandler) transformClangdResult(method string, uri lsp.DocumentURI, result interface{}) interface{} {
+	handler.synchronizer.DataMux.RLock()
+	defer handler.synchronizer.DataMux.RUnlock()
+
 	switch method {
 	case "textDocument/completion":
 		r := result.(*lsp.CompletionList)
@@ -798,20 +760,22 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 	var result interface{}
 	if req.Notif {
 		err = handler.StdioConn.Notify(ctx, req.Method, params)
+		if enableLogging {
+			log.Println("From clangd:", req.Method)
+		}
 	} else {
 		result, err = sendRequest(ctx, handler.StdioConn, req.Method, params)
-	}
-	if err != nil {
-		log.Println("From clangd: Method:", req.Method, "Error:", err)
-		return nil, err
-	}
-	if enableLogging {
-		log.Println("From clangd:", req.Method)
+		if enableLogging {
+			log.Println("From clangd:", req.Method, "id", req.ID)
+		}
 	}
 	return result, err
 }
 
 func (handler *InoHandler) transformParamsToStdio(method string, raw *json.RawMessage) (params interface{}, uri lsp.DocumentURI, err error) {
+	handler.synchronizer.DataMux.RLock()
+	defer handler.synchronizer.DataMux.RUnlock()
+
 	params, err = readParams(method, raw)
 	if err != nil {
 		return
