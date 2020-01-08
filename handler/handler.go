@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"regexp"
@@ -91,6 +92,8 @@ func (handler *InoHandler) startClangd() {
 	clangdWrite, clangdRead, clangdErr := handler.clangdProc.Start()
 	if enableLogging {
 		go io.Copy(handler.clangdProc.Logs.ClangdErr, clangdErr)
+	} else {
+		go io.Copy(ioutil.Discard, clangdErr)
 	}
 	srw := handler.clangdProc.Logs.AttachClangdInOut(clangdRead, clangdWrite)
 	clangdStream := jsonrpc2.NewBufferedStream(srw, jsonrpc2.VSCodeObjectCodec{})
