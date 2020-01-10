@@ -23,10 +23,13 @@ jobs:
     matrix:
       linux:
         imageName: 'ubuntu-16.04'
+        ExecutableSuffix: ''
       mac:
         imageName: 'macos-10.13'
+        ExecutableSuffix: ''
       windows:
         imageName: 'vs2017-win2016'
+        ExecutableSuffix: '.exe'
   pool:
     vmImage: $(imageName)
   steps:
@@ -34,7 +37,7 @@ jobs:
     inputs:
       version: '1.12'
   - script: |
-      go build -o "$(Build.BinariesDirectory)/$(Agent.OS)_amd64/$(ExecutableName)"
+      go build -o "$(Build.BinariesDirectory)/$(Agent.OS)_amd64/$(ExecutableName)$(ExecutableSuffix)"
       go test ./...
     displayName: 'Build and Test'
   - task: ArchiveFiles@2
