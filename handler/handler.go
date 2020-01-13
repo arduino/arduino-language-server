@@ -72,9 +72,8 @@ type InoHandler struct {
 
 // ClangdProc contains the process input / output streams for clangd.
 type ClangdProc struct {
-	Start      func() (io.WriteCloser, io.ReadCloser, io.ReadCloser)
-	Logs       *StreamLogger
-	initParams lsp.InitializeParams
+	Start func() (io.WriteCloser, io.ReadCloser, io.ReadCloser)
+	Logs  *StreamLogger
 }
 
 // FileData gathers information on a .ino source file.
@@ -174,8 +173,6 @@ func (handler *InoHandler) transformParamsToClangd(ctx context.Context, method s
 	}
 
 	switch method {
-	case "initialize":
-		handler.clangdProc.initParams = *params.(*lsp.InitializeParams)
 	case "textDocument/didOpen":
 		p := params.(*lsp.DidOpenTextDocumentParams)
 		uri = p.TextDocument.URI
@@ -353,17 +350,14 @@ func (handler *InoHandler) handleError(ctx context.Context, err error) error {
 		submatch := exp.FindStringSubmatch(errorStr)
 		message = submatch[1]
 	} else if strings.Contains(errorStr, "platform not installed") || strings.Contains(errorStr, "no FQBN provided") {
-		var board string
 		if len(handler.config.SelectedBoard.Name) > 0 {
-			board = handler.config.SelectedBoard.Name
-		} else {
-			board = handler.config.SelectedBoard.Fqbn
-		}
-		if len(board) > 0 {
+			board := handler.config.SelectedBoard.Name
 			message = "Editor support may be inaccurate because the core for the board `" + board + "` is not installed."
 			message += " Use the Boards Manager to install it."
 		} else {
-			message = "Editor support may be inaccurate because the selected board is unkown."
+			// This case happens most often when the app is started for the first time and no
+			// board is selected yet. Don't bother the user with an error then.
+			return err
 		}
 	} else if strings.Contains(errorStr, "No such file or directory") {
 		exp, regexpErr := regexp.Compile("([\\w\\.\\-]+)\\.h: No such file or directory")
