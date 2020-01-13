@@ -251,6 +251,8 @@ func printLibraryPaths(basePath string, printer *Printer) {
 				srcDir := filepath.Join(libsDir, libInfo.Name(), "src")
 				if srcInfo, err := os.Stat(srcDir); err == nil && srcInfo.IsDir() {
 					printer.Println("-I", srcDir)
+				} else {
+					printer.Println("-I", filepath.Join(libsDir, libInfo.Name()))
 				}
 			}
 		}
