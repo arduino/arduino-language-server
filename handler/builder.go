@@ -14,23 +14,29 @@ import (
 )
 
 func generateCpp(inoCode []byte, sourcePath, fqbn string) (cppPath string, cppCode []byte, err error) {
-	rawTempDir, err := ioutil.TempDir("", "ino2cpp-")
+	// The CLI expects the `theSketchName.ino` file to be in `some/path/theSketchName` folder.
+	// Expected folder structure: `/path/to/temp/ino2cpp-${random}/theSketchName/theSketchName.ino`.
+	rawRootTempDir, err := ioutil.TempDir("", "ino2cpp-")
 	if err != nil {
 		err = errors.Wrap(err, "Error while creating temporary directory.")
 		return
 	}
-	tempDir, err := filepath.EvalSymlinks(rawTempDir)
+	rootTempDir, err := filepath.EvalSymlinks(rawRootTempDir)
 	if err != nil {
 		err = errors.Wrap(err, "Error while resolving symbolic links of temporary directory.")
 		return
 	}
 
-	// Write source file to temp dir
-	name := filepath.Base(sourcePath)
-	if !strings.HasSuffix(name, ".ino") {
-		name += ".ino"
+	sketchName := filepath.Base(sourcePath)
+	if strings.HasSuffix(sketchName, ".ino") {
+		sketchName = sketchName[:len(sketchName)-len(".ino")]
 	}
-	inoPath := filepath.Join(tempDir, name)
+	sketchTempPath := filepath.Join(rootTempDir, sketchName)
+	createDirIfNotExist(sketchTempPath)
+
+	// Write source file to temp dir
+	sketchFileName := sketchName + ".ino"
+	inoPath := filepath.Join(sketchTempPath, sketchFileName)
 	err = ioutil.WriteFile(inoPath, inoCode, 0600)
 	if err != nil {
 		err = errors.Wrap(err, "Error while writing source file to temporary directory.")
@@ -41,14 +47,14 @@ func generateCpp(inoCode []byte, sourcePath, fqbn string) (cppPath string, cppCo
 	}
 
 	// Copy all header files to temp dir
-	err = copyHeaderFiles(filepath.Dir(sourcePath), tempDir)
+	err = copyHeaderFiles(filepath.Dir(sourcePath), rootTempDir)
 	if err != nil {
 		return
 	}
 
 	// Generate compile_flags.txt
-	cppPath = filepath.Join(tempDir, name+".cpp")
-	flagsPath, err := generateCompileFlags(tempDir, inoPath, sourcePath, fqbn)
+	cppPath = filepath.Join(rootTempDir, sketchFileName+".cpp")
+	flagsPath, err := generateCompileFlags(rootTempDir, inoPath, sourcePath, fqbn)
 	if err != nil {
 		return
 	}
@@ -57,8 +63,17 @@ func generateCpp(inoCode []byte, sourcePath, fqbn string) (cppPath string, cppCo
 	}
 
 	// Generate target file
-	cppCode, err = generateTargetFile(tempDir, inoPath, cppPath, fqbn)
+	cppCode, err = generateTargetFile(rootTempDir, inoPath, cppPath, fqbn)
 	return
+}
+
+func createDirIfNotExist(dir string) {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err = os.MkdirAll(dir, os.ModePerm)
+		if err != nil {
+			panic(err)
+		}
+	}
 }
 
 func copyHeaderFiles(sourceDir string, destDir string) error {
