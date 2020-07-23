@@ -53,8 +53,8 @@ func generateCpp(inoCode []byte, sourcePath, fqbn string) (cppPath string, cppCo
 	}
 
 	// Generate compile_flags.txt
-	cppPath = filepath.Join(rootTempDir, sketchFileName+".cpp")
-	flagsPath, err := generateCompileFlags(rootTempDir, inoPath, sourcePath, fqbn)
+	cppPath = filepath.Join(sketchTempPath, sketchFileName+".cpp")
+	flagsPath, err := generateCompileFlags(sketchTempPath, inoPath, sourcePath, fqbn)
 	if err != nil {
 		return
 	}
@@ -63,7 +63,7 @@ func generateCpp(inoCode []byte, sourcePath, fqbn string) (cppPath string, cppCo
 	}
 
 	// Generate target file
-	cppCode, err = generateTargetFile(rootTempDir, inoPath, cppPath, fqbn)
+	cppCode, err = generateTargetFile(sketchTempPath, inoPath, cppPath, fqbn)
 	return
 }
 
