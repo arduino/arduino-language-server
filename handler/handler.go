@@ -840,7 +840,7 @@ func (handler *InoHandler) parseCommandArgument(rawArg interface{}) interface{} 
 func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {
 	params := lsp.ShowMessageParams{
 		Type:    msgType,
-		Message: strings.ReplaceAll(message, "\n", "<br>"),
+		Message: message,
 	}
 	handler.StdioConn.Notify(ctx, "window/showMessage", &params)
 }
