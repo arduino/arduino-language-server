@@ -360,13 +360,13 @@ func (handler *InoHandler) handleError(ctx context.Context, err error) error {
 			return err
 		}
 	} else if strings.Contains(errorStr, "No such file or directory") {
-		exp, regexpErr := regexp.Compile("([\\w\\.\\-]+)\\.h: No such file or directory")
+		exp, regexpErr := regexp.Compile("([\\w\\.\\-]+): No such file or directory")
 		if regexpErr != nil {
 			panic(regexpErr)
 		}
 		submatch := exp.FindStringSubmatch(errorStr)
-		message = "Editor support may be inaccurate because the header `" + submatch[1] + ".h` was not found."
-		message += " If it is part of a library, use the Library Manager to install it"
+		message = "Editor support may be inaccurate because the header `" + submatch[1] + "` was not found."
+		message += " If it is part of a library, use the Library Manager to install it."
 	} else {
 		message = "Could not start editor support.\n" + errorStr
 	}
