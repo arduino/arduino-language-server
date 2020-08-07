@@ -1,0 +1,150 @@
+name: Repackage clangd
+
+on:
+  schedule:
+    - cron: '0 4 * * MON-FRI' # run every weekday at 4AM (https://docs.github.com/en/actions/reference/events-that-trigger-workflows#scheduled-events-schedule)
+  pull_request:
+    paths:
+      - .github/workflows/repackage-clangd.yml
+  push:
+    paths:
+      - .github/workflows/repackage-clangd.yml
+
+env:
+  # The LLVM repository's tags use the form llvmorg-<VERSION>
+  LLVM_TAG_PREFIX: llvmorg-
+  LLVM_PREBUILD_DOWNLOAD_URL_PREFIX: https://github.com/llvm/llvm-project/releases/download/
+  LLVM_PREBUILD_FILENAME_VERSION_TEMPLATE: VERSION
+  # NOTE: the Ubuntu version of the pre-built binaries may vary with each release
+  LLVM_PREBUILD_FILENAMES: >-
+    (
+    [linux]="clang+llvm-VERSION-x86_64-linux-gnu-ubuntu-18.04.tar.xz"
+    [linuxarm]="clang+llvm-VERSION-armv7a-linux-gnueabihf.tar.xz"
+    [linuxaarch64]="clang+llvm-VERSION-aarch64-linux-gnu.tar.xz"
+    [windows]="LLVM-VERSION-win64.exe"
+    [macos]="clang+llvm-VERSION-x86_64-apple-darwin.tar.xz"
+    )
+  CLANGD_SERVER_DIRECTORY: arduino-language-server/clangd
+  CLANGD_ARCHIVE_PREFIX: clangd_
+
+jobs:
+  check-for-new-llvm-release:
+    runs-on: ubuntu-latest
+
+    outputs:
+      llvm-release-version: ${{ steps.get-llvm-release-version.outputs.llvm-release-version }}
+      llvm-release-is-new: ${{ steps.check-if-llvm-release-is-new.outputs.llvm-release-is-new }}
+      llvm-binaries-are-available: ${{ steps.check-if-llvm-binaries-are-available.outputs.llvm-binaries-are-available }}
+
+    steps:
+      - name: Get latest LLVM release data
+        id: get-llvm-release-data
+        uses: octokit/request-action@v2.x
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Pre-releases are excluded
+          route: GET /repos/:owner/:repo/releases/latest
+          # The following inputs result in "Unexpected input" warnings on the workflow run log and summary page, but they are correct
+          owner: llvm
+          repo: llvm-project
+
+      - name: Determine version of the latest LLVM release
+        id: get-llvm-release-version
+        run: |
+          LLVM_TAG_NAME="${{ fromJson(steps.get-llvm-release-data.outputs.data).tag_name }}"
+          # Extract the version number substring from the tag name
+          LLVM_RELEASE_VERSION="${LLVM_TAG_NAME#${{ env.LLVM_TAG_PREFIX }}}"
+          echo "::set-output name=llvm-release-version::$LLVM_RELEASE_VERSION"
+
+      - name: Check if clangd from the latest LLVM release already exists on the server
+        id: check-if-llvm-release-is-new
+        run: |
+          # Non-zero exit status is expected
+          set +e
+          CLANGD_REPACKAGE_URL="https://downloads.arduino.cc/${{ env.CLANGD_SERVER_DIRECTORY }}/${{ env.CLANGD_ARCHIVE_PREFIX }}${{ steps.get-llvm-release-version.outputs.llvm-release-version }}_linux.zip"
+          HTTP_STATUS_CODE="$(curl --silent --location --head --output /dev/null --write-out "%{http_code}\n" "$CLANGD_REPACKAGE_URL")"
+          if [[ "$HTTP_STATUS_CODE" == "404" ]]; then
+            echo "clangd from LLVM release ${{ steps.get-llvm-release-version.outputs.llvm-release-version }} has not been repackaged"
+            RELEASE_IS_NEW=1
+          else
+            echo "clangd from LLVM release ${{ steps.get-llvm-release-version.outputs.llvm-release-version }} has already been repackaged"
+            RELEASE_IS_NEW=0
+          fi
+          echo "::set-output name=llvm-release-is-new::$RELEASE_IS_NEW"
+
+      # Pre-built binaries for Windows are not provided for all LLVM releases
+      # It may be that binaries are added some time after the release
+      - name: Check if binaries are available for all targets
+        id: check-if-llvm-binaries-are-available
+        if: steps.check-if-llvm-release-is-new.outputs.llvm-release-is-new == true
+        run: |
+          set +e
+          eval "declare -A LLVM_PREBUILD_FILENAMES_ARRAY=${{ env.LLVM_PREBUILD_FILENAMES }}"
+          for target in "${!LLVM_PREBUILD_FILENAMES_ARRAY[@]}"; do
+            FILENAME=${LLVM_PREBUILD_FILENAMES_ARRAY[$target]/${{ env.LLVM_PREBUILD_FILENAME_VERSION_TEMPLATE }}/${{ steps.get-llvm-release-version.outputs.llvm-release-version }}}
+            LLVM_PREBUILD_URL="${{ env.LLVM_PREBUILD_DOWNLOAD_URL_PREFIX }}${{ env.LLVM_TAG_PREFIX }}${{ steps.get-llvm-release-version.outputs.llvm-release-version }}/$FILENAME"
+            HTTP_STATUS_CODE="$(curl --silent --location --head --output /dev/null --write-out '%{http_code}\n' "$LLVM_PREBUILD_URL")"
+            if [[ "$HTTP_STATUS_CODE" == "404" ]]; then
+              echo "LLVM pre-builds for all targets are not currently available from this release"
+              echo "::set-output name=llvm-binaries-are-available::0"
+              exit
+            fi
+          done
+          echo "LLVM binaries are available for all targets"
+          echo "::set-output name=llvm-binaries-are-available::1"
+
+  repackage:
+    name: Repackage clangd from the LLVM release
+    needs: check-for-new-llvm-release
+    if: needs.check-for-new-llvm-release.outputs.llvm-release-is-new == true && needs.check-for-new-llvm-release.outputs.llvm-binaries-are-available == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repackage clangd
+        run: |
+          # Get license from repository
+          LICENSE_DIRECTORY="${{ runner.temp }}"
+          LICENSE_FILENAME="LICENSE.TXT"
+          LICENSE_URL="https://raw.githubusercontent.com/llvm/llvm-project/${{ env.LLVM_TAG_PREFIX }}${{ needs.check-for-new-llvm-release.outputs.llvm-release-version }}/llvm/$LICENSE_FILENAME"
+          wget --server-response --content-on-error --quiet --directory-prefix="$LICENSE_DIRECTORY" "$LICENSE_URL"
+          STAGING_PATH="${{ runner.temp }}/llvm-staging"
+          mkdir -p "$STAGING_PATH"
+          cd "$STAGING_PATH"
+          eval "declare -A LLVM_PREBUILD_FILENAMES_ARRAY=${{ env.LLVM_PREBUILD_FILENAMES }}"
+          for target in "${!LLVM_PREBUILD_FILENAMES_ARRAY[@]}"; do
+            # Download LLVM pre-build
+            DOWNLOAD_FILENAME="${LLVM_PREBUILD_FILENAMES_ARRAY[$target]/${{ env.LLVM_PREBUILD_FILENAME_VERSION_TEMPLATE }}/${{ needs.check-for-new-llvm-release.outputs.llvm-release-version }}}"
+            LLVM_PREBUILD_URL="${{ env.LLVM_PREBUILD_DOWNLOAD_URL_PREFIX }}${{ env.LLVM_TAG_PREFIX }}${{ needs.check-for-new-llvm-release.outputs.llvm-release-version }}/$DOWNLOAD_FILENAME"
+            wget --server-response --content-on-error --quiet "$LLVM_PREBUILD_URL"
+            # Extract pre-build
+            if [[ "${DOWNLOAD_FILENAME##*.}" == "exe" ]]; then
+              7z x "$DOWNLOAD_FILENAME"
+            else
+              tar --strip-components=1 --extract --file="$DOWNLOAD_FILENAME"
+            fi
+            # Repackage clangd and dependencies
+            REPACKAGE_ARCHIVE_PATH="${{ github.workspace }}/${{ env.CLANGD_ARCHIVE_PREFIX }}${{ needs.check-for-new-llvm-release.outputs.llvm-release-version }}_${target}.zip"
+            7z a "$REPACKAGE_ARCHIVE_PATH" "${LICENSE_DIRECTORY}/${LICENSE_FILENAME}"
+            if [[ "$target" == "windows" ]]; then
+              # Put all files in the archive root
+              7z a "$REPACKAGE_ARCHIVE_PATH" "${STAGING_PATH}/bin/clangd.exe" "${STAGING_PATH}/bin/api-ms-win*.dll"
+            elif [[ "$target" == "macos" ]]; then
+              # In order to put the files in subfolders of the archive, it's necessary to specify relative paths
+              7z a "$REPACKAGE_ARCHIVE_PATH" "bin/clangd" "lib/libc++.*dylib"
+            else
+              # Linux
+              7z a "$REPACKAGE_ARCHIVE_PATH" "bin/clangd" "lib/libc++*.so*"
+            fi
+            rm -rf "$STAGING_PATH"/*
+          done
+
+      - name: Upload [S3]
+        # Using fork of action pending merge+release of https://github.com/shallwefootball/upload-s3-action/pull/17
+        uses: kittaakos/upload-s3-action@v0.0.1
+        with:
+          aws_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_bucket: arduino-downloads-prod-beagle
+          source_dir: ${{ github.workspace }}
+          destination_dir: ${{ env.CLANGD_SERVER_DIRECTORY }}
