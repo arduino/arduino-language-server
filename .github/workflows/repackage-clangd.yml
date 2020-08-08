@@ -9,6 +9,12 @@ on:
   push:
     paths:
       - .github/workflows/repackage-clangd.yml
+  workflow_dispatch:
+    inputs:
+      llvm-version:
+        description: LLVM version (x.y.z)
+        required: true
+        default: latest
 
 env:
   # The LLVM repository's tags use the form llvmorg-<VERSION>
@@ -52,9 +58,15 @@ jobs:
       - name: Determine version of the latest LLVM release
         id: get-llvm-release-version
         run: |
-          LLVM_TAG_NAME="${{ fromJson(steps.get-llvm-release-data.outputs.data).tag_name }}"
-          # Extract the version number substring from the tag name
-          LLVM_RELEASE_VERSION="${LLVM_TAG_NAME#${{ env.LLVM_TAG_PREFIX }}}"
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" || "${{ github.event.inputs.llvm-version }}" == "latest" ]]; then
+            LLVM_TAG_NAME="${{ fromJson(steps.get-llvm-release-data.outputs.data).tag_name }}"
+            # Extract the version number substring from the tag name
+            LLVM_RELEASE_VERSION="${LLVM_TAG_NAME#${{ env.LLVM_TAG_PREFIX }}}"
+            echo "Latest LLVM version: $LLVM_RELEASE_VERSION"
+          else
+            LLVM_RELEASE_VERSION="${{ github.event.inputs.llvm-version }}"
+            echo "Using selected LLVM version: $LLVM_RELEASE_VERSION"
+          fi
           echo "::set-output name=llvm-release-version::$LLVM_RELEASE_VERSION"
 
       - name: Check if clangd from the latest LLVM release already exists on the server
