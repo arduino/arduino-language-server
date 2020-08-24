@@ -50,17 +50,28 @@ jobs:
       - name: Upload Workflow Artifact [GitHub Actions]
         uses: actions/upload-artifact@v2
         with:
-          name: binary_${{ runner.OS }}
+          name: build-artifacts
           # this makes the artifact a .zip of the .zip archive, which is currently necessary to preserve the executable file permissions
           # see: https://github.com/actions/upload-artifact/issues/38
           path: ${{ env.BUILD_OUTPUT_DIRECTORY }}/archive/${{ env.EXECUTABLE_NAME }}_${{ runner.OS }}_amd64.zip
 
-      - name: Publish Nightly [S3]
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: kittaakos/upload-s3-action@v0.0.1
+  publish:
+    needs: build
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Workflow Artifact [GitHub Actions]
+        uses: actions/download-artifact@v2
         with:
-          aws_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_bucket: arduino-downloads-prod-beagle
-          source_dir: ${{ env.BUILD_OUTPUT_DIRECTORY }}/archive/${{ env.EXECUTABLE_NAME }}_${{ runner.OS }}_amd64.zip
-          destination_dir: arduino-language-server/nightly/
+          name: build-artifacts
+          path: build-artifacts
+
+      - name: Publish Nightly [S3]
+        uses: docker://plugins/s3
+        env:
+          PLUGIN_SOURCE: "build-artifacts/*"
+          PLUGIN_TARGET: "/arduino-language-server/nightly"
+          PLUGIN_STRIP_PREFIX: "build-artifacts/"
+          PLUGIN_BUCKET: ${{ secrets.DOWNLOADS_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
