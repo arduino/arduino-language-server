@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -11,6 +12,7 @@ import (
 )
 
 var clangdPath string
+var compileCommandsDir string
 var cliPath string
 var initialFqbn string
 var initialBoardName string
@@ -19,6 +21,7 @@ var loggingBasePath string
 
 func main() {
 	flag.StringVar(&clangdPath, "clangd", "clangd", "Path to clangd executable")
+	flag.StringVar(&compileCommandsDir, "compile-commands-dir", "", "Specify a path to look for compile_commands.json. If path is invalid, clangd will look in the current directory and parent paths of each source file. If not specified, the clangd process is started without the compilation database.")
 	flag.StringVar(&cliPath, "cli", "arduino-cli", "Path to arduino-cli executable")
 	flag.StringVar(&initialFqbn, "fqbn", "arduino:avr:uno", "Fully qualified board name to use initially (can be changed via JSON-RPC)")
 	flag.StringVar(&initialBoardName, "board-name", "", "User-friendly board name to use initially (can be changed via JSON-RPC)")
@@ -53,7 +56,12 @@ func startClangd() (clangdIn io.WriteCloser, clangdOut io.ReadCloser, clangdErr 
 	if enableLogging {
 		log.Println("Starting clangd process:", clangdPath)
 	}
-	clangdCmd := exec.Command(clangdPath)
+	var clangdCmd *exec.Cmd
+	if compileCommandsDir != "" {
+		clangdCmd = exec.Command(clangdPath)
+	} else {
+		clangdCmd = exec.Command(clangdPath, fmt.Sprintf(`--compile-commands-dir="%s"`, compileCommandsDir))
+	}
 	clangdIn, _ = clangdCmd.StdinPipe()
 	clangdOut, _ = clangdCmd.StdoutPipe()
 	clangdErr, _ = clangdCmd.StderrPipe()
