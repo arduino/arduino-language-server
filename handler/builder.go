@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/arduino/go-properties-orderedmap"
 	"github.com/pkg/errors"
 )
 
@@ -142,7 +143,7 @@ func generateCompileFlags(tempDir, inoPath, sourcePath, fqbn string) (string, er
 		err = logCommandErr(globalCliPath, output, err, errMsgFilter(tempDir))
 		return "", err
 	}
-	properties, err := readProperties(bytes.NewReader(output))
+	buildProps, err := properties.LoadFromBytes(output)
 	if err != nil {
 		return "", errors.Wrap(err, "Error while reading build properties.")
 	}
@@ -154,7 +155,7 @@ func generateCompileFlags(tempDir, inoPath, sourcePath, fqbn string) (string, er
 	defer outFile.Close()
 
 	printer := Printer{Writer: bufio.NewWriter(outFile)}
-	printCompileFlags(properties, &printer, fqbn)
+	printCompileFlags(buildProps, &printer, fqbn)
 	printLibraryPaths(sourcePath, &printer)
 	printer.Flush()
 	return flagsPath, printer.Err
@@ -214,40 +215,40 @@ func copyIno2Cpp(inoCode string, cppPath string) (cppCode []byte, err error) {
 	return
 }
 
-func printCompileFlags(properties map[string]string, printer *Printer, fqbn string) {
+func printCompileFlags(buildProps *properties.Map, printer *Printer, fqbn string) {
 	if strings.Contains(fqbn, ":avr:") {
 		printer.Println("--target=avr")
 	} else if strings.Contains(fqbn, ":sam:") {
 		printer.Println("--target=arm-none-eabi")
 	}
-	cppFlags := expandProperty(properties, "compiler.cpp.flags")
+	cppFlags := buildProps.ExpandPropsInString(buildProps.Get("compiler.cpp.flags"))
 	printer.Println(splitFlags(cppFlags))
-	mcu := expandProperty(properties, "build.mcu")
+	mcu := buildProps.ExpandPropsInString(buildProps.Get("build.mcu"))
 	if strings.Contains(fqbn, ":avr:") {
 		printer.Println("-mmcu=", mcu)
 	} else if strings.Contains(fqbn, ":sam:") {
 		printer.Println("-mcpu=", mcu)
 	}
-	fcpu := expandProperty(properties, "build.f_cpu")
+	fcpu := buildProps.ExpandPropsInString(buildProps.Get("build.f_cpu"))
 	printer.Println("-DF_CPU=", fcpu)
-	ideVersion := expandProperty(properties, "runtime.ide.version")
+	ideVersion := buildProps.ExpandPropsInString(buildProps.Get("runtime.ide.version"))
 	printer.Println("-DARDUINO=", ideVersion)
-	board := expandProperty(properties, "build.board")
+	board := buildProps.ExpandPropsInString(buildProps.Get("build.board"))
 	printer.Println("-DARDUINO_", board)
-	arch := expandProperty(properties, "build.arch")
+	arch := buildProps.ExpandPropsInString(buildProps.Get("build.arch"))
 	printer.Println("-DARDUINO_ARCH_", arch)
 	if strings.Contains(fqbn, ":sam:") {
-		libSamFlags := expandProperty(properties, "compiler.libsam.c.flags")
+		libSamFlags := buildProps.ExpandPropsInString(buildProps.Get("compiler.libsam.c.flags"))
 		printer.Println(splitFlags(libSamFlags))
 	}
-	extraFlags := expandProperty(properties, "build.extra_flags")
+	extraFlags := buildProps.ExpandPropsInString(buildProps.Get("build.extra_flags"))
 	printer.Println(splitFlags(extraFlags))
-	corePath := expandProperty(properties, "build.core.path")
+	corePath := buildProps.ExpandPropsInString(buildProps.Get("build.core.path"))
 	printer.Println("-I", corePath)
-	variantPath := expandProperty(properties, "build.variant.path")
+	variantPath := buildProps.ExpandPropsInString(buildProps.Get("build.variant.path"))
 	printer.Println("-I", variantPath)
 	if strings.Contains(fqbn, ":avr:") {
-		avrgccPath := expandProperty(properties, "runtime.tools.avr-gcc.path")
+		avrgccPath := buildProps.ExpandPropsInString(buildProps.Get("runtime.tools.avr-gcc.path"))
 		printer.Println("-I", filepath.Join(avrgccPath, "avr", "include"))
 	}
 
