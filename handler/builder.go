@@ -140,7 +140,7 @@ func generateCompileFlags(tempDir, inoPath, sourcePath, fqbn string) (string, er
 	propertiesCmd := exec.Command(globalCliPath, cliArgs...)
 	output, err := propertiesCmd.Output()
 	if err != nil {
-		err = logCommandErr(globalCliPath, output, err, errMsgFilter(tempDir))
+		err = logCommandErr(propertiesCmd, output, err, errMsgFilter(tempDir))
 		return "", err
 	}
 	buildProps, err := properties.LoadFromBytes(output)
@@ -171,7 +171,7 @@ func generateTargetFile(tempDir, inoPath, cppPath, fqbn string) (cppCode []byte,
 	preprocessCmd := exec.Command(globalCliPath, cliArgs...)
 	cppCode, err = preprocessCmd.Output()
 	if err != nil {
-		err = logCommandErr(globalCliPath, cppCode, err, errMsgFilter(tempDir))
+		err = logCommandErr(preprocessCmd, cppCode, err, errMsgFilter(tempDir))
 		return
 	}
 
@@ -331,9 +331,9 @@ func splitFlags(flags string) string {
 	return string(result)
 }
 
-func logCommandErr(command string, stdout []byte, err error, filter func(string) string) error {
+func logCommandErr(command *exec.Cmd, stdout []byte, err error, filter func(string) string) error {
 	message := ""
-	log.Println("Command error:", command, err)
+	log.Println("Command error:", command.Args, err)
 	if len(stdout) > 0 {
 		stdoutStr := string(stdout)
 		log.Println("------------------------------BEGIN STDOUT\n", stdoutStr, "------------------------------END STDOUT")
