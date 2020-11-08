@@ -7,8 +7,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/bcmi-labs/arduino-language-server/handler"
+	"github.com/bcmi-labs/arduino-language-server/streams"
 )
 
 var clangdPath string
@@ -29,27 +31,51 @@ func main() {
 	flag.StringVar(&loggingBasePath, "logpath", ".", "Location where to write logging files to when logging is enabled")
 	flag.Parse()
 
-	// var stdinLog, stdoutLog, clangdinLog, clangdoutLog, clangderrLog io.Writer
-	var logStreams *handler.StreamLogger
 	if enableLogging {
-		var err error
-		logStreams, err = handler.NewStreamLogger(loggingBasePath)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer logStreams.Close()
-
-		log.SetOutput(logStreams.Default)
+		logfile := openLogFile("inols-err.log")
+		defer logfile.Close()
+		log.SetOutput(logfile)
 	} else {
-		logStreams = handler.NewNoopLogger()
 		log.SetOutput(os.Stderr)
 	}
 
 	handler.Setup(cliPath, enableLogging, true)
 	initialBoard := handler.Board{Fqbn: initialFqbn, Name: initialBoardName}
-	inoHandler := handler.NewInoHandler(os.Stdin, os.Stdout, logStreams, startClangd, initialBoard)
+
+	clangdStdout, clangdStdin, clangdStderr := startClangd()
+	clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
+	if enableLogging {
+		logfile := openLogFile("inols-clangd.log")
+		defer logfile.Close()
+		clangdStdio = streams.LogReadWriteCloserToFile(clangdStdio, logfile)
+
+		errLogfile := openLogFile("inols-clangd-err.log")
+		defer errLogfile.Close()
+		go io.Copy(errLogfile, clangdStderr)
+	}
+
+	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
+	if enableLogging {
+		logfile := openLogFile("inols.log")
+		defer logfile.Close()
+		stdio = streams.LogReadWriteCloserToFile(stdio, logfile)
+	}
+
+	inoHandler := handler.NewInoHandler(stdio, clangdStdio, initialBoard)
 	defer inoHandler.StopClangd()
 	<-inoHandler.StdioConn.DisconnectNotify()
+}
+
+func openLogFile(name string) *os.File {
+	path := filepath.Join(loggingBasePath, name)
+	logfile, err := os.Create(path)
+	if err != nil {
+		log.Fatalf("Error opening log file: %s", err)
+	} else {
+		abs, _ := filepath.Abs(path)
+		log.Println("logging to " + abs)
+	}
+	return logfile
 }
 
 func startClangd() (clangdIn io.WriteCloser, clangdOut io.ReadCloser, clangdErr io.ReadCloser) {

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"regexp"
@@ -33,19 +32,19 @@ func Setup(cliPath string, _enableLogging bool, _asyncProcessing bool) {
 type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser)
 
 // NewInoHandler creates and configures an InoHandler.
-func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, logStreams *StreamLogger, startClangd CLangdStarter, board Board) *InoHandler {
+func NewInoHandler(stdio io.ReadWriteCloser, clangdStdio io.ReadWriteCloser, board Board) *InoHandler {
 	handler := &InoHandler{
-		clangdProc: ClangdProc{
-			Start: startClangd,
-			Logs:  logStreams,
-		},
 		data: make(map[lsp.DocumentURI]*FileData),
 		config: BoardConfig{
 			SelectedBoard: board,
 		},
 	}
-	handler.startClangd()
-	stdStream := jsonrpc2.NewBufferedStream(logStreams.AttachStdInOut(stdin, stdout), jsonrpc2.VSCodeObjectCodec{})
+
+	clangdStream := jsonrpc2.NewBufferedStream(clangdStdio, jsonrpc2.VSCodeObjectCodec{})
+	clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
+	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
+
+	stdStream := jsonrpc2.NewBufferedStream(stdio, jsonrpc2.VSCodeObjectCodec{})
 	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.FromStdio)
 	if asyncProcessing {
 		stdHandler = AsyncHandler{
@@ -64,16 +63,9 @@ func NewInoHandler(stdin io.ReadCloser, stdout io.WriteCloser, logStreams *Strea
 type InoHandler struct {
 	StdioConn    *jsonrpc2.Conn
 	ClangdConn   *jsonrpc2.Conn
-	clangdProc   ClangdProc
 	data         map[lsp.DocumentURI]*FileData
 	config       BoardConfig
 	synchronizer Synchronizer
-}
-
-// ClangdProc contains the process input / output streams for clangd.
-type ClangdProc struct {
-	Start func() (io.WriteCloser, io.ReadCloser, io.ReadCloser)
-	Logs  *StreamLogger
 }
 
 // FileData gathers information on a .ino source file.
@@ -84,20 +76,6 @@ type FileData struct {
 	sourceLineMap map[int]int
 	targetLineMap map[int]int
 	version       int
-}
-
-// StartClangd starts the clangd process and connects its input / output streams.
-func (handler *InoHandler) startClangd() {
-	clangdWrite, clangdRead, clangdErr := handler.clangdProc.Start()
-	if enableLogging {
-		go io.Copy(handler.clangdProc.Logs.ClangdErr, clangdErr)
-	} else {
-		go io.Copy(ioutil.Discard, clangdErr)
-	}
-	srw := handler.clangdProc.Logs.AttachClangdInOut(clangdRead, clangdWrite)
-	clangdStream := jsonrpc2.NewBufferedStream(srw, jsonrpc2.VSCodeObjectCodec{})
-	clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
-	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
 }
 
 // StopClangd closes the connection to the clangd process.
