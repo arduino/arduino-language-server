@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bcmi-labs/arduino-language-server/handler/sourcemapper"
+	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
 	"github.com/pkg/errors"
 	lsp "github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
@@ -70,12 +72,11 @@ type InoHandler struct {
 
 // FileData gathers information on a .ino source file.
 type FileData struct {
-	sourceText    string
-	sourceURI     lsp.DocumentURI
-	targetURI     lsp.DocumentURI
-	sourceLineMap map[int]int
-	targetLineMap map[int]int
-	version       int
+	sourceText string
+	sourceURI  lsp.DocumentURI
+	targetURI  lsp.DocumentURI
+	sourceMap  *sourcemapper.InoMapper
+	version    int
 }
 
 // StopClangd closes the connection to the clangd process.
@@ -240,13 +241,11 @@ func (handler *InoHandler) createFileData(ctx context.Context, sourceURI lsp.Doc
 	}
 
 	targetURI := pathToURI(targetPath)
-	sourceLineMap, targetLineMap := createSourceMaps(bytes.NewReader(targetBytes))
 	data := &FileData{
 		sourceText,
 		sourceURI,
 		targetURI,
-		sourceLineMap,
-		targetLineMap,
+		sourcemapper.CreateInoMapper(bytes.NewReader(targetBytes)),
 		version,
 	}
 	handler.data[sourceURI] = data
@@ -262,7 +261,7 @@ func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, c
 		if rang == nil {
 			newSourceText = change.Text
 		} else {
-			newSourceText, err = applyTextChange(data.sourceText, *rang, change.Text)
+			newSourceText, err = textutils.ApplyTextChange(data.sourceText, *rang, change.Text)
 			if err != nil {
 				return err
 			}
@@ -277,35 +276,28 @@ func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, c
 				}
 			} else {
 				// Fallback: try to apply a multi-line update
-				targetStartLine := data.targetLineMap[rang.Start.Line]
-				targetEndLine := data.targetLineMap[rang.End.Line]
 				data.sourceText = newSourceText
-				updateSourceMaps(data.sourceLineMap, data.targetLineMap, rang.End.Line-rang.Start.Line, rang.Start.Line, change.Text)
-				rang.Start.Line = targetStartLine
-				rang.End.Line = targetEndLine
+				data.sourceMap.Update(rang.End.Line-rang.Start.Line, rang.Start.Line, change.Text)
+				*rang = data.sourceMap.InoToCppRange(*rang)
 				return nil
 			}
 		}
 
-		sourceLineMap, targetLineMap := createSourceMaps(bytes.NewReader(targetBytes))
 		data.sourceText = newSourceText
-		data.sourceLineMap = sourceLineMap
-		data.targetLineMap = targetLineMap
+		data.sourceMap = sourcemapper.CreateInoMapper(bytes.NewReader(targetBytes))
 
 		change.Text = string(targetBytes)
 		change.Range = nil
 		change.RangeLength = 0
 	} else {
 		// Apply an update to a single line both to the source and the target text
-		targetLine := data.targetLineMap[rang.Start.Line]
-		data.sourceText, err = applyTextChange(data.sourceText, *rang, change.Text)
+		data.sourceText, err = textutils.ApplyTextChange(data.sourceText, *rang, change.Text)
 		if err != nil {
 			return err
 		}
-		updateSourceMaps(data.sourceLineMap, data.targetLineMap, 0, rang.Start.Line, change.Text)
+		data.sourceMap.Update(0, rang.Start.Line, change.Text)
 
-		rang.Start.Line = targetLine
-		rang.End.Line = targetLine
+		*rang = data.sourceMap.InoToCppRange(*rang)
 	}
 	return nil
 }
@@ -391,7 +383,7 @@ func (handler *InoHandler) ino2cppDidChangeTextDocumentParams(ctx context.Contex
 func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDocumentPositionParams) error {
 	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		targetLine := data.targetLineMap[params.Position.Line]
+		targetLine := data.sourceMap.InoToCppLine(params.Position.Line)
 		params.Position.Line = targetLine
 		return nil
 	}
@@ -401,12 +393,10 @@ func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDoc
 func (handler *InoHandler) ino2cppCodeActionParams(params *lsp.CodeActionParams) error {
 	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		params.Range.Start.Line = data.targetLineMap[params.Range.Start.Line]
-		params.Range.End.Line = data.targetLineMap[params.Range.End.Line]
+		params.Range = data.sourceMap.InoToCppRange(params.Range)
 		for index := range params.Context.Diagnostics {
 			r := &params.Context.Diagnostics[index].Range
-			r.Start.Line = data.targetLineMap[r.Start.Line]
-			r.End.Line = data.targetLineMap[r.End.Line]
+			*r = data.sourceMap.InoToCppRange(*r)
 		}
 		return nil
 	}
@@ -416,8 +406,7 @@ func (handler *InoHandler) ino2cppCodeActionParams(params *lsp.CodeActionParams)
 func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.DocumentRangeFormattingParams) error {
 	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		params.Range.Start.Line = data.targetLineMap[params.Range.Start.Line]
-		params.Range.End.Line = data.targetLineMap[params.Range.End.Line]
+		params.Range = data.sourceMap.InoToCppRange(params.Range)
 		return nil
 	}
 	return unknownURI(params.TextDocument.URI)
@@ -426,7 +415,7 @@ func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.Docu
 func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
 	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		params.Position.Line = data.targetLineMap[params.Position.Line]
+		params.Position.Line = data.sourceMap.InoToCppLine(params.Position.Line)
 		return nil
 	}
 	return unknownURI(params.TextDocument.URI)
@@ -435,7 +424,7 @@ func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.Doc
 func (handler *InoHandler) ino2cppRenameParams(params *lsp.RenameParams) error {
 	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		params.Position.Line = data.targetLineMap[params.Position.Line]
+		params.Position.Line = data.sourceMap.InoToCppLine(params.Position.Line)
 		return nil
 	}
 	return unknownURI(params.TextDocument.URI)
@@ -467,13 +456,9 @@ func (handler *InoHandler) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *ls
 		if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
 			newValue := make([]lsp.TextEdit, len(edit))
 			for index := range edit {
-				r := edit[index].Range
 				newValue[index] = lsp.TextEdit{
 					NewText: edit[index].NewText,
-					Range: lsp.Range{
-						Start: lsp.Position{Line: data.targetLineMap[r.Start.Line], Character: r.Start.Character},
-						End:   lsp.Position{Line: data.targetLineMap[r.End.Line], Character: r.End.Character},
-					},
+					Range:   data.sourceMap.InoToCppRange(edit[index].Range),
 				}
 			}
 			newEdit.Changes[string(data.targetURI)] = newValue
@@ -577,9 +562,7 @@ func (handler *InoHandler) cpp2inoCompletionList(list *lsp.CompletionList, uri l
 		for _, item := range list.Items {
 			if !strings.HasPrefix(item.InsertText, "_") {
 				if item.TextEdit != nil {
-					r := &item.TextEdit.Range
-					r.Start.Line = data.sourceLineMap[r.Start.Line]
-					r.End.Line = data.sourceLineMap[r.End.Line]
+					item.TextEdit.Range = data.sourceMap.CppToInoRange(item.TextEdit.Range)
 				}
 				newItems = append(newItems, item)
 			}
@@ -592,9 +575,7 @@ func (handler *InoHandler) cpp2inoCodeAction(codeAction *CodeAction, uri lsp.Doc
 	codeAction.Edit = handler.cpp2inoWorkspaceEdit(codeAction.Edit)
 	if data, ok := handler.data[uri]; ok {
 		for index := range codeAction.Diagnostics {
-			r := &codeAction.Diagnostics[index].Range
-			r.Start.Line = data.sourceLineMap[r.Start.Line]
-			r.End.Line = data.sourceLineMap[r.End.Line]
+			codeAction.Diagnostics[index].Range = data.sourceMap.CppToInoRange(codeAction.Diagnostics[index].Range)
 		}
 	}
 }
@@ -614,13 +595,9 @@ func (handler *InoHandler) cpp2inoWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *ls
 		if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
 			newValue := make([]lsp.TextEdit, len(edit))
 			for index := range edit {
-				r := edit[index].Range
 				newValue[index] = lsp.TextEdit{
 					NewText: edit[index].NewText,
-					Range: lsp.Range{
-						Start: lsp.Position{Line: data.sourceLineMap[r.Start.Line], Character: r.Start.Character},
-						End:   lsp.Position{Line: data.sourceLineMap[r.End.Line], Character: r.End.Character},
-					},
+					Range:   data.sourceMap.CppToInoRange(edit[index].Range),
 				}
 			}
 			newEdit.Changes[string(data.sourceURI)] = newValue
@@ -635,8 +612,7 @@ func (handler *InoHandler) cpp2inoHover(hover *Hover, uri lsp.DocumentURI) {
 	if data, ok := handler.data[uri]; ok {
 		r := hover.Range
 		if r != nil {
-			r.Start.Line = data.sourceLineMap[r.Start.Line]
-			r.End.Line = data.sourceLineMap[r.End.Line]
+			*r = data.sourceMap.CppToInoRange(*r)
 		}
 	}
 }
@@ -644,22 +620,19 @@ func (handler *InoHandler) cpp2inoHover(hover *Hover, uri lsp.DocumentURI) {
 func (handler *InoHandler) cpp2inoLocation(location *lsp.Location) {
 	if data, ok := handler.data[location.URI]; ok {
 		location.URI = data.sourceURI
-		location.Range.Start.Line = data.sourceLineMap[location.Range.Start.Line]
-		location.Range.End.Line = data.sourceLineMap[location.Range.End.Line]
+		location.Range = data.sourceMap.CppToInoRange(location.Range)
 	}
 }
 
 func (handler *InoHandler) cpp2inoDocumentHighlight(highlight *lsp.DocumentHighlight, uri lsp.DocumentURI) {
 	if data, ok := handler.data[uri]; ok {
-		highlight.Range.Start.Line = data.sourceLineMap[highlight.Range.Start.Line]
-		highlight.Range.End.Line = data.sourceLineMap[highlight.Range.End.Line]
+		highlight.Range = data.sourceMap.CppToInoRange(highlight.Range)
 	}
 }
 
 func (handler *InoHandler) cpp2inoTextEdit(edit *lsp.TextEdit, uri lsp.DocumentURI) {
 	if data, ok := handler.data[uri]; ok {
-		edit.Range.Start.Line = data.sourceLineMap[edit.Range.Start.Line]
-		edit.Range.End.Line = data.sourceLineMap[edit.Range.End.Line]
+		edit.Range = data.sourceMap.CppToInoRange(edit.Range)
 	}
 }
 
@@ -672,8 +645,7 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []DocumentSymbol, 
 	symbolIdx := make(map[string]*DocumentSymbol)
 	for i := 0; i < len(origSymbols); i++ {
 		symbol := &origSymbols[i]
-		symbol.Range.Start.Line = data.sourceLineMap[symbol.Range.Start.Line]
-		symbol.Range.End.Line = data.sourceLineMap[symbol.Range.End.Line]
+		symbol.Range = data.sourceMap.CppToInoRange(symbol.Range)
 
 		duplicate := false
 		other, duplicate := symbolIdx[symbol.Name]
@@ -686,8 +658,7 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []DocumentSymbol, 
 			}
 		}
 
-		symbol.SelectionRange.Start.Line = data.sourceLineMap[symbol.SelectionRange.Start.Line]
-		symbol.SelectionRange.End.Line = data.sourceLineMap[symbol.SelectionRange.End.Line]
+		symbol.SelectionRange = data.sourceMap.CppToInoRange(symbol.SelectionRange)
 		symbol.Children = handler.cpp2inoDocumentSymbols(symbol.Children, uri)
 		symbolIdx[symbol.Name] = symbol
 	}
@@ -776,9 +747,9 @@ func (handler *InoHandler) cpp2inoPublishDiagnosticsParams(params *lsp.PublishDi
 		newDiagnostics := make([]lsp.Diagnostic, 0, len(params.Diagnostics))
 		for index := range params.Diagnostics {
 			r := &params.Diagnostics[index].Range
-			if startLine, ok := data.sourceLineMap[r.Start.Line]; ok {
+			if startLine, ok := data.sourceMap.CppToInoLineOk(r.Start.Line); ok {
 				r.Start.Line = startLine
-				r.End.Line = data.sourceLineMap[r.End.Line]
+				r.End.Line = data.sourceMap.CppToInoLine(r.End.Line)
 				newDiagnostics = append(newDiagnostics, params.Diagnostics[index])
 			}
 		}
