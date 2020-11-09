@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 
 	"github.com/bcmi-labs/arduino-language-server/handler"
 	"github.com/bcmi-labs/arduino-language-server/streams"
@@ -33,7 +34,13 @@ func main() {
 
 	if enableLogging {
 		logfile := openLogFile("inols-err.log")
-		defer logfile.Close()
+		defer func() {
+			// In case of panic output the stack trace in the log file before exiting
+			if r := recover(); r != nil {
+				log.Println(string(debug.Stack()))
+			}
+			logfile.Close()
+		}()
 		log.SetOutput(logfile)
 	} else {
 		log.SetOutput(os.Stderr)
