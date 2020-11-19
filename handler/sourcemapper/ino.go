@@ -3,6 +3,10 @@ package sourcemapper
 import (
 	"bufio"
 	"io"
+	"net/url"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -11,136 +15,163 @@ import (
 
 // InoMapper is a mapping between the .ino sketch and the preprocessed .cpp file
 type InoMapper struct {
-	toCpp map[int]int
-	toIno map[int]int
+	InoText map[lsp.DocumentURI]*SourceRevision
+	CppText *SourceRevision
+	CppFile lsp.DocumentURI
+	toCpp   map[InoLine]int // Converts File.ino:line -> line
+	toIno   map[int]InoLine // Convers line -> File.ino:line
+}
+
+type SourceRevision struct {
+	Version int
+	Text    string
+}
+
+// InoLine is a line number into an .ino file
+type InoLine struct {
+	File string
+	Line int
 }
 
 // InoToCppLine converts a source (.ino) line into a target (.cpp) line
-func (s *InoMapper) InoToCppLine(sourceLine int) int {
-	return s.toCpp[sourceLine]
+func (s *InoMapper) InoToCppLine(sourceURI lsp.DocumentURI, line int) int {
+	file := uriToPath(sourceURI)
+	return s.toCpp[InoLine{file, line}]
 }
 
-// InoToCppRange converts a source (.ino) lsp.Range into a target (.cpp) lsp.Range
-func (s *InoMapper) InoToCppRange(r lsp.Range) lsp.Range {
-	r.Start.Line = s.InoToCppLine(r.Start.Line)
-	r.End.Line = s.InoToCppLine(r.End.Line)
-	return r
+func (s *InoMapper) InoToCppLSPRange(sourceURI lsp.DocumentURI, r lsp.Range) lsp.Range {
+	res := r
+	res.Start.Line = s.InoToCppLine(sourceURI, r.Start.Line)
+	res.End.Line = s.InoToCppLine(sourceURI, r.End.Line)
+	return res
 }
 
-// CppToInoLine converts a target (.cpp) line into a source (.ino) line
-func (s *InoMapper) CppToInoLine(targetLine int) int {
-	return s.toIno[targetLine]
+// CppToInoLine converts a target (.cpp) line into a source.ino:line
+func (s *InoMapper) CppToInoLine(targetLine int) (string, int) {
+	res := s.toIno[targetLine]
+	return res.File, res.Line
 }
 
-// CppToInoRange converts a target (.cpp) lsp.Range into a source (.ino) lsp.Range
-func (s *InoMapper) CppToInoRange(r lsp.Range) lsp.Range {
-	r.Start.Line = s.CppToInoLine(r.Start.Line)
-	r.End.Line = s.CppToInoLine(r.End.Line)
-	return r
+// CppToInoRange converts a target (.cpp) lsp.Range into a source.ino:lsp.Range
+func (s *InoMapper) CppToInoRange(r lsp.Range) (string, lsp.Range) {
+	startFile, startLine := s.CppToInoLine(r.Start.Line)
+	endFile, endLine := s.CppToInoLine(r.End.Line)
+	res := r
+	res.Start.Line = startLine
+	res.End.Line = endLine
+	if startFile != endFile {
+		panic("invalid range conversion")
+	}
+	return startFile, res
 }
 
 // CppToInoLineOk converts a target (.cpp) line into a source (.ino) line and
 // returns true if the conversion is successful
-func (s *InoMapper) CppToInoLineOk(targetLine int) (int, bool) {
+func (s *InoMapper) CppToInoLineOk(targetLine int) (string, int, bool) {
 	res, ok := s.toIno[targetLine]
-	return res, ok
+	return res.File, res.Line, ok
 }
 
 // CreateInoMapper create a InoMapper from the given target file
 func CreateInoMapper(targetFile io.Reader) *InoMapper {
+	mapper := &InoMapper{
+		toCpp: map[InoLine]int{},
+		toIno: map[int]InoLine{},
+	}
+
+	sourceFile := ""
 	sourceLine := -1
 	targetLine := 0
-	sourceLineMap := make(map[int]int)
-	targetLineMap := make(map[int]int)
 	scanner := bufio.NewScanner(targetFile)
 	for scanner.Scan() {
 		lineStr := scanner.Text()
 		if strings.HasPrefix(lineStr, "#line") {
-			nrEnd := strings.Index(lineStr[6:], " ")
-			var l int
-			var err error
-			if nrEnd > 0 {
-				l, err = strconv.Atoi(lineStr[6 : nrEnd+6])
-			} else {
-				l, err = strconv.Atoi(lineStr[6:])
-			}
+			tokens := strings.SplitN(lineStr, " ", 3)
+			l, err := strconv.Atoi(tokens[1])
 			if err == nil && l > 0 {
 				sourceLine = l - 1
 			}
-		} else if sourceLine >= 0 {
-			sourceLineMap[targetLine] = sourceLine
-			targetLineMap[sourceLine] = targetLine
+			sourceFile = unquoteCppString(tokens[2])
+		} else if sourceFile != "" {
+			mapper.toCpp[InoLine{sourceFile, sourceLine}] = targetLine
+			mapper.toIno[targetLine] = InoLine{sourceFile, sourceLine}
 			sourceLine++
 		}
 		targetLine++
 	}
-	sourceLineMap[targetLine] = sourceLine
-	targetLineMap[sourceLine] = targetLine
-	return &InoMapper{
-		toIno: sourceLineMap,
-		toCpp: targetLineMap,
+	mapper.toCpp[InoLine{sourceFile, sourceLine}] = targetLine
+	mapper.toIno[targetLine] = InoLine{sourceFile, sourceLine}
+	return mapper
+}
+
+func unquoteCppString(str string) string {
+	if len(str) >= 2 && strings.HasPrefix(str, `"`) && strings.HasSuffix(str, `"`) {
+		str = strings.TrimSuffix(str, `"`)[1:]
 	}
+	str = strings.Replace(str, "\\\"", "\"", -1)
+	str = strings.Replace(str, "\\\\", "\\", -1)
+	return str
 }
 
 // Update performs an update to the SourceMap considering the deleted lines, the
 // insertion line and the inserted text
 func (s *InoMapper) Update(deletedLines, insertLine int, insertText string) {
-	for i := 1; i <= deletedLines; i++ {
-		sourceLine := insertLine + 1
-		targetLine := s.toCpp[sourceLine]
+	// for i := 1; i <= deletedLines; i++ {
+	// 	sourceLine := insertLine + 1
+	// 	targetLine := s.toCpp[sourceLine]
 
-		// Shift up all following lines by one and put them into a new map
-		newMappings := make(map[int]int)
-		maxSourceLine, maxTargetLine := 0, 0
-		for t, s := range s.toIno {
-			if t > targetLine && s > sourceLine {
-				newMappings[t-1] = s - 1
-			} else if s > sourceLine {
-				newMappings[t] = s - 1
-			} else if t > targetLine {
-				newMappings[t-1] = s
-			}
-			if s > maxSourceLine {
-				maxSourceLine = s
-			}
-			if t > maxTargetLine {
-				maxTargetLine = t
-			}
-		}
+	// 	// Shift up all following lines by one and put them into a new map
+	// 	newMappings := make(map[int]int)
+	// 	maxSourceLine, maxTargetLine := 0, 0
+	// 	for t, s := range s.toIno {
+	// 		if t > targetLine && s > sourceLine {
+	// 			newMappings[t-1] = s - 1
+	// 		} else if s > sourceLine {
+	// 			newMappings[t] = s - 1
+	// 		} else if t > targetLine {
+	// 			newMappings[t-1] = s
+	// 		}
+	// 		if s > maxSourceLine {
+	// 			maxSourceLine = s
+	// 		}
+	// 		if t > maxTargetLine {
+	// 			maxTargetLine = t
+	// 		}
+	// 	}
 
-		// Remove mappings for the deleted line
-		delete(s.toIno, maxTargetLine)
-		delete(s.toCpp, maxSourceLine)
+	// 	// Remove mappings for the deleted line
+	// 	delete(s.toIno, maxTargetLine)
+	// 	delete(s.toCpp, maxSourceLine)
 
-		// Copy the mappings from the intermediate map
-		copyMappings(s.toIno, s.toCpp, newMappings)
-	}
+	// 	// Copy the mappings from the intermediate map
+	// 	copyMappings(s.toIno, s.toCpp, newMappings)
+	// }
 
-	addedLines := strings.Count(insertText, "\n")
-	if addedLines > 0 {
-		targetLine := s.toCpp[insertLine]
+	// addedLines := strings.Count(insertText, "\n")
+	// if addedLines > 0 {
+	// 	targetLine := s.toCpp[insertLine]
 
-		// Shift down all following lines and put them into a new map
-		newMappings := make(map[int]int)
-		for t, s := range s.toIno {
-			if t > targetLine && s > insertLine {
-				newMappings[t+addedLines] = s + addedLines
-			} else if s > insertLine {
-				newMappings[t] = s + addedLines
-			} else if t > targetLine {
-				newMappings[t+addedLines] = s
-			}
-		}
+	// 	// Shift down all following lines and put them into a new map
+	// 	newMappings := make(map[int]int)
+	// 	for t, s := range s.toIno {
+	// 		if t > targetLine && s > insertLine {
+	// 			newMappings[t+addedLines] = s + addedLines
+	// 		} else if s > insertLine {
+	// 			newMappings[t] = s + addedLines
+	// 		} else if t > targetLine {
+	// 			newMappings[t+addedLines] = s
+	// 		}
+	// 	}
 
-		// Add mappings for the added lines
-		for i := 1; i <= addedLines; i++ {
-			s.toIno[targetLine+i] = insertLine + i
-			s.toCpp[insertLine+i] = targetLine + i
-		}
+	// 	// Add mappings for the added lines
+	// 	for i := 1; i <= addedLines; i++ {
+	// 		s.toIno[targetLine+i] = insertLine + i
+	// 		s.toCpp[insertLine+i] = targetLine + i
+	// 	}
 
-		// Copy the mappings from the intermediate map
-		copyMappings(s.toIno, s.toCpp, newMappings)
-	}
+	// 	// Copy the mappings from the intermediate map
+	// 	copyMappings(s.toIno, s.toCpp, newMappings)
+	// }
 }
 
 func copyMappings(sourceLineMap, targetLineMap, newMappings map[int]int) {
@@ -154,4 +185,27 @@ func copyMappings(sourceLineMap, targetLineMap, newMappings map[int]int) {
 			targetLineMap[s] = t
 		}
 	}
+}
+
+var expDriveID = regexp.MustCompile("[a-zA-Z]:")
+
+func uriToPath(uri lsp.DocumentURI) string {
+	urlObj, err := url.Parse(string(uri))
+	if err != nil {
+		return string(uri)
+	}
+	path := ""
+	segments := strings.Split(urlObj.Path, "/")
+	for _, segment := range segments {
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			decoded = segment
+		}
+		if runtime.GOOS == "windows" && expDriveID.MatchString(decoded) {
+			path += strings.ToUpper(decoded)
+		} else if len(decoded) > 0 {
+			path += string(filepath.Separator) + decoded
+		}
+	}
+	return path
 }
