@@ -59,6 +59,8 @@ func main() {
 		errLogfile := openLogFile("inols-clangd-err.log")
 		defer errLogfile.Close()
 		go io.Copy(errLogfile, clangdStderr)
+	} else {
+		go io.Copy(os.Stderr, clangdStderr)
 	}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
