@@ -151,75 +151,60 @@ func (handler *InoHandler) transformParamsToClangd(ctx context.Context, method s
 		defer handler.synchronizer.DataMux.RUnlock()
 	}
 
-	switch method {
-	case "textDocument/didOpen":
-		p := params.(*lsp.DidOpenTextDocumentParams)
+	switch p := params.(type) {
+	case *lsp.DidOpenTextDocumentParams: // "textDocument/didOpen":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentItem(ctx, &p.TextDocument)
-	case "textDocument/didChange":
-		p := params.(*lsp.DidChangeTextDocumentParams)
+	case *lsp.DidChangeTextDocumentParams: // "textDocument/didChange":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDidChangeTextDocumentParams(ctx, p)
-	case "textDocument/didSave":
-		p := params.(*lsp.DidSaveTextDocumentParams)
+	case *lsp.DidSaveTextDocumentParams: // "textDocument/didSave":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
-	case "textDocument/didClose":
-		p := params.(*lsp.DidCloseTextDocumentParams)
+	case *lsp.DidCloseTextDocumentParams: // "textDocument/didClose":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
 		handler.deleteFileData(uri)
-	case "textDocument/completion":
-		p := params.(*lsp.CompletionParams)
+	case *lsp.CompletionParams: // "textDocument/completion":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
-	case "textDocument/codeAction":
-		p := params.(*lsp.CodeActionParams)
+	case *lsp.CodeActionParams: // "textDocument/codeAction":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppCodeActionParams(p)
-	case "textDocument/signatureHelp":
-		fallthrough
-	case "textDocument/hover":
-		fallthrough
-	case "textDocument/definition":
-		fallthrough
-	case "textDocument/typeDefinition":
-		fallthrough
-	case "textDocument/implementation":
-		fallthrough
-	case "textDocument/documentHighlight":
-		p := params.(*lsp.TextDocumentPositionParams)
+	// case "textDocument/signatureHelp":
+	// 	fallthrough
+	// case "textDocument/hover":
+	// 	fallthrough
+	// case "textDocument/definition":
+	// 	fallthrough
+	// case "textDocument/typeDefinition":
+	// 	fallthrough
+	// case "textDocument/implementation":
+	// 	fallthrough
+	case *lsp.TextDocumentPositionParams: // "textDocument/documentHighlight":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(p)
-	case "textDocument/references":
-		p := params.(*lsp.ReferenceParams)
+	case *lsp.ReferenceParams: // "textDocument/references":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
-	case "textDocument/formatting":
-		p := params.(*lsp.DocumentFormattingParams)
+	case *lsp.DocumentFormattingParams: // "textDocument/formatting":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
-	case "textDocument/rangeFormatting":
-		p := params.(*lsp.DocumentRangeFormattingParams)
+	case *lsp.DocumentRangeFormattingParams: // "textDocument/rangeFormatting":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDocumentRangeFormattingParams(p)
-	case "textDocument/onTypeFormatting":
-		p := params.(*lsp.DocumentOnTypeFormattingParams)
+	case *lsp.DocumentOnTypeFormattingParams: // "textDocument/onTypeFormatting":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDocumentOnTypeFormattingParams(p)
-	case "textDocument/documentSymbol":
-		p := params.(*lsp.DocumentSymbolParams)
+	case *lsp.DocumentSymbolParams: // "textDocument/documentSymbol":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
-	case "textDocument/rename":
-		p := params.(*lsp.RenameParams)
+	case *lsp.RenameParams: // "textDocument/rename":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppRenameParams(p)
-	case "workspace/didChangeWatchedFiles":
-		p := params.(*lsp.DidChangeWatchedFilesParams)
+	case *lsp.DidChangeWatchedFilesParams: // "workspace/didChangeWatchedFiles":
 		err = handler.ino2cppDidChangeWatchedFilesParams(p)
-	case "workspace/executeCommand":
-		p := params.(*lsp.ExecuteCommandParams)
+	case *lsp.ExecuteCommandParams: // "workspace/executeCommand":
 		err = handler.ino2cppExecuteCommand(p)
 	}
 	return
@@ -473,12 +458,10 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	handler.synchronizer.DataMux.RLock()
 	defer handler.synchronizer.DataMux.RUnlock()
 
-	switch method {
-	case "textDocument/completion":
-		r := result.(*lsp.CompletionList)
+	switch r := result.(type) {
+	case *lsp.CompletionList: // "textDocument/completion":
 		handler.cpp2inoCompletionList(r, uri)
-	case "textDocument/codeAction":
-		r := result.(*[]*commandOrCodeAction)
+	case *[]*commandOrCodeAction: // "textDocument/codeAction":
 		for index := range *r {
 			command := (*r)[index].Command
 			if command != nil {
@@ -489,41 +472,35 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 				handler.cpp2inoCodeAction(codeAction, uri)
 			}
 		}
-	case "textDocument/hover":
-		r := result.(*Hover)
+	case *Hover: // "textDocument/hover":
 		if len(r.Contents.Value) == 0 {
 			return nil
 		}
 		handler.cpp2inoHover(r, uri)
-	case "textDocument/definition":
-		fallthrough
-	case "textDocument/typeDefinition":
-		fallthrough
-	case "textDocument/implementation":
-		fallthrough
-	case "textDocument/references":
-		r := result.(*[]lsp.Location)
+	// case "textDocument/definition":
+	// 	fallthrough
+	// case "textDocument/typeDefinition":
+	// 	fallthrough
+	// case "textDocument/implementation":
+	// 	fallthrough
+	case *[]lsp.Location: // "textDocument/references":
 		for index := range *r {
 			handler.cpp2inoLocation(&(*r)[index])
 		}
-	case "textDocument/documentHighlight":
-		r := result.(*[]lsp.DocumentHighlight)
+	case *[]lsp.DocumentHighlight: // "textDocument/documentHighlight":
 		for index := range *r {
 			handler.cpp2inoDocumentHighlight(&(*r)[index], uri)
 		}
-	case "textDocument/formatting":
-		fallthrough
-	case "textDocument/rangeFormatting":
-		fallthrough
-	case "textDocument/onTypeFormatting":
-		r := result.(*[]lsp.TextEdit)
+	// case "textDocument/formatting":
+	// 	fallthrough
+	// case "textDocument/rangeFormatting":
+	// 	fallthrough
+	case *[]lsp.TextEdit: // "textDocument/onTypeFormatting":
 		for index := range *r {
 			handler.cpp2inoTextEdit(&(*r)[index], uri)
 		}
-	case "textDocument/documentSymbol":
-		r, ok := result.(*[]*documentSymbolOrSymbolInformation)
-
-		if !ok || len(*r) == 0 {
+	case *[]*documentSymbolOrSymbolInformation: // "textDocument/documentSymbol":
+		if len(*r) == 0 {
 			return result
 		}
 
@@ -544,11 +521,9 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 			}
 			return handler.cpp2inoSymbolInformation(symbols)
 		}
-	case "textDocument/rename":
-		r := result.(*lsp.WorkspaceEdit)
+	case *lsp.WorkspaceEdit: // "textDocument/rename":
 		return handler.cpp2inoWorkspaceEdit(r)
-	case "workspace/symbol":
-		r := result.(*[]lsp.SymbolInformation)
+	case *[]lsp.SymbolInformation: // "workspace/symbol":
 		for index := range *r {
 			handler.cpp2inoLocation(&(*r)[index].Location)
 		}
