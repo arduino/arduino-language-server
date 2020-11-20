@@ -27,26 +27,22 @@ type AsyncHandler struct {
 func (ah AsyncHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
 	needsWriteLock := req.Method == "textDocument/didOpen" || req.Method == "textDocument/didChange"
 	if needsWriteLock {
-		ah.synchronizer.FileMux.Lock()
-		if enableLogging {
-			log.Println("Message processing locked for", req.Method)
-		}
-		go ah.runWrite(ctx, conn, req)
+		go func() {
+			ah.synchronizer.FileMux.Lock()
+			defer ah.synchronizer.FileMux.Unlock()
+			if enableLogging {
+				log.Println("Message processing locked for", req.Method)
+			}
+			ah.handler.Handle(ctx, conn, req)
+			if enableLogging {
+				log.Println("Message processing unlocked for", req.Method)
+			}
+		}()
 	} else {
-		ah.synchronizer.FileMux.RLock()
-		go ah.runRead(ctx, conn, req)
-	}
-}
-
-func (ah AsyncHandler) runRead(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
-	defer ah.synchronizer.FileMux.RUnlock()
-	ah.handler.Handle(ctx, conn, req)
-}
-
-func (ah AsyncHandler) runWrite(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
-	defer ah.synchronizer.FileMux.Unlock()
-	ah.handler.Handle(ctx, conn, req)
-	if enableLogging {
-		log.Println("Message processing unlocked for", req.Method)
+		go func() {
+			ah.synchronizer.FileMux.RLock()
+			ah.handler.Handle(ctx, conn, req)
+			ah.synchronizer.FileMux.RUnlock()
+		}()
 	}
 }
