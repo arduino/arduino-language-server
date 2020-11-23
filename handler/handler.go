@@ -12,20 +12,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arduino/arduino-cli/arduino/builder"
+	"github.com/arduino/arduino-cli/executils"
+	"github.com/arduino/go-paths-helper"
 	"github.com/bcmi-labs/arduino-language-server/handler/sourcemapper"
 	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
+	"github.com/bcmi-labs/arduino-language-server/streams"
 	"github.com/pkg/errors"
 	lsp "github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
 var globalCliPath string
+var globalClangdPath string
 var enableLogging bool
 var asyncProcessing bool
 
 // Setup initializes global variables.
-func Setup(cliPath string, _enableLogging bool, _asyncProcessing bool) {
+func Setup(cliPath string, clangdPath string, _enableLogging bool, _asyncProcessing bool) {
 	globalCliPath = cliPath
+	globalClangdPath = clangdPath
 	enableLogging = _enableLogging
 	asyncProcessing = _asyncProcessing
 }
@@ -34,20 +40,17 @@ func Setup(cliPath string, _enableLogging bool, _asyncProcessing bool) {
 type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser)
 
 // NewInoHandler creates and configures an InoHandler.
-func NewInoHandler(stdio io.ReadWriteCloser, clangdStdio io.ReadWriteCloser, board Board) *InoHandler {
+func NewInoHandler(stdio io.ReadWriteCloser, board Board) *InoHandler {
 	handler := &InoHandler{
-		data: make(map[lsp.DocumentURI]*FileData),
+		data:         map[lsp.DocumentURI]*FileData{},
+		trackedFiles: map[lsp.DocumentURI]lsp.TextDocumentItem{},
 		config: BoardConfig{
 			SelectedBoard: board,
 		},
 	}
 
-	clangdStream := jsonrpc2.NewBufferedStream(clangdStdio, jsonrpc2.VSCodeObjectCodec{})
-	clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
-	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
-
 	stdStream := jsonrpc2.NewBufferedStream(stdio, jsonrpc2.VSCodeObjectCodec{})
-	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.FromStdio)
+	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.HandleMessageFromIDE)
 	if asyncProcessing {
 		stdHandler = AsyncHandler{
 			handler:      stdHandler,
@@ -63,8 +66,17 @@ func NewInoHandler(stdio io.ReadWriteCloser, clangdStdio io.ReadWriteCloser, boa
 
 // InoHandler is a JSON-RPC handler that delegates messages to clangd.
 type InoHandler struct {
-	StdioConn    *jsonrpc2.Conn
-	ClangdConn   *jsonrpc2.Conn
+	StdioConn               *jsonrpc2.Conn
+	ClangdConn              *jsonrpc2.Conn
+	buildPath               *paths.Path
+	buildSketchRoot         *paths.Path
+	buildSketchCpp          *paths.Path
+	sketchRoot              *paths.Path
+	sketchName              string
+	sketchMapper            *sourcemapper.InoMapper
+	sketchTrackedFilesCount int
+	trackedFiles            map[lsp.DocumentURI]lsp.TextDocumentItem
+
 	data         map[lsp.DocumentURI]*FileData
 	config       BoardConfig
 	synchronizer Synchronizer
@@ -85,76 +97,49 @@ func (handler *InoHandler) StopClangd() {
 	handler.ClangdConn = nil
 }
 
-// FromStdio handles a message received from the client (via stdio).
-func (handler *InoHandler) FromStdio(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (result interface{}, err error) {
-	params, err := readParams(req.Method, req.Params)
-	if err != nil {
-		return
+// HandleMessageFromIDE handles a message received from the IDE client (via stdio).
+func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
+	needsWriteLock := map[string]bool{
+		"textDocument/didOpen":   true,
+		"textDocument/didChange": true,
+		"textDocument/didClose":  true,
+	}
+	if needsWriteLock[req.Method] {
+		// handler.synchronizer.DataMux.Lock()
+		// defer handler.synchronizer.DataMux.Unlock()
+	} else {
+		// handler.synchronizer.DataMux.RLock()
+		// defer handler.synchronizer.DataMux.RUnlock()
 	}
 
 	// Handle LSP methods: transform parameters and send to clangd
 	var uri lsp.DocumentURI
+
+	params, err := readParams(req.Method, req.Params)
+	if err != nil {
+		return nil, err
+	}
 	if params == nil {
 		params = req.Params
-	} else {
-		uri, err = handler.transformParamsToClangd(ctx, req.Method, params)
 	}
-	if err != nil {
-		return
-	}
-	if req.Notif {
-		err = handler.ClangdConn.Notify(ctx, req.Method, params)
-		if enableLogging {
-			log.Println("From stdio:", req.Method)
-		}
-	} else {
-		ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
-		defer cancel()
-		result, err = sendRequest(ctx, handler.ClangdConn, req.Method, params)
-		if enableLogging {
-			log.Println("From stdio:", req.Method, "id", req.ID)
-		}
-	}
-	if err != nil {
-		// Exit the process and trigger a restart by the client in case of a severe error
-		if err.Error() == "context deadline exceeded" {
-			log.Println("Timeout exceeded while waiting for a reply from clangd.")
-			handler.exit()
-		}
-		if strings.Contains(err.Error(), "non-added document") || strings.Contains(err.Error(), "non-added file") {
-			log.Println("The clangd process has lost track of the open document.")
-			handler.exit()
-		}
-		return
-	}
-
-	// Transform and return the result
-	if result != nil {
-		result = handler.transformClangdResult(req.Method, uri, result)
-	}
-	return
-}
-
-func (handler *InoHandler) exit() {
-	log.Println("Please restart the language server.")
-	handler.StopClangd()
-	os.Exit(1)
-}
-
-func (handler *InoHandler) transformParamsToClangd(ctx context.Context, method string, params interface{}) (uri lsp.DocumentURI, err error) {
-	needsWriteLock := method == "textDocument/didOpen" || method == "textDocument/didChange" || method == "textDocument/didClose"
-	if needsWriteLock {
-		handler.synchronizer.DataMux.Lock()
-		defer handler.synchronizer.DataMux.Unlock()
-	} else {
-		handler.synchronizer.DataMux.RLock()
-		defer handler.synchronizer.DataMux.RUnlock()
-	}
-
 	switch p := params.(type) {
-	case *lsp.DidOpenTextDocumentParams: // "textDocument/didOpen":
+	case *lsp.InitializeParams:
+		// method "initialize"
+		handler.synchronizer.DataMux.RLock()
+		err = handler.initializeWorkbench(ctx, p)
+		handler.synchronizer.DataMux.RUnlock()
+
+	case *lsp.DidOpenTextDocumentParams:
+		// method "textDocument/didOpen":
 		uri = p.TextDocument.URI
-		err = handler.ino2cppTextDocumentItem(ctx, &p.TextDocument)
+		handler.synchronizer.DataMux.Lock()
+		res, err := handler.didOpen(ctx, p)
+		handler.synchronizer.DataMux.Unlock()
+		if res == nil {
+			log.Println("    notification is not propagated to clangd")
+			return nil, err // do not propagate to clangd
+		}
+		params = res
 	case *lsp.DidChangeTextDocumentParams: // "textDocument/didChange":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDidChangeTextDocumentParams(ctx, p)
@@ -207,29 +192,165 @@ func (handler *InoHandler) transformParamsToClangd(ctx context.Context, method s
 	case *lsp.ExecuteCommandParams: // "workspace/executeCommand":
 		err = handler.ino2cppExecuteCommand(p)
 	}
-	return
+	if err != nil {
+		return nil, err
+	}
+
+	var result interface{}
+	if req.Notif {
+		err = handler.ClangdConn.Notify(ctx, req.Method, params)
+		if enableLogging {
+			log.Println("    sent", req.Method, "notification to clangd")
+		}
+	} else {
+		ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+		defer cancel()
+		result, err = sendRequest(ctx, handler.ClangdConn, req.Method, params)
+		if enableLogging {
+			log.Println("    sent", req.Method, "request id", req.ID, " to clangd")
+		}
+	}
+	if err != nil {
+		// Exit the process and trigger a restart by the client in case of a severe error
+		if err.Error() == "context deadline exceeded" {
+			log.Println("Timeout exceeded while waiting for a reply from clangd.")
+			handler.exit()
+		}
+		if strings.Contains(err.Error(), "non-added document") || strings.Contains(err.Error(), "non-added file") {
+			log.Println("The clangd process has lost track of the open document.")
+			handler.exit()
+		}
+	}
+
+	// Transform and return the result
+	if result != nil {
+		result = handler.transformClangdResult(req.Method, uri, result)
+	}
+	return result, err
 }
 
-func (handler *InoHandler) createFileData(ctx context.Context, inoSourceURI lsp.DocumentURI, sourceText string, version int) (*FileData, []byte, error) {
-	log.Println("InoHandler: createFileData(", inoSourceURI, sourceText, version)
-	sourcePath := uriToPath(inoSourceURI)
-	targetPath, targetBytes, err := generateCpp([]byte(sourceText), sourcePath, handler.config.SelectedBoard.Fqbn)
-	if err != nil {
-		err = handler.handleError(ctx, err)
-		return nil, nil, err
+func (handler *InoHandler) exit() {
+	log.Println("Please restart the language server.")
+	handler.StopClangd()
+	os.Exit(1)
+}
+
+func newPathFromURI(uri lsp.DocumentURI) *paths.Path {
+	return paths.New(uriToPath(uri))
+}
+
+func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.InitializeParams) error {
+	rootURI := params.RootURI
+	log.Printf("--> initializeWorkbench(%s)\n", rootURI)
+
+	handler.sketchRoot = newPathFromURI(rootURI)
+	handler.sketchName = handler.sketchRoot.Base()
+	if buildPath, err := generateBuildEnvironment(handler.sketchRoot, handler.config.SelectedBoard.Fqbn); err == nil {
+		handler.buildPath = buildPath
+		handler.buildSketchRoot = buildPath.Join("sketch")
+	} else {
+		return err
+	}
+	handler.buildSketchCpp = handler.buildSketchRoot.Join(handler.sketchName + ".ino.cpp")
+
+	if cppContent, err := handler.buildSketchCpp.ReadFile(); err == nil {
+		handler.sketchMapper = sourcemapper.CreateInoMapper(bytes.NewReader(cppContent))
+	} else {
+		return errors.WithMessage(err, "reading generated cpp file from sketch")
 	}
 
-	targetURI := pathToURI(targetPath)
-	data := &FileData{
-		sourceText,
-		inoSourceURI,
-		targetURI,
-		sourcemapper.CreateInoMapper(bytes.NewReader(targetBytes)),
-		version,
+	clangdStdout, clangdStdin, clangdStderr := startClangd(handler.buildPath, handler.buildSketchCpp)
+	clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
+	if enableLogging {
+		clangdStdio = streams.LogReadWriteCloserAs(clangdStdio, "inols-clangd.log")
+		go io.Copy(streams.OpenLogFileAs("inols-clangd-err.log"), clangdStderr)
+	} else {
+		go io.Copy(os.Stderr, clangdStderr)
 	}
-	handler.data[inoSourceURI] = data
-	handler.data[targetURI] = data
-	return data, targetBytes, nil
+
+	clangdStream := jsonrpc2.NewBufferedStream(clangdStdio, jsonrpc2.VSCodeObjectCodec{})
+	clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
+	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
+
+	params.RootPath = handler.buildSketchRoot.String()
+	params.RootURI = pathToURI(handler.buildSketchRoot.String())
+	return nil
+}
+
+func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.ReadCloser, io.ReadCloser) {
+	// Open compile_commands.json and find the main cross-compiler executable
+	compileCommands, err := builder.LoadCompilationDatabase(compileCommandsDir.Join("compile_commands.json"))
+	if err != nil {
+		panic("could not find compile_commands.json")
+	}
+	compiler := ""
+	for _, cmd := range compileCommands.Contents {
+		// Accepts only `arguments` fields for now
+		if !sketchCpp.EquivalentTo(paths.New(cmd.File)) {
+			continue
+		}
+		if len(cmd.Arguments) == 0 {
+			panic("invalid empty argument field in compile_commands.json")
+		}
+		compiler = cmd.Arguments[0]
+		break
+	}
+	if compiler == "" {
+		panic("main compiler not found")
+	}
+
+	// Start clangd
+	args := []string{
+		globalClangdPath,
+		"-log=verbose",
+		fmt.Sprintf("-query-driver=%s", compiler),
+		fmt.Sprintf(`--compile-commands-dir=%s`, compileCommandsDir),
+	}
+	if enableLogging {
+		log.Println("    Starting clangd:", strings.Join(args, " "))
+	}
+	if clangdCmd, err := executils.NewProcess(args...); err != nil {
+		panic("starting clangd: " + err.Error())
+	} else if clangdIn, err := clangdCmd.StdinPipe(); err != nil {
+		panic("getting clangd stdin: " + err.Error())
+	} else if clangdOut, err := clangdCmd.StdoutPipe(); err != nil {
+		panic("getting clangd stdout: " + err.Error())
+	} else if clangdErr, err := clangdCmd.StderrPipe(); err != nil {
+		panic("getting clangd stderr: " + err.Error())
+	} else if err := clangdCmd.Start(); err != nil {
+		panic("running clangd: " + err.Error())
+	} else {
+		return clangdIn, clangdOut, clangdErr
+	}
+}
+
+func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
+	// Add the TextDocumentItem in the tracked files list
+	doc := params.TextDocument
+	handler.trackedFiles[doc.URI] = doc
+	log.Printf("--> didOpen(%s)", doc.URI)
+
+	// If we are tracking a .ino...
+	if newPathFromURI(doc.URI).Ext() == ".ino" {
+		handler.sketchTrackedFilesCount++
+		log.Printf("    increasing .ino tracked files count: %d", handler.sketchTrackedFilesCount)
+
+		// ...notify clang that sketchCpp is no longer valid on disk
+		if handler.sketchTrackedFilesCount == 1 {
+			sketchCpp, err := handler.buildSketchCpp.ReadFile()
+			newParam := &lsp.DidOpenTextDocumentParams{
+				TextDocument: lsp.TextDocumentItem{
+					URI:        pathToURI(handler.buildSketchCpp.String()),
+					Text:       string(sketchCpp),
+					LanguageID: "cpp",
+					Version:    1,
+				},
+			}
+			log.Printf("    message for clangd: didOpen(%s)", newParam.TextDocument.URI)
+			return newParam, err
+		}
+	}
+	return nil, nil
 }
 
 func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, change *lsp.TextDocumentContentChangeEvent) (err error) {
@@ -329,19 +450,6 @@ func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc *lsp.TextDocumentId
 		return nil
 	}
 	return unknownURI(doc.URI)
-}
-
-func (handler *InoHandler) ino2cppTextDocumentItem(ctx context.Context, doc *lsp.TextDocumentItem) error {
-	if strings.HasSuffix(string(doc.URI), ".ino") {
-		data, targetBytes, err := handler.createFileData(ctx, doc.URI, doc.Text, doc.Version)
-		if err != nil {
-			return err
-		}
-		doc.LanguageID = "cpp"
-		doc.URI = data.targetURI
-		doc.Text = string(targetBytes)
-	}
-	return nil
 }
 
 func (handler *InoHandler) ino2cppDidChangeTextDocumentParams(ctx context.Context, params *lsp.DidChangeTextDocumentParams) error {

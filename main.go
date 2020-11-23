@@ -2,14 +2,12 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime/debug"
 
+	"github.com/arduino/go-paths-helper"
 	"github.com/bcmi-labs/arduino-language-server/handler"
 	"github.com/bcmi-labs/arduino-language-server/streams"
 )
@@ -32,8 +30,14 @@ func main() {
 	flag.StringVar(&loggingBasePath, "logpath", ".", "Location where to write logging files to when logging is enabled")
 	flag.Parse()
 
+	if loggingBasePath != "" {
+		streams.GlobalLogDirectory = paths.New(loggingBasePath)
+	} else if enableLogging {
+		log.Fatalf("Please specify logpath")
+	}
+
 	if enableLogging {
-		logfile := openLogFile("inols-err.log")
+		logfile := streams.OpenLogFileAs("inols-err.log")
 		defer func() {
 			// In case of panic output the stack trace in the log file before exiting
 			if r := recover(); r != nil {
@@ -41,69 +45,21 @@ func main() {
 			}
 			logfile.Close()
 		}()
-		log.SetOutput(logfile)
+		log.SetOutput(io.MultiWriter(logfile, os.Stderr))
+		// log.SetOutput(logfile)
 	} else {
 		log.SetOutput(os.Stderr)
 	}
 
-	handler.Setup(cliPath, enableLogging, true)
+	handler.Setup(cliPath, clangdPath, enableLogging, true)
 	initialBoard := handler.Board{Fqbn: initialFqbn, Name: initialBoardName}
-
-	clangdStdout, clangdStdin, clangdStderr := startClangd()
-	clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
-	if enableLogging {
-		logfile := openLogFile("inols-clangd.log")
-		defer logfile.Close()
-		clangdStdio = streams.LogReadWriteCloserToFile(clangdStdio, logfile)
-
-		errLogfile := openLogFile("inols-clangd-err.log")
-		defer errLogfile.Close()
-		go io.Copy(errLogfile, clangdStderr)
-	} else {
-		go io.Copy(os.Stderr, clangdStderr)
-	}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
 	if enableLogging {
-		logfile := openLogFile("inols.log")
-		defer logfile.Close()
-		stdio = streams.LogReadWriteCloserToFile(stdio, logfile)
+		stdio = streams.LogReadWriteCloserAs(stdio, "inols.log")
 	}
 
-	inoHandler := handler.NewInoHandler(stdio, clangdStdio, initialBoard)
+	inoHandler := handler.NewInoHandler(stdio, initialBoard)
 	defer inoHandler.StopClangd()
 	<-inoHandler.StdioConn.DisconnectNotify()
-}
-
-func openLogFile(name string) *os.File {
-	path := filepath.Join(loggingBasePath, name)
-	logfile, err := os.Create(path)
-	if err != nil {
-		log.Fatalf("Error opening log file: %s", err)
-	} else {
-		abs, _ := filepath.Abs(path)
-		log.Println("logging to " + abs)
-	}
-	return logfile
-}
-
-func startClangd() (clangdIn io.WriteCloser, clangdOut io.ReadCloser, clangdErr io.ReadCloser) {
-	if enableLogging {
-		log.Println("Starting clangd process:", clangdPath)
-	}
-	var clangdCmd *exec.Cmd
-	if compileCommandsDir != "" {
-		clangdCmd = exec.Command(clangdPath)
-	} else {
-		clangdCmd = exec.Command(clangdPath, fmt.Sprintf(`--compile-commands-dir="%s"`, compileCommandsDir))
-	}
-	clangdIn, _ = clangdCmd.StdinPipe()
-	clangdOut, _ = clangdCmd.StdoutPipe()
-	clangdErr, _ = clangdCmd.StderrPipe()
-
-	err := clangdCmd.Start()
-	if err != nil {
-		panic(err)
-	}
-	return
 }

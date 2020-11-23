@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/arduino/go-paths-helper"
 	"github.com/pkg/errors"
 	lsp "github.com/sourcegraph/go-lsp"
 )
@@ -32,6 +33,10 @@ func uriToPath(uri lsp.DocumentURI) string {
 		}
 	}
 	return path
+}
+
+func ToURI(path *paths.Path) lsp.DocumentURI {
+	return pathToURI(path.String())
 }
 
 func pathToURI(path string) lsp.DocumentURI {

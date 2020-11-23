@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"io/ioutil"
 	"log"
 	"os"
@@ -10,181 +11,95 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/arduino/arduino-cli/arduino/libraries"
+	"github.com/arduino/arduino-cli/executils"
+	"github.com/arduino/go-paths-helper"
 	"github.com/arduino/go-properties-orderedmap"
 	"github.com/pkg/errors"
 )
 
-func generateCpp(inoCode []byte, sourcePath, fqbn string) (cppPath string, cppCode []byte, err error) {
-	// The CLI expects the `theSketchName.ino` file to be in `some/path/theSketchName` folder.
-	// Expected folder structure: `/path/to/temp/ino2cpp-${random}/theSketchName/theSketchName.ino`.
-	rawRootTempDir, err := ioutil.TempDir("", "ino2cpp-")
-	if err != nil {
-		err = errors.Wrap(err, "Error while creating temporary directory.")
-		return
-	}
-	rootTempDir, err := filepath.EvalSymlinks(rawRootTempDir)
-	if err != nil {
-		err = errors.Wrap(err, "Error while resolving symbolic links of temporary directory.")
-		return
-	}
-
-	sketchName := filepath.Base(sourcePath)
-	if strings.HasSuffix(sketchName, ".ino") {
-		sketchName = sketchName[:len(sketchName)-len(".ino")]
-	}
-	sketchTempPath := filepath.Join(rootTempDir, sketchName)
-	createDirIfNotExist(sketchTempPath)
-
-	// Write source file to temp dir
-	sketchFileName := sketchName + ".ino"
-	inoPath := filepath.Join(sketchTempPath, sketchFileName)
-	err = ioutil.WriteFile(inoPath, inoCode, 0600)
-	if err != nil {
-		err = errors.Wrap(err, "Error while writing source file to temporary directory.")
-		return
-	}
-	if enableLogging {
-		log.Println("Source file written to", inoPath)
-	}
-
-	// Copy all header files to temp dir
-	err = copyHeaderFiles(filepath.Dir(sourcePath), rootTempDir)
-	if err != nil {
-		return
-	}
-
-	// Generate compile_flags.txt
-	cppPath = filepath.Join(sketchTempPath, sketchFileName+".cpp")
-	flagsPath, err := generateCompileFlags(sketchTempPath, inoPath, sourcePath, fqbn)
-	if err != nil {
-		return
-	}
-	if enableLogging {
-		log.Println("Compile flags written to", flagsPath)
-	}
-
-	// Generate target file
-	cppCode, err = generateTargetFile(sketchTempPath, inoPath, cppPath, fqbn)
-	return
-}
-
-func createDirIfNotExist(dir string) {
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		err = os.MkdirAll(dir, os.ModePerm)
-		if err != nil {
-			panic(err)
-		}
-	}
-}
-
-func copyHeaderFiles(sourceDir string, destDir string) error {
-	fileInfos, err := ioutil.ReadDir(sourceDir)
-	if err != nil {
-		return err
-	}
-	for _, fileInfo := range fileInfos {
-		if !fileInfo.IsDir() && strings.HasSuffix(fileInfo.Name(), ".h") {
-			input, err := ioutil.ReadFile(filepath.Join(sourceDir, fileInfo.Name()))
-			if err != nil {
-				return err
-			}
-
-			err = ioutil.WriteFile(filepath.Join(destDir, fileInfo.Name()), input, 0644)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
+// func generateCpp(sourcePath, fqbn string) (*paths.Path, []byte, error) {
+// 	// Generate target file
+// 	if cppPath, err := generateBuildEnvironment(paths.New(sourcePath), fqbn); err != nil {
+// 		return nil, nil, err
+// 	} else if cppCode, err := cppPath.ReadFile(); err != nil {
+// 		return nil, nil, err
+// 	} else {
+// 		return cppPath, cppCode, err
+// 	}
+// }
 
 func updateCpp(inoCode []byte, sourcePath, fqbn string, fqbnChanged bool, cppPath string) (cppCode []byte, err error) {
-	tempDir := filepath.Dir(cppPath)
-	inoPath := strings.TrimSuffix(cppPath, ".cpp")
-	if inoCode != nil {
-		// Write source file to temp dir
-		err = ioutil.WriteFile(inoPath, inoCode, 0600)
-		if err != nil {
-			err = errors.Wrap(err, "Error while writing source file to temporary directory.")
-			return
-		}
-		if enableLogging {
-			log.Println("Source file written to", inoPath)
-		}
-	}
+	// 	tempDir := filepath.Dir(cppPath)
+	// 	inoPath := strings.TrimSuffix(cppPath, ".cpp")
+	// 	if inoCode != nil {
+	// 		// Write source file to temp dir
+	// 		err = ioutil.WriteFile(inoPath, inoCode, 0600)
+	// 		if err != nil {
+	// 			err = errors.Wrap(err, "Error while writing source file to temporary directory.")
+	// 			return
+	// 		}
+	// 		if enableLogging {
+	// 			log.Println("Source file written to", inoPath)
+	// 		}
+	// 	}
 
-	if fqbnChanged {
-		// Generate compile_flags.txt
-		var flagsPath string
-		flagsPath, err = generateCompileFlags(tempDir, inoPath, sourcePath, fqbn)
-		if err != nil {
-			return
-		}
-		if enableLogging {
-			log.Println("Compile flags written to", flagsPath)
-		}
-	}
+	// 	if fqbnChanged {
+	// 		// Generate compile_flags.txt
+	// 		var flagsPath string
+	// 		flagsPath, err = generateCompileFlags(tempDir, inoPath, sourcePath, fqbn)
+	// 		if err != nil {
+	// 			return
+	// 		}
+	// 		if enableLogging {
+	// 			log.Println("Compile flags written to", flagsPath)
+	// 		}
+	// 	}
 
-	// Generate target file
-	cppCode, err = generateTargetFile(tempDir, inoPath, cppPath, fqbn)
+	// 	// Generate target file
+	// 	cppCode, err = generateTargetFile(tempDir, inoPath, cppPath, fqbn)
 	return
 }
 
-func generateCompileFlags(tempDir, inoPath, sourcePath, fqbn string) (string, error) {
-	var cliArgs []string
-	if len(fqbn) > 0 {
-		cliArgs = []string{"compile", "--fqbn", fqbn, "--show-properties", inoPath}
-	} else {
-		cliArgs = []string{"compile", "--show-properties", inoPath}
+func generateBuildEnvironment(sketchDir *paths.Path, fqbn string) (*paths.Path, error) {
+	// XXX: do this from IDE or via gRPC
+	args := []string{globalCliPath,
+		"compile",
+		"--fqbn", fqbn,
+		"--only-compilation-database",
+		"--clean",
+		"--format", "json",
+		sketchDir.String(),
 	}
-	propertiesCmd := exec.Command(globalCliPath, cliArgs...)
-	output, err := propertiesCmd.Output()
+	cmd, err := executils.NewProcess(args...)
 	if err != nil {
-		err = logCommandErr(propertiesCmd, output, err, errMsgFilter(tempDir))
-		return "", err
+		return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 	}
-	buildProps, err := properties.LoadFromBytes(output)
-	if err != nil {
-		return "", errors.Wrap(err, "Error while reading build properties.")
-	}
-	flagsPath := filepath.Join(tempDir, "compile_flags.txt")
-	outFile, err := os.OpenFile(flagsPath, os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		return flagsPath, errors.Wrap(err, "Error while creating output file for compile flags.")
-	}
-	defer outFile.Close()
-
-	printer := Printer{Writer: bufio.NewWriter(outFile)}
-	printCompileFlags(buildProps, &printer, fqbn)
-	printLibraryPaths(sourcePath, &printer)
-	printer.Flush()
-	return flagsPath, printer.Err
-}
-
-func generateTargetFile(tempDir, inoPath, cppPath, fqbn string) (cppCode []byte, err error) {
-	var cliArgs []string
-	if len(fqbn) > 0 {
-		cliArgs = []string{"compile", "--fqbn", fqbn, "--preprocess", inoPath}
-	} else {
-		cliArgs = []string{"compile", "--preprocess", inoPath}
-	}
-	preprocessCmd := exec.Command(globalCliPath, cliArgs...)
-	cppCode, err = preprocessCmd.Output()
-	if err != nil {
-		err = logCommandErr(preprocessCmd, cppCode, err, errMsgFilter(tempDir))
-		return
+	cmdOutput := &bytes.Buffer{}
+	cmd.RedirectStdoutTo(cmdOutput)
+	cmd.SetDirFromPath(sketchDir)
+	log.Println("running: ", strings.Join(args, " "))
+	if err := cmd.Run(); err != nil {
+		return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 	}
 
-	// Filter lines beginning with ERROR or WARNING
-	cppCode = []byte(filterErrorsAndWarnings(cppCode))
-
-	err = ioutil.WriteFile(cppPath, cppCode, 0600)
-	if err != nil {
-		err = errors.Wrap(err, "Error while writing target file to temporary directory.")
-	} else if enableLogging {
-		log.Println("Target file written to", cppPath)
+	type cmdBuilderRes struct {
+		BuildPath     *paths.Path `json:"build_path"`
+		UsedLibraries []*libraries.Library
 	}
-	return
+	type cmdRes struct {
+		CompilerOut   string        `json:"compiler_out"`
+		CompilerErr   string        `json:"compiler_err"`
+		BuilderResult cmdBuilderRes `json:"builder_result"`
+	}
+	var res cmdRes
+	if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
+		return nil, errors.Errorf("parsing arduino-cli output: %s", err)
+	}
+
+	// Return only the build path
+	log.Println("arduino-cli output:", cmdOutput)
+	return res.BuilderResult.BuildPath, nil
 }
 
 func filterErrorsAndWarnings(cppCode []byte) string {
