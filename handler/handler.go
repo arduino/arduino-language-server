@@ -283,19 +283,14 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.
 	if err != nil {
 		panic("could not find compile_commands.json")
 	}
-	compiler := ""
+	compilers := map[string]bool{}
 	for _, cmd := range compileCommands.Contents {
-		// Accepts only `arguments` fields for now
-		if !sketchCpp.EquivalentTo(paths.New(cmd.File)) {
-			continue
-		}
 		if len(cmd.Arguments) == 0 {
 			panic("invalid empty argument field in compile_commands.json")
 		}
-		compiler = cmd.Arguments[0]
-		break
+		compilers[cmd.Arguments[0]] = true
 	}
-	if compiler == "" {
+	if len(compilers) == 0 {
 		panic("main compiler not found")
 	}
 
@@ -303,8 +298,10 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.
 	args := []string{
 		globalClangdPath,
 		"-log=verbose",
-		fmt.Sprintf("-query-driver=%s", compiler),
 		fmt.Sprintf(`--compile-commands-dir=%s`, compileCommandsDir),
+	}
+	for compiler := range compilers {
+		args = append(args, fmt.Sprintf("-query-driver=%s", compiler))
 	}
 	if enableLogging {
 		log.Println("    Starting clangd:", strings.Join(args, " "))
