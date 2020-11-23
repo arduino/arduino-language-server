@@ -39,6 +39,13 @@ func (s *InoMapper) InoToCppLine(sourceURI lsp.DocumentURI, line int) int {
 	return s.toCpp[InoLine{file, line}]
 }
 
+// InoToCppLineOk converts a source (.ino) line into a target (.cpp) line
+func (s *InoMapper) InoToCppLineOk(sourceURI lsp.DocumentURI, line int) (int, bool) {
+	file := uriToPath(sourceURI)
+	res, ok := s.toCpp[InoLine{file, line}]
+	return res, ok
+}
+
 func (s *InoMapper) InoToCppLSPRange(sourceURI lsp.DocumentURI, r lsp.Range) lsp.Range {
 	res := r
 	res.Start.Line = s.InoToCppLine(sourceURI, r.Start.Line)

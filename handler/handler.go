@@ -140,19 +140,24 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			return nil, err // do not propagate to clangd
 		}
 		params = res
+
+	case *lsp.CompletionParams: // "textDocument/completion":
+		uri = p.TextDocument.URI
+		log.Printf("--> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
+
+		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
+		log.Printf("    --> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
+
 	case *lsp.DidChangeTextDocumentParams: // "textDocument/didChange":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDidChangeTextDocumentParams(ctx, p)
 	case *lsp.DidSaveTextDocumentParams: // "textDocument/didSave":
 		uri = p.TextDocument.URI
-		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
+		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.DidCloseTextDocumentParams: // "textDocument/didClose":
 		uri = p.TextDocument.URI
-		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
+		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 		handler.deleteFileData(uri)
-	case *lsp.CompletionParams: // "textDocument/completion":
-		uri = p.TextDocument.URI
-		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
 	case *lsp.CodeActionParams: // "textDocument/codeAction":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppCodeActionParams(p)
@@ -174,7 +179,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
 	case *lsp.DocumentFormattingParams: // "textDocument/formatting":
 		uri = p.TextDocument.URI
-		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
+		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.DocumentRangeFormattingParams: // "textDocument/rangeFormatting":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDocumentRangeFormattingParams(p)
@@ -183,7 +188,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ino2cppDocumentOnTypeFormattingParams(p)
 	case *lsp.DocumentSymbolParams: // "textDocument/documentSymbol":
 		uri = p.TextDocument.URI
-		err = handler.ino2cppTextDocumentIdentifier(&p.TextDocument)
+		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.RenameParams: // "textDocument/rename":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppRenameParams(p)
@@ -193,6 +198,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ino2cppExecuteCommand(p)
 	}
 	if err != nil {
+		log.Printf("    ~~~ %s", err)
 		return nil, err
 	}
 
@@ -441,16 +447,36 @@ func (handler *InoHandler) handleError(ctx context.Context, err error) error {
 	return errors.New(message)
 }
 
-func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc *lsp.TextDocumentIdentifier) error {
-	if data, ok := handler.data[doc.URI]; ok {
-		doc.URI = data.targetURI
-		return nil
+func (handler *InoHandler) sketchToBuildPathTextDocumentIdentifier(doc *lsp.TextDocumentIdentifier) error {
+	// Sketchbook/Sketch/Sketch.ino      -> build-path/sketch/Sketch.ino.cpp
+	// Sketchbook/Sketch/AnotherTab.ino  -> build-path/sketch/Sketch.ino.cpp  (different section from above)
+	// Sketchbook/Sketch/AnotherFile.cpp -> build-path/sketch/AnotherFile.cpp (1:1)
+	// another/path/source.cpp           -> unchanged
+
+	// Convert sketch path to build path
+	docFile := newPathFromURI(doc.URI)
+	newDocFile := docFile
+
+	if docFile.Ext() == ".ino" {
+		newDocFile = handler.buildSketchCpp
+	} else if inside, err := docFile.IsInsideDir(handler.sketchRoot); err != nil {
+		log.Printf("    could not determine if '%s' is inside '%s'", docFile, handler.sketchRoot)
+		return unknownURI(doc.URI)
+	} else if !inside {
+		log.Printf("    passing doc identifier to '%s' as-is", docFile)
+	} else if rel, err := handler.sketchRoot.RelTo(docFile); err != nil {
+		log.Printf("    could not determine rel-path of '%s' in '%s", docFile, handler.sketchRoot)
+		return unknownURI(doc.URI)
+	} else {
+		newDocFile = handler.buildSketchRoot.JoinPath(rel)
 	}
-	return unknownURI(doc.URI)
+	log.Printf("    URI: '%s' -> '%s'", docFile, newDocFile)
+	doc.URI = pathToURI(newDocFile.String())
+	return nil
 }
 
 func (handler *InoHandler) ino2cppDidChangeTextDocumentParams(ctx context.Context, params *lsp.DidChangeTextDocumentParams) error {
-	handler.ino2cppTextDocumentIdentifier(&params.TextDocument.TextDocumentIdentifier)
+	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument.TextDocumentIdentifier)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		for index := range params.ContentChanges {
 			err := handler.updateFileData(ctx, data, &params.ContentChanges[index])
@@ -465,17 +491,21 @@ func (handler *InoHandler) ino2cppDidChangeTextDocumentParams(ctx context.Contex
 }
 
 func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDocumentPositionParams) error {
-	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
-	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		targetLine := data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
-		params.Position.Line = targetLine
-		return nil
+	sourceURI := params.TextDocument.URI
+	if strings.HasSuffix(string(sourceURI), ".ino") {
+		line, ok := handler.sketchMapper.InoToCppLineOk(sourceURI, params.Position.Line)
+		if !ok {
+			log.Printf("    invalid line requested: %s:%d", sourceURI, params.Position.Line)
+			return unknownURI(params.TextDocument.URI)
+		}
+		params.Position.Line = line
 	}
-	return unknownURI(params.TextDocument.URI)
+	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
+	return nil
 }
 
 func (handler *InoHandler) ino2cppCodeActionParams(params *lsp.CodeActionParams) error {
-	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
+	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		params.Range = data.sourceMap.InoToCppLSPRange(data.sourceURI, params.Range)
 		for index := range params.Context.Diagnostics {
@@ -488,7 +518,7 @@ func (handler *InoHandler) ino2cppCodeActionParams(params *lsp.CodeActionParams)
 }
 
 func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.DocumentRangeFormattingParams) error {
-	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
+	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		params.Range = data.sourceMap.InoToCppLSPRange(data.sourceURI, params.Range)
 		return nil
@@ -497,7 +527,7 @@ func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.Docu
 }
 
 func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
-	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
+	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
 		return nil
@@ -506,7 +536,7 @@ func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.Doc
 }
 
 func (handler *InoHandler) ino2cppRenameParams(params *lsp.RenameParams) error {
-	handler.ino2cppTextDocumentIdentifier(&params.TextDocument)
+	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
 	if data, ok := handler.data[params.TextDocument.URI]; ok {
 		params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
 		return nil
