@@ -157,16 +157,20 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		log.Printf("    --> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
 
 	case *lsp.DidChangeTextDocumentParams: // "textDocument/didChange":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDidChangeTextDocumentParams(ctx, p)
 	case *lsp.DidSaveTextDocumentParams: // "textDocument/didSave":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.DidCloseTextDocumentParams: // "textDocument/didClose":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 		handler.deleteFileData(uri)
 	case *lsp.CodeActionParams: // "textDocument/codeAction":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppCodeActionParams(p)
 	// case "textDocument/signatureHelp":
@@ -178,29 +182,38 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	// case "textDocument/implementation":
 	// 	fallthrough
 	case *lsp.TextDocumentPositionParams: // "textDocument/documentHighlight":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(p)
 	case *lsp.ReferenceParams: // "textDocument/references":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
 	case *lsp.DocumentFormattingParams: // "textDocument/formatting":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.DocumentRangeFormattingParams: // "textDocument/rangeFormatting":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDocumentRangeFormattingParams(p)
 	case *lsp.DocumentOnTypeFormattingParams: // "textDocument/onTypeFormatting":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDocumentOnTypeFormattingParams(p)
 	case *lsp.DocumentSymbolParams: // "textDocument/documentSymbol":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.RenameParams: // "textDocument/rename":
+		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
 		err = handler.ino2cppRenameParams(p)
 	case *lsp.DidChangeWatchedFilesParams: // "workspace/didChangeWatchedFiles":
+		log.Printf("UNHANDLED " + req.Method)
 		err = handler.ino2cppDidChangeWatchedFilesParams(p)
 	case *lsp.ExecuteCommandParams: // "workspace/executeCommand":
+		log.Printf("UNHANDLED " + req.Method)
 		err = handler.ino2cppExecuteCommand(p)
 	}
 	if err != nil {
@@ -823,6 +836,11 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 	switch p := params.(type) {
 	case *lsp.PublishDiagnosticsParams:
 		// "textDocument/publishDiagnostics"
+		log.Printf("    <-- publishDiagnostics(%s):", p.URI)
+		for _, diag := range p.Diagnostics {
+			log.Printf("        > %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+		}
+
 		if newPathFromURI(p.URI).EquivalentTo(handler.buildSketchCpp) {
 			// we should transform back N diagnostics of sketch.cpp.ino into
 			// their .ino counter parts (that may span over multiple files...)
@@ -845,11 +863,14 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 					URI:         pathToURI(filename),
 					Diagnostics: inoDiags,
 				}
-				if err := handler.StdioConn.Notify(ctx, req.Method, msg); err != nil {
-					return nil, err
-				}
 				if enableLogging {
-					log.Println("--> ", req.Method)
+					log.Printf("<-- publishDiagnostics(%s):", msg.URI)
+					for _, diag := range msg.Diagnostics {
+						log.Printf("    > %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+					}
+				}
+				if err := handler.StdioConn.Notify(ctx, "textDocument/publishDiagnostics", msg); err != nil {
+					return nil, err
 				}
 			}
 
