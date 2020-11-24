@@ -1,41 +1,40 @@
-package handler
+package lsp
 
 import (
 	"context"
 	"encoding/json"
 
-	lsp "github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-func readParams(method string, raw *json.RawMessage) (interface{}, error) {
+func ReadParams(method string, raw *json.RawMessage) (interface{}, error) {
 	switch method {
 	case "initialize":
-		params := new(lsp.InitializeParams)
+		params := new(InitializeParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/didOpen":
-		params := new(lsp.DidOpenTextDocumentParams)
+		params := new(DidOpenTextDocumentParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/didChange":
-		params := new(lsp.DidChangeTextDocumentParams)
+		params := new(DidChangeTextDocumentParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/didSave":
-		params := new(lsp.DidSaveTextDocumentParams)
+		params := new(DidSaveTextDocumentParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/didClose":
-		params := new(lsp.DidCloseTextDocumentParams)
+		params := new(DidCloseTextDocumentParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/completion":
-		params := new(lsp.CompletionParams)
+		params := new(CompletionParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/codeAction":
-		params := new(lsp.CodeActionParams)
+		params := new(CodeActionParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/signatureHelp":
@@ -51,43 +50,43 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 	case "textDocument/implementation":
 		fallthrough
 	case "textDocument/documentHighlight":
-		params := new(lsp.TextDocumentPositionParams)
+		params := new(TextDocumentPositionParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/references":
-		params := new(lsp.ReferenceParams)
+		params := new(ReferenceParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/formatting":
-		params := new(lsp.DocumentFormattingParams)
+		params := new(DocumentFormattingParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/rangeFormatting":
-		params := new(lsp.DocumentRangeFormattingParams)
+		params := new(DocumentRangeFormattingParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/onTypeFormatting":
-		params := new(lsp.DocumentOnTypeFormattingParams)
+		params := new(DocumentOnTypeFormattingParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/documentSymbol":
-		params := new(lsp.DocumentSymbolParams)
+		params := new(DocumentSymbolParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/rename":
-		params := new(lsp.RenameParams)
+		params := new(RenameParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "workspace/symbol":
-		params := new(lsp.WorkspaceSymbolParams)
+		params := new(WorkspaceSymbolParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "workspace/didChangeWatchedFiles":
-		params := new(lsp.DidChangeWatchedFilesParams)
+		params := new(DidChangeWatchedFilesParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "workspace/executeCommand":
-		params := new(lsp.ExecuteCommandParams)
+		params := new(ExecuteCommandParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "workspace/applyEdit":
@@ -95,7 +94,7 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "textDocument/publishDiagnostics":
-		params := new(lsp.PublishDiagnosticsParams)
+		params := new(PublishDiagnosticsParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "arduino/selectedBoard":
@@ -106,26 +105,26 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 	return nil, nil
 }
 
-func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params interface{}) (interface{}, error) {
+func SendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params interface{}) (interface{}, error) {
 	switch method {
 	case "initialize":
-		result := new(lsp.InitializeResult)
+		result := new(InitializeResult)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/completion":
-		result := new(lsp.CompletionList)
+		result := new(CompletionList)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/codeAction":
-		result := new([]*commandOrCodeAction)
+		result := new([]*CommandOrCodeAction)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "completionItem/resolve":
-		result := new(lsp.CompletionItem)
+		result := new(CompletionItem)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/signatureHelp":
-		result := new(lsp.SignatureHelp)
+		result := new(SignatureHelp)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/hover":
@@ -139,11 +138,11 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 	case "textDocument/implementation":
 		fallthrough
 	case "textDocument/references":
-		result := new([]lsp.Location)
+		result := new([]Location)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/documentHighlight":
-		result := new([]lsp.DocumentHighlight)
+		result := new([]DocumentHighlight)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/formatting":
@@ -151,23 +150,23 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 	case "textDocument/rangeFormatting":
 		fallthrough
 	case "textDocument/onTypeFormatting":
-		result := new([]lsp.TextEdit)
+		result := new([]TextEdit)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/documentSymbol":
-		result := new([]*documentSymbolOrSymbolInformation)
+		result := new([]*DocumentSymbolOrSymbolInformation)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/rename":
-		result := new(lsp.WorkspaceEdit)
+		result := new(WorkspaceEdit)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "workspace/symbol":
-		result := new([]lsp.SymbolInformation)
+		result := new([]SymbolInformation)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "window/showMessageRequest":
-		result := new(lsp.MessageActionItem)
+		result := new(MessageActionItem)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "workspace/executeCommand":
@@ -186,20 +185,20 @@ func sendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 
 // CodeAction structure according to LSP
 type CodeAction struct {
-	Title       string             `json:"title"`
-	Kind        string             `json:"kind,omitempty"`
-	Diagnostics []lsp.Diagnostic   `json:"diagnostics,omitempty"`
-	Edit        *lsp.WorkspaceEdit `json:"edit,omitempty"`
-	Command     *lsp.Command       `json:"command,omitempty"`
+	Title       string         `json:"title"`
+	Kind        string         `json:"kind,omitempty"`
+	Diagnostics []Diagnostic   `json:"diagnostics,omitempty"`
+	Edit        *WorkspaceEdit `json:"edit,omitempty"`
+	Command     *Command       `json:"command,omitempty"`
 }
 
-type commandOrCodeAction struct {
-	Command    *lsp.Command
+type CommandOrCodeAction struct {
+	Command    *Command
 	CodeAction *CodeAction
 }
 
-func (entry *commandOrCodeAction) UnmarshalJSON(raw []byte) error {
-	command := new(lsp.Command)
+func (entry *CommandOrCodeAction) UnmarshalJSON(raw []byte) error {
+	command := new(Command)
 	err := json.Unmarshal(raw, command)
 	if err == nil && len(command.Command) > 0 {
 		entry.Command = command
@@ -214,7 +213,7 @@ func (entry *commandOrCodeAction) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-func (entry *commandOrCodeAction) MarshalJSON() ([]byte, error) {
+func (entry *CommandOrCodeAction) MarshalJSON() ([]byte, error) {
 	if entry.Command != nil {
 		return json.Marshal(entry.Command)
 	}
@@ -224,16 +223,16 @@ func (entry *commandOrCodeAction) MarshalJSON() ([]byte, error) {
 	return nil, nil
 }
 
-// HoverParams structure according to LSP
-type HoverParams struct {
-	lsp.TextDocumentPositionParams
-	// lsp.WorkDoneProgressParams
-}
-
 // Hover structure according to LSP
 type Hover struct {
 	Contents MarkupContent `json:"contents"`
-	Range    *lsp.Range    `json:"range,omitempty"`
+	Range    *Range        `json:"range,omitempty"`
+}
+
+// HoverParams structure according to LSP
+type HoverParams struct {
+	TextDocumentPositionParams
+	// WorkDoneProgressParams
 }
 
 // MarkupContent structure according to LSP
@@ -246,24 +245,24 @@ type MarkupContent struct {
 type DocumentSymbol struct {
 	Name           string           `json:"name"`
 	Detail         string           `json:"detail,omitempty"`
-	Kind           lsp.SymbolKind   `json:"kind"`
+	Kind           SymbolKind       `json:"kind"`
 	Deprecated     bool             `json:"deprecated,omitempty"`
-	Range          lsp.Range        `json:"range"`
-	SelectionRange lsp.Range        `json:"selectionRange"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
 	Children       []DocumentSymbol `json:"children,omitempty"`
 }
 
-type documentSymbolOrSymbolInformation struct {
+type DocumentSymbolOrSymbolInformation struct {
 	DocumentSymbol    *DocumentSymbol
-	SymbolInformation *lsp.SymbolInformation
+	SymbolInformation *SymbolInformation
 }
 
 type documentSymbolOrSymbolInformationDiscriminator struct {
-	Range    *lsp.Range    `json:"range,omitempty"`
-	Location *lsp.Location `json:"location,omitempty"`
+	Range    *Range    `json:"range,omitempty"`
+	Location *Location `json:"location,omitempty"`
 }
 
-func (entry *documentSymbolOrSymbolInformation) UnmarshalJSON(raw []byte) error {
+func (entry *DocumentSymbolOrSymbolInformation) UnmarshalJSON(raw []byte) error {
 	discriminator := new(documentSymbolOrSymbolInformationDiscriminator)
 	err := json.Unmarshal(raw, discriminator)
 	if err != nil {
@@ -277,7 +276,7 @@ func (entry *documentSymbolOrSymbolInformation) UnmarshalJSON(raw []byte) error 
 		}
 	}
 	if discriminator.Location != nil {
-		entry.SymbolInformation = new(lsp.SymbolInformation)
+		entry.SymbolInformation = new(SymbolInformation)
 		err = json.Unmarshal(raw, entry.SymbolInformation)
 		if err != nil {
 			return err
@@ -288,8 +287,8 @@ func (entry *documentSymbolOrSymbolInformation) UnmarshalJSON(raw []byte) error 
 
 // ApplyWorkspaceEditParams structure according to LSP
 type ApplyWorkspaceEditParams struct {
-	Label string            `json:"label,omitempty"`
-	Edit  lsp.WorkspaceEdit `json:"edit"`
+	Label string        `json:"label,omitempty"`
+	Edit  WorkspaceEdit `json:"edit"`
 }
 
 // ApplyWorkspaceEditResponse structure according to LSP

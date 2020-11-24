@@ -9,6 +9,7 @@ import (
 
 	"github.com/arduino/go-paths-helper"
 	"github.com/bcmi-labs/arduino-language-server/handler"
+	"github.com/bcmi-labs/arduino-language-server/lsp"
 	"github.com/bcmi-labs/arduino-language-server/streams"
 )
 
@@ -52,7 +53,7 @@ func main() {
 	}
 
 	handler.Setup(cliPath, clangdPath, enableLogging, true)
-	initialBoard := handler.Board{Fqbn: initialFqbn, Name: initialBoardName}
+	initialBoard := lsp.Board{Fqbn: initialFqbn, Name: initialBoardName}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
 	if enableLogging {

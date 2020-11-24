@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/arduino/go-paths-helper"
+	"github.com/bcmi-labs/arduino-language-server/lsp"
 	"github.com/pkg/errors"
-	lsp "github.com/sourcegraph/go-lsp"
 )
 
 var expDriveID = regexp.MustCompile("[a-zA-Z]:")

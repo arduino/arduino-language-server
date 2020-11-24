@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sourcegraph/go-lsp"
+	"github.com/bcmi-labs/arduino-language-server/lsp"
 )
 
 // InoMapper is a mapping between the .ino sketch and the preprocessed .cpp file

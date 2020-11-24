@@ -16,9 +16,9 @@ import (
 	"github.com/arduino/go-paths-helper"
 	"github.com/bcmi-labs/arduino-language-server/handler/sourcemapper"
 	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
+	"github.com/bcmi-labs/arduino-language-server/lsp"
 	"github.com/bcmi-labs/arduino-language-server/streams"
 	"github.com/pkg/errors"
-	lsp "github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -39,11 +39,11 @@ func Setup(cliPath string, clangdPath string, _enableLogging bool, _asyncProcess
 type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser)
 
 // NewInoHandler creates and configures an InoHandler.
-func NewInoHandler(stdio io.ReadWriteCloser, board Board) *InoHandler {
+func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler := &InoHandler{
 		data:         map[lsp.DocumentURI]*FileData{},
 		trackedFiles: map[lsp.DocumentURI]lsp.TextDocumentItem{},
-		config: BoardConfig{
+		config: lsp.BoardConfig{
 			SelectedBoard: board,
 		},
 	}
@@ -77,7 +77,7 @@ type InoHandler struct {
 	trackedFiles            map[lsp.DocumentURI]lsp.TextDocumentItem
 
 	data         map[lsp.DocumentURI]*FileData
-	config       BoardConfig
+	config       lsp.BoardConfig
 	synchronizer Synchronizer
 }
 
@@ -114,7 +114,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	// Handle LSP methods: transform parameters and send to clangd
 	var uri lsp.DocumentURI
 
-	params, err := readParams(req.Method, req.Params)
+	params, err := lsp.ReadParams(req.Method, req.Params)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
 		log.Printf("    --> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
 
-	case *HoverParams:
+	case *lsp.HoverParams:
 		// method: "textDocument/hover"
 		uri = p.TextDocument.URI
 		doc := &p.TextDocumentPositionParams
@@ -230,7 +230,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	} else {
 		ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
 		defer cancel()
-		result, err = sendRequest(ctx, handler.ClangdConn, req.Method, params)
+		result, err = lsp.SendRequest(ctx, handler.ClangdConn, req.Method, params)
 		if enableLogging {
 			log.Println("    sent", req.Method, "request id", req.ID, " to clangd")
 		}
@@ -609,7 +609,7 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	switch r := result.(type) {
 	case *lsp.CompletionList: // "textDocument/completion":
 		handler.cpp2inoCompletionList(r, uri)
-	case *[]*commandOrCodeAction: // "textDocument/codeAction":
+	case *[]*lsp.CommandOrCodeAction: // "textDocument/codeAction":
 		for index := range *r {
 			command := (*r)[index].Command
 			if command != nil {
@@ -620,7 +620,7 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 				handler.cpp2inoCodeAction(codeAction, uri)
 			}
 		}
-	case *Hover: // "textDocument/hover":
+	case *lsp.Hover: // "textDocument/hover":
 		if len(r.Contents.Value) == 0 {
 			return nil
 		}
@@ -647,7 +647,7 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		for index := range *r {
 			handler.cpp2inoTextEdit(&(*r)[index], uri)
 		}
-	case *[]*documentSymbolOrSymbolInformation: // "textDocument/documentSymbol":
+	case *[]*lsp.DocumentSymbolOrSymbolInformation: // "textDocument/documentSymbol":
 		if len(*r) == 0 {
 			return result
 		}
@@ -655,7 +655,7 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		slice := *r
 		if slice[0].DocumentSymbol != nil {
 			// Treat the input as []DocumentSymbol
-			symbols := make([]DocumentSymbol, len(slice))
+			symbols := make([]lsp.DocumentSymbol, len(slice))
 			for index := range slice {
 				symbols[index] = *slice[index].DocumentSymbol
 			}
@@ -694,7 +694,7 @@ func (handler *InoHandler) cpp2inoCompletionList(list *lsp.CompletionList, uri l
 	}
 }
 
-func (handler *InoHandler) cpp2inoCodeAction(codeAction *CodeAction, uri lsp.DocumentURI) {
+func (handler *InoHandler) cpp2inoCodeAction(codeAction *lsp.CodeAction, uri lsp.DocumentURI) {
 	codeAction.Edit = handler.cpp2inoWorkspaceEdit(codeAction.Edit)
 	if data, ok := handler.data[uri]; ok {
 		for index := range codeAction.Diagnostics {
@@ -732,7 +732,7 @@ func (handler *InoHandler) cpp2inoWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *ls
 	return &newEdit
 }
 
-func (handler *InoHandler) cpp2inoHover(hover *Hover, uri lsp.DocumentURI) {
+func (handler *InoHandler) cpp2inoHover(hover *lsp.Hover, uri lsp.DocumentURI) {
 	if data, ok := handler.data[uri]; ok {
 		r := hover.Range
 		if r != nil {
@@ -760,13 +760,13 @@ func (handler *InoHandler) cpp2inoTextEdit(edit *lsp.TextEdit, uri lsp.DocumentU
 	}
 }
 
-func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []DocumentSymbol, uri lsp.DocumentURI) []DocumentSymbol {
+func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymbol, uri lsp.DocumentURI) []lsp.DocumentSymbol {
 	data, ok := handler.data[uri]
 	if !ok || len(origSymbols) == 0 {
 		return origSymbols
 	}
 
-	symbolIdx := make(map[string]*DocumentSymbol)
+	symbolIdx := make(map[string]*lsp.DocumentSymbol)
 	for i := 0; i < len(origSymbols); i++ {
 		symbol := &origSymbols[i]
 		_, symbol.Range = data.sourceMap.CppToInoRange(symbol.Range)
@@ -787,7 +787,7 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []DocumentSymbol, 
 		symbolIdx[symbol.Name] = symbol
 	}
 
-	newSymbols := make([]DocumentSymbol, len(symbolIdx))
+	newSymbols := make([]lsp.DocumentSymbol, len(symbolIdx))
 	j := 0
 	for _, s := range symbolIdx {
 		newSymbols[j] = *s
@@ -825,7 +825,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 	handler.synchronizer.DataMux.RLock()
 	defer handler.synchronizer.DataMux.RUnlock()
 
-	params, err := readParams(req.Method, req.Params)
+	params, err := lsp.ReadParams(req.Method, req.Params)
 	if err != nil {
 		return nil, errors.WithMessage(err, "parsing JSON message from clangd")
 	}
@@ -877,7 +877,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 			return nil, err
 		}
 
-	case *ApplyWorkspaceEditParams:
+	case *lsp.ApplyWorkspaceEditParams:
 		// "workspace/applyEdit"
 		p.Edit = *handler.cpp2inoWorkspaceEdit(&p.Edit)
 	}
@@ -893,7 +893,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 			log.Println("From clangd:", req.Method)
 		}
 	} else {
-		result, err = sendRequest(ctx, handler.StdioConn, req.Method, params)
+		result, err = lsp.SendRequest(ctx, handler.StdioConn, req.Method, params)
 		if enableLogging {
 			log.Println("From clangd:", req.Method, "id", req.ID)
 		}

@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	lsp "github.com/sourcegraph/go-lsp"
+	"github.com/bcmi-labs/arduino-language-server/lsp"
 )
 
 func TestUriToPath(t *testing.T) {

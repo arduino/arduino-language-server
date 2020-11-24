@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sourcegraph/go-lsp"
+	"github.com/bcmi-labs/arduino-language-server/lsp"
 )
 
 func TestApplyTextChange(t *testing.T) {

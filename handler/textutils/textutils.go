@@ -3,7 +3,7 @@ package textutils
 import (
 	"fmt"
 
-	"github.com/sourcegraph/go-lsp"
+	"github.com/bcmi-labs/arduino-language-server/lsp"
 )
 
 // ApplyTextChange replaces startingText substring specified by replaceRange with insertText
