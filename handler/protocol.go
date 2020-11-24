@@ -41,7 +41,9 @@ func readParams(method string, raw *json.RawMessage) (interface{}, error) {
 	case "textDocument/signatureHelp":
 		fallthrough
 	case "textDocument/hover":
-		fallthrough
+		params := new(HoverParams)
+		err := json.Unmarshal(*raw, params)
+		return params, err
 	case "textDocument/definition":
 		fallthrough
 	case "textDocument/typeDefinition":
@@ -220,6 +222,12 @@ func (entry *commandOrCodeAction) MarshalJSON() ([]byte, error) {
 		return json.Marshal(entry.CodeAction)
 	}
 	return nil, nil
+}
+
+// HoverParams structure according to LSP
+type HoverParams struct {
+	lsp.TextDocumentPositionParams
+	// lsp.WorkDoneProgressParams
 }
 
 // Hover structure according to LSP

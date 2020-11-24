@@ -147,6 +147,15 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
 		log.Printf("    --> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
 
+	case *HoverParams:
+		// method: "textDocument/hover"
+		uri = p.TextDocument.URI
+		doc := &p.TextDocumentPositionParams
+		log.Printf("--> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
+
+		err = handler.ino2cppTextDocumentPositionParams(doc)
+		log.Printf("    --> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
+
 	case *lsp.DidChangeTextDocumentParams: // "textDocument/didChange":
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDidChangeTextDocumentParams(ctx, p)
@@ -161,8 +170,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		uri = p.TextDocument.URI
 		err = handler.ino2cppCodeActionParams(p)
 	// case "textDocument/signatureHelp":
-	// 	fallthrough
-	// case "textDocument/hover":
 	// 	fallthrough
 	// case "textDocument/definition":
 	// 	fallthrough
