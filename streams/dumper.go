@@ -16,13 +16,19 @@ var GlobalLogDirectory *paths.Path
 // that forward and logs all read/write/close operations on the given filename
 // that is created in the GlobalLogDirectory.
 func LogReadWriteCloserAs(upstream io.ReadWriteCloser, filename string) io.ReadWriteCloser {
-	return &dumper{upstream, OpenLogFileAs(filename)}
+	return &dumper{
+		upstream: upstream,
+		logfile:  OpenLogFileAs(filename),
+	}
 }
 
 // LogReadWriteCloserToFile return a proxy for the given upstream io.ReadWriteCloser
 // that forward and logs all read/write/close operations on the given file.
 func LogReadWriteCloserToFile(upstream io.ReadWriteCloser, file *os.File) io.ReadWriteCloser {
-	return &dumper{upstream, file}
+	return &dumper{
+		upstream: upstream,
+		logfile:  file,
+	}
 }
 
 // OpenLogFileAs creates a log file in GlobalLogDirectory.
@@ -41,6 +47,8 @@ func OpenLogFileAs(filename string) *os.File {
 type dumper struct {
 	upstream io.ReadWriteCloser
 	logfile  *os.File
+	reading  bool
+	writing  bool
 }
 
 func (d *dumper) Read(buff []byte) (int, error) {
@@ -48,7 +56,12 @@ func (d *dumper) Read(buff []byte) (int, error) {
 	if err != nil {
 		d.logfile.Write([]byte(fmt.Sprintf("<<< Read Error: %s\n", err)))
 	} else {
-		d.logfile.Write([]byte(fmt.Sprintf("<<< Read %d bytes:\n%s\n", n, buff[:n])))
+		if !d.reading {
+			d.reading = true
+			d.writing = false
+			d.logfile.Write([]byte("\n<<<\n"))
+		}
+		d.logfile.Write(buff[:n])
 	}
 	return n, err
 }
@@ -58,7 +71,12 @@ func (d *dumper) Write(buff []byte) (int, error) {
 	if err != nil {
 		_, _ = d.logfile.Write([]byte(fmt.Sprintf(">>> Write Error: %s\n", err)))
 	} else {
-		_, _ = d.logfile.Write([]byte(fmt.Sprintf(">>> Wrote %d bytes:\n%s\n", n, buff[:n])))
+		if !d.writing {
+			d.writing = true
+			d.reading = false
+			d.logfile.Write([]byte("\n>>>\n"))
+		}
+		_, _ = d.logfile.Write(buff[:n])
 	}
 	return n, err
 }
