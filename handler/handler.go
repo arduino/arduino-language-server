@@ -3,7 +3,6 @@ package handler
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -803,7 +802,58 @@ func (handler *InoHandler) cpp2inoSymbolInformation(syms []*lsp.SymbolInformatio
 
 // FromClangd handles a message received from clangd.
 func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
-	params, _, err := handler.transformParamsToStdio(req.Method, req.Params)
+	handler.synchronizer.DataMux.RLock()
+	defer handler.synchronizer.DataMux.RUnlock()
+
+	params, err := readParams(req.Method, req.Params)
+	if err != nil {
+		return nil, errors.WithMessage(err, "parsing JSON message from clangd")
+	}
+	if params == nil {
+		// passthrough
+		params = req.Params
+	}
+	switch p := params.(type) {
+	case *lsp.PublishDiagnosticsParams:
+		// "textDocument/publishDiagnostics"
+		if newPathFromURI(p.URI).EquivalentTo(handler.buildSketchCpp) {
+			// we should transform back N diagnostics of sketch.cpp.ino into
+			// their .ino counter parts (that may span over multiple files...)
+
+			convertedDiagnostics := map[string][]lsp.Diagnostic{}
+			for _, cppDiag := range p.Diagnostics {
+				inoSource, inoRange := handler.sketchMapper.CppToInoRange(cppDiag.Range)
+				inoDiag := cppDiag
+				inoDiag.Range = inoRange
+				if inoDiags, ok := convertedDiagnostics[inoSource]; !ok {
+					convertedDiagnostics[inoSource] = []lsp.Diagnostic{inoDiag}
+				} else {
+					convertedDiagnostics[inoSource] = append(inoDiags, inoDiag)
+				}
+			}
+
+			// Push back to IDE the converted diagnostics
+			for filename, inoDiags := range convertedDiagnostics {
+				msg := lsp.PublishDiagnosticsParams{
+					URI:         pathToURI(filename),
+					Diagnostics: inoDiags,
+				}
+				if err := handler.StdioConn.Notify(ctx, req.Method, msg); err != nil {
+					return nil, err
+				}
+				if enableLogging {
+					log.Println("--> ", req.Method)
+				}
+			}
+
+			return nil, err
+		}
+
+	case *ApplyWorkspaceEditParams:
+		// "workspace/applyEdit"
+		p.Edit = *handler.cpp2inoWorkspaceEdit(&p.Edit)
+	}
+
 	if err != nil {
 		log.Println("From clangd: Method:", req.Method, "Error:", err)
 		return nil, err
@@ -821,46 +871,6 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 		}
 	}
 	return result, err
-}
-
-func (handler *InoHandler) transformParamsToStdio(method string, raw *json.RawMessage) (params interface{}, uri lsp.DocumentURI, err error) {
-	handler.synchronizer.DataMux.RLock()
-	defer handler.synchronizer.DataMux.RUnlock()
-
-	params, err = readParams(method, raw)
-	if err != nil {
-		return
-	} else if params == nil {
-		params = raw
-		return
-	}
-	switch method {
-	case "textDocument/publishDiagnostics":
-		p := params.(*lsp.PublishDiagnosticsParams)
-		uri = p.URI
-		err = handler.cpp2inoPublishDiagnosticsParams(p)
-	case "workspace/applyEdit":
-		p := params.(*ApplyWorkspaceEditParams)
-		p.Edit = *handler.cpp2inoWorkspaceEdit(&p.Edit)
-	}
-	return
-}
-
-func (handler *InoHandler) cpp2inoPublishDiagnosticsParams(params *lsp.PublishDiagnosticsParams) error {
-	if data, ok := handler.data[params.URI]; ok {
-		params.URI = data.sourceURI
-		newDiagnostics := make([]lsp.Diagnostic, 0, len(params.Diagnostics))
-		for index := range params.Diagnostics {
-			r := &params.Diagnostics[index].Range
-			if _, startLine, ok := data.sourceMap.CppToInoLineOk(r.Start.Line); ok {
-				r.Start.Line = startLine
-				_, r.End.Line = data.sourceMap.CppToInoLine(r.End.Line)
-				newDiagnostics = append(newDiagnostics, params.Diagnostics[index])
-			}
-		}
-		params.Diagnostics = newDiagnostics
-	}
-	return nil
 }
 
 func (handler *InoHandler) parseCommandArgument(rawArg interface{}) interface{} {
