@@ -260,15 +260,11 @@ func (handler *InoHandler) exit() {
 	os.Exit(1)
 }
 
-func newPathFromURI(uri lsp.DocumentURI) *paths.Path {
-	return paths.New(uriToPath(uri))
-}
-
 func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.InitializeParams) error {
 	rootURI := params.RootURI
 	log.Printf("--> initializeWorkbench(%s)\n", rootURI)
 
-	handler.sketchRoot = newPathFromURI(rootURI)
+	handler.sketchRoot = rootURI.AsPath()
 	handler.sketchName = handler.sketchRoot.Base()
 	if buildPath, err := generateBuildEnvironment(handler.sketchRoot, handler.config.SelectedBoard.Fqbn); err == nil {
 		handler.buildPath = buildPath
@@ -298,7 +294,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
 
 	params.RootPath = handler.buildSketchRoot.String()
-	params.RootURI = pathToURI(handler.buildSketchRoot.String())
+	params.RootURI = lsp.NewDocumenteURIFromPath(handler.buildSketchRoot)
 	return nil
 }
 
@@ -353,7 +349,7 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 	log.Printf("--> didOpen(%s)", doc.URI)
 
 	// If we are tracking a .ino...
-	if newPathFromURI(doc.URI).Ext() == ".ino" {
+	if doc.URI.AsPath().Ext() == ".ino" {
 		handler.sketchTrackedFilesCount++
 		log.Printf("    increasing .ino tracked files count: %d", handler.sketchTrackedFilesCount)
 
@@ -362,7 +358,7 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 			sketchCpp, err := handler.buildSketchCpp.ReadFile()
 			newParam := &lsp.DidOpenTextDocumentParams{
 				TextDocument: lsp.TextDocumentItem{
-					URI:        pathToURI(handler.buildSketchCpp.String()),
+					URI:        lsp.NewDocumenteURIFromPath(handler.buildSketchCpp),
 					Text:       string(sketchCpp),
 					LanguageID: "cpp",
 					Version:    1,
@@ -388,11 +384,11 @@ func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, c
 				return err
 			}
 		}
-		targetBytes, err := updateCpp([]byte(newSourceText), uriToPath(data.sourceURI), handler.config.SelectedBoard.Fqbn, false, uriToPath(data.targetURI))
+		targetBytes, err := updateCpp([]byte(newSourceText), data.sourceURI.Unbox(), handler.config.SelectedBoard.Fqbn, false, data.targetURI.Unbox())
 		if err != nil {
 			if rang == nil {
 				// Fallback: use the source text unchanged
-				targetBytes, err = copyIno2Cpp(newSourceText, uriToPath(data.targetURI))
+				targetBytes, err = copyIno2Cpp(newSourceText, data.targetURI.Unbox())
 				if err != nil {
 					return err
 				}
@@ -473,7 +469,7 @@ func (handler *InoHandler) sketchToBuildPathTextDocumentIdentifier(doc *lsp.Text
 	// another/path/source.cpp           -> unchanged
 
 	// Convert sketch path to build path
-	docFile := newPathFromURI(doc.URI)
+	docFile := doc.URI.AsPath()
 	newDocFile := docFile
 
 	if docFile.Ext() == ".ino" {
@@ -490,7 +486,7 @@ func (handler *InoHandler) sketchToBuildPathTextDocumentIdentifier(doc *lsp.Text
 		newDocFile = handler.buildSketchRoot.JoinPath(rel)
 	}
 	log.Printf("    URI: '%s' -> '%s'", docFile, newDocFile)
-	doc.URI = pathToURI(newDocFile.String())
+	doc.URI = lsp.NewDocumenteURIFromPath(newDocFile)
 	return nil
 }
 
@@ -841,7 +837,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 			log.Printf("        > %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
 		}
 
-		if newPathFromURI(p.URI).EquivalentTo(handler.buildSketchCpp) {
+		if p.URI.AsPath().EquivalentTo(handler.buildSketchCpp) {
 			// we should transform back N diagnostics of sketch.cpp.ino into
 			// their .ino counter parts (that may span over multiple files...)
 
@@ -860,7 +856,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 			// Push back to IDE the converted diagnostics
 			for filename, inoDiags := range convertedDiagnostics {
 				msg := lsp.PublishDiagnosticsParams{
-					URI:         pathToURI(filename),
+					URI:         lsp.NewDocumentURI(filename),
 					Diagnostics: inoDiags,
 				}
 				if enableLogging {
@@ -935,4 +931,8 @@ func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageT
 		Message: message,
 	}
 	handler.StdioConn.Notify(ctx, "window/showMessage", &params)
+}
+
+func unknownURI(uri lsp.DocumentURI) error {
+	return errors.New("Document is not available: " + string(uri))
 }
