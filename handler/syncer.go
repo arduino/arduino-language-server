@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"log"
 	"sync"
 
 	"github.com/sourcegraph/jsonrpc2"
@@ -31,11 +30,11 @@ func (ah AsyncHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jso
 			ah.synchronizer.FileMux.Lock()
 			defer ah.synchronizer.FileMux.Unlock()
 			if enableLogging {
-				log.Println("Message processing locked for", req.Method)
+				// log.Println("Message processing locked for", req.Method)
 			}
 			ah.handler.Handle(ctx, conn, req)
 			if enableLogging {
-				log.Println("Message processing unlocked for", req.Method)
+				// log.Println("Message processing unlocked for", req.Method)
 			}
 		}()
 	} else {

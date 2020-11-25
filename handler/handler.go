@@ -129,18 +129,24 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		handler.synchronizer.DataMux.RUnlock()
 
 	case *lsp.DidOpenTextDocumentParams:
-		// method "textDocument/didOpen":
+		// method "textDocument/didOpen"
 		uri = p.TextDocument.URI
+		log.Printf("--> didOpen(%s)", uri)
+
 		handler.synchronizer.DataMux.Lock()
 		res, err := handler.didOpen(ctx, p)
 		handler.synchronizer.DataMux.Unlock()
+
 		if res == nil {
-			log.Println("    notification is not propagated to clangd")
+			log.Println("    --X notification is not propagated to clangd")
 			return nil, err // do not propagate to clangd
 		}
+
+		log.Printf("    --> didOpen(%s)", res.TextDocument.URI)
 		params = res
 
-	case *lsp.CompletionParams: // "textDocument/completion":
+	case *lsp.CompletionParams:
+		// method: "textDocument/completion"
 		uri = p.TextDocument.URI
 		log.Printf("--> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
 
@@ -346,7 +352,6 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 	// Add the TextDocumentItem in the tracked files list
 	doc := params.TextDocument
 	handler.trackedFiles[doc.URI] = doc
-	log.Printf("--> didOpen(%s)", doc.URI)
 
 	// If we are tracking a .ino...
 	if doc.URI.AsPath().Ext() == ".ino" {
@@ -364,7 +369,6 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 					Version:    1,
 				},
 			}
-			log.Printf("    message for clangd: didOpen(%s)", newParam.TextDocument.URI)
 			return newParam, err
 		}
 	}
