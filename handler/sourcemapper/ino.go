@@ -3,10 +3,6 @@ package sourcemapper
 import (
 	"bufio"
 	"io"
-	"net/url"
-	"path/filepath"
-	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -35,14 +31,12 @@ type InoLine struct {
 
 // InoToCppLine converts a source (.ino) line into a target (.cpp) line
 func (s *InoMapper) InoToCppLine(sourceURI lsp.DocumentURI, line int) int {
-	file := uriToPath(sourceURI)
-	return s.toCpp[InoLine{file, line}]
+	return s.toCpp[InoLine{sourceURI.Unbox(), line}]
 }
 
 // InoToCppLineOk converts a source (.ino) line into a target (.cpp) line
 func (s *InoMapper) InoToCppLineOk(sourceURI lsp.DocumentURI, line int) (int, bool) {
-	file := uriToPath(sourceURI)
-	res, ok := s.toCpp[InoLine{file, line}]
+	res, ok := s.toCpp[InoLine{sourceURI.Unbox(), line}]
 	return res, ok
 }
 
@@ -192,27 +186,4 @@ func copyMappings(sourceLineMap, targetLineMap, newMappings map[int]int) {
 			targetLineMap[s] = t
 		}
 	}
-}
-
-var expDriveID = regexp.MustCompile("[a-zA-Z]:")
-
-func uriToPath(uri lsp.DocumentURI) string {
-	urlObj, err := url.Parse(string(uri))
-	if err != nil {
-		return string(uri)
-	}
-	path := ""
-	segments := strings.Split(urlObj.Path, "/")
-	for _, segment := range segments {
-		decoded, err := url.PathUnescape(segment)
-		if err != nil {
-			decoded = segment
-		}
-		if runtime.GOOS == "windows" && expDriveID.MatchString(decoded) {
-			path += strings.ToUpper(decoded)
-		} else if len(decoded) > 0 {
-			path += string(filepath.Separator) + decoded
-		}
-	}
-	return path
 }
