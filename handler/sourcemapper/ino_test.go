@@ -43,8 +43,8 @@ void loop() {
 	}, sourceMap.toCpp)
 	require.EqualValues(t, map[int]InoLine{
 		3:  {"sketch_july2a.ino", 0},
-		5:  {"sketch_july2a.ino", 1},
-		7:  {"sketch_july2a.ino", 6},
+		5:  {"sketch_july2a.ino", 1}, // setup
+		7:  {"sketch_july2a.ino", 6}, // loop
 		9:  {"sketch_july2a.ino", 1},
 		10: {"sketch_july2a.ino", 2},
 		11: {"sketch_july2a.ino", 3},
@@ -56,6 +56,10 @@ void loop() {
 		17: {"sketch_july2a.ino", 9},
 		18: {"sketch_july2a.ino", 10},
 	}, sourceMap.toIno)
+	require.EqualValues(t, map[int]InoLine{
+		5: {"sketch_july2a.ino", 1}, // setup
+		7: {"sketch_july2a.ino", 6}, // loop
+	}, sourceMap.cppPreprocessed)
 }
 
 func TestCreateMultifileSourceMap(t *testing.T) {
@@ -105,10 +109,6 @@ void secondFunction() {
 		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 0}:  2,
 		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 1}:  3,
 		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 2}:  4,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3}:  6,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8}:  8,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22}: 10,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1}:     12,
 		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3}:  14,
 		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 4}:  15,
 		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 5}:  16,
@@ -141,10 +141,10 @@ void secondFunction() {
 		2:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 0},
 		3:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 1},
 		4:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 2},
-		6:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3},
-		8:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8},
-		10: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22},
-		12: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1},
+		6:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3},  // setup
+		8:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8},  // loop
+		10: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22}, // vino
+		12: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1},     // secondFunction
 		14: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3},
 		15: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 4},
 		16: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 5},
@@ -173,6 +173,12 @@ void secondFunction() {
 		40: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 3},
 		41: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 4},
 	})
+	require.EqualValues(t, map[int]InoLine{
+		6:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3},  // setup
+		8:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8},  // loop
+		10: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22}, // vino
+		12: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1},     // secondFunction
+	}, sourceMap.cppPreprocessed)
 }
 
 // func TestUpdateSourceMaps1(t *testing.T) {

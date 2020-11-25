@@ -11,11 +11,12 @@ import (
 
 // InoMapper is a mapping between the .ino sketch and the preprocessed .cpp file
 type InoMapper struct {
-	InoText map[lsp.DocumentURI]*SourceRevision
-	CppText *SourceRevision
-	CppFile lsp.DocumentURI
-	toCpp   map[InoLine]int // Converts File.ino:line -> line
-	toIno   map[int]InoLine // Convers line -> File.ino:line
+	InoText         map[lsp.DocumentURI]*SourceRevision
+	CppText         *SourceRevision
+	CppFile         lsp.DocumentURI
+	toCpp           map[InoLine]int // Converts File.ino:line -> line
+	toIno           map[int]InoLine // Convers line -> File.ino:line
+	cppPreprocessed map[int]InoLine // map of the lines added by the preprocessor: preprocessed line -> File.ino:line
 }
 
 type SourceRevision struct {
@@ -76,8 +77,9 @@ func (s *InoMapper) CppToInoLineOk(targetLine int) (string, int, bool) {
 // CreateInoMapper create a InoMapper from the given target file
 func CreateInoMapper(targetFile io.Reader) *InoMapper {
 	mapper := &InoMapper{
-		toCpp: map[InoLine]int{},
-		toIno: map[int]InoLine{},
+		toCpp:           map[InoLine]int{},
+		toIno:           map[int]InoLine{},
+		cppPreprocessed: map[int]InoLine{},
 	}
 
 	sourceFile := ""
@@ -94,15 +96,22 @@ func CreateInoMapper(targetFile io.Reader) *InoMapper {
 			}
 			sourceFile = unquoteCppString(tokens[2])
 		} else if sourceFile != "" {
-			mapper.toCpp[InoLine{sourceFile, sourceLine}] = targetLine
-			mapper.toIno[targetLine] = InoLine{sourceFile, sourceLine}
+			mapper.mapLine(sourceFile, sourceLine, targetLine)
 			sourceLine++
 		}
 		targetLine++
 	}
-	mapper.toCpp[InoLine{sourceFile, sourceLine}] = targetLine
-	mapper.toIno[targetLine] = InoLine{sourceFile, sourceLine}
+	mapper.mapLine(sourceFile, sourceLine, targetLine)
 	return mapper
+}
+
+func (s *InoMapper) mapLine(sourceFile string, sourceLine, targetLine int) {
+	inoLine := InoLine{sourceFile, sourceLine}
+	if line, ok := s.toCpp[inoLine]; ok {
+		s.cppPreprocessed[line] = inoLine
+	}
+	s.toCpp[inoLine] = targetLine
+	s.toIno[targetLine] = inoLine
 }
 
 func unquoteCppString(str string) string {
