@@ -146,6 +146,32 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		log.Printf("    --> didOpen(%s@%d as '%s')", res.TextDocument.URI, res.TextDocument.Version, p.TextDocument.LanguageID)
 		params = res
 
+	case *lsp.DidChangeTextDocumentParams:
+		// notification "textDocument/didChange"
+		uri = p.TextDocument.URI
+		log.Printf("--> didChange(%s@%d)", p.TextDocument.URI, p.TextDocument.Version)
+		for _, change := range p.ContentChanges {
+			log.Printf("     > %s -> '%s'", change.Range, strconv.Quote(change.Text))
+		}
+
+		res, err := handler.didChange(ctx, p)
+		if err != nil {
+			log.Printf("    --E error: %s", err)
+			return nil, err
+		}
+		if res == nil {
+			log.Println("    --X notification is not propagated to clangd")
+			return nil, err // do not propagate to clangd
+		}
+
+		p = res
+		log.Printf("    --> didChange(%s@%d)", p.TextDocument.URI, p.TextDocument.Version)
+		for _, change := range p.ContentChanges {
+			log.Printf("         > %s -> '%s'", change.Range, strconv.Quote(change.Text))
+		}
+		err = handler.ClangdConn.Notify(ctx, req.Method, p)
+		return nil, err
+
 	case *lsp.CompletionParams:
 		// method: "textDocument/completion"
 		uri = p.TextDocument.URI
@@ -163,10 +189,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ino2cppTextDocumentPositionParams(doc)
 		log.Printf("    --> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
 
-	case *lsp.DidChangeTextDocumentParams: // "textDocument/didChange":
-		log.Printf("UNHANDLED " + req.Method)
-		uri = p.TextDocument.URI
-		err = handler.ino2cppDidChangeTextDocumentParams(ctx, p)
 	case *lsp.DidSaveTextDocumentParams: // "textDocument/didSave":
 		log.Printf("UNHANDLED " + req.Method)
 		uri = p.TextDocument.URI
@@ -377,6 +399,69 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 	return nil, nil
 }
 
+func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
+	doc := req.TextDocument
+
+	trackedDoc, ok := handler.trackedFiles[doc.URI]
+	if !ok {
+		return nil, unknownURI(doc.URI)
+	}
+	if trackedDoc.Version+1 != doc.Version {
+		return nil, errors.Errorf("document out-of-sync: expected version %d but got %d", trackedDoc.Version+1, doc.Version)
+	}
+	trackedDoc.Version++
+
+	if doc.URI.AsPath().Ext() == ".ino" {
+		// If changes are applied to a .ino file we increment the global .ino.cpp versioning
+		// for each increment of the single .ino file.
+
+		cppChanges := []lsp.TextDocumentContentChangeEvent{}
+		for _, inoChange := range req.ContentChanges {
+			dirty := handler.sketchMapper.ApplyTextChange(doc.URI, inoChange)
+			if dirty {
+				// TODO: Detect changes in critical lines (for example function definitions)
+				//       and trigger arduino-preprocessing + clangd restart.
+
+				log.Println("    uh oh DIRTY CHANGE!")
+			}
+
+			// log.Println("New version:----------")
+			// log.Println(handler.sketchMapper.CppText.Text)
+			// log.Println("----------------------")
+
+			cppRange, ok := handler.sketchMapper.InoToCppLSPRangeOk(doc.URI, *inoChange.Range)
+			if !ok {
+				return nil, errors.Errorf("invalid change range %s:%s", doc.URI, *inoChange.Range)
+			}
+			cppChange := lsp.TextDocumentContentChangeEvent{
+				Range:       &cppRange,
+				RangeLength: inoChange.RangeLength,
+				Text:        inoChange.Text,
+			}
+			cppChanges = append(cppChanges, cppChange)
+		}
+
+		// build a cpp equivalent didChange request
+		cppReq := &lsp.DidChangeTextDocumentParams{
+			ContentChanges: cppChanges,
+			TextDocument: lsp.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: lsp.TextDocumentIdentifier{
+					URI: lsp.NewDocumenteURIFromPath(handler.buildSketchCpp),
+				},
+				Version: handler.sketchMapper.CppText.Version,
+			},
+		}
+		return cppReq, nil
+	} else {
+
+		// TODO
+		return nil, unknownURI(doc.URI)
+
+	}
+
+	return nil, unknownURI(doc.URI)
+}
+
 func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, change *lsp.TextDocumentContentChangeEvent) (err error) {
 	rang := change.Range
 	if rang == nil || rang.Start.Line != rang.End.Line {
@@ -494,21 +579,6 @@ func (handler *InoHandler) sketchToBuildPathTextDocumentIdentifier(doc *lsp.Text
 	log.Printf("    URI: '%s' -> '%s'", docFile, newDocFile)
 	doc.URI = lsp.NewDocumenteURIFromPath(newDocFile)
 	return nil
-}
-
-func (handler *InoHandler) ino2cppDidChangeTextDocumentParams(ctx context.Context, params *lsp.DidChangeTextDocumentParams) error {
-	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument.TextDocumentIdentifier)
-	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		for index := range params.ContentChanges {
-			err := handler.updateFileData(ctx, data, &params.ContentChanges[index])
-			if err != nil {
-				return err
-			}
-		}
-		data.version = params.TextDocument.Version
-		return nil
-	}
-	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDocumentPositionParams) error {
