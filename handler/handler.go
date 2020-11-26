@@ -190,16 +190,19 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		log.Printf("    --> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
 
 	case *lsp.DidSaveTextDocumentParams: // "textDocument/didSave":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.DidCloseTextDocumentParams: // "textDocument/didClose":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 		handler.deleteFileData(uri)
 	case *lsp.CodeActionParams: // "textDocument/codeAction":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.ino2cppCodeActionParams(p)
 	// case "textDocument/signatureHelp":
@@ -211,42 +214,51 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	// case "textDocument/implementation":
 	// 	fallthrough
 	case *lsp.TextDocumentPositionParams: // "textDocument/documentHighlight":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(p)
 	case *lsp.ReferenceParams: // "textDocument/references":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
 	case *lsp.DocumentFormattingParams: // "textDocument/formatting":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.DocumentRangeFormattingParams: // "textDocument/rangeFormatting":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDocumentRangeFormattingParams(p)
 	case *lsp.DocumentOnTypeFormattingParams: // "textDocument/onTypeFormatting":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDocumentOnTypeFormattingParams(p)
 	case *lsp.DocumentSymbolParams: // "textDocument/documentSymbol":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.RenameParams: // "textDocument/rename":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.ino2cppRenameParams(p)
 	case *lsp.DidChangeWatchedFilesParams: // "workspace/didChangeWatchedFiles":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		err = handler.ino2cppDidChangeWatchedFilesParams(p)
 	case *lsp.ExecuteCommandParams: // "workspace/executeCommand":
-		log.Printf("UNHANDLED " + req.Method)
+		log.Printf("--X " + req.Method)
+		return nil, nil
 		err = handler.ino2cppExecuteCommand(p)
 	}
 	if err != nil {
-		log.Printf("    ~~~ %s", err)
+		log.Printf("    --E %s", err)
 		return nil, err
 	}
 
