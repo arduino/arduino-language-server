@@ -42,7 +42,7 @@ type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io
 func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler := &InoHandler{
 		data:         map[lsp.DocumentURI]*FileData{},
-		trackedFiles: map[lsp.DocumentURI]lsp.TextDocumentItem{},
+		trackedFiles: map[lsp.DocumentURI]*lsp.TextDocumentItem{},
 		config: lsp.BoardConfig{
 			SelectedBoard: board,
 		},
@@ -70,11 +70,12 @@ type InoHandler struct {
 	buildPath               *paths.Path
 	buildSketchRoot         *paths.Path
 	buildSketchCpp          *paths.Path
+	buildSketchCppVersion   int
 	sketchRoot              *paths.Path
 	sketchName              string
 	sketchMapper            *sourcemapper.InoMapper
 	sketchTrackedFilesCount int
-	trackedFiles            map[lsp.DocumentURI]lsp.TextDocumentItem
+	trackedFiles            map[lsp.DocumentURI]*lsp.TextDocumentItem
 
 	data         map[lsp.DocumentURI]*FileData
 	config       lsp.BoardConfig
@@ -131,7 +132,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	case *lsp.DidOpenTextDocumentParams:
 		// method "textDocument/didOpen"
 		uri = p.TextDocument.URI
-		log.Printf("--> didOpen(%s)", uri)
+		log.Printf("--> didOpen(%s@%d as '%s')", p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.LanguageID)
 
 		handler.synchronizer.DataMux.Lock()
 		res, err := handler.didOpen(ctx, p)
@@ -142,7 +143,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			return nil, err // do not propagate to clangd
 		}
 
-		log.Printf("    --> didOpen(%s)", res.TextDocument.URI)
+		log.Printf("    --> didOpen(%s@%d as '%s')", res.TextDocument.URI, res.TextDocument.Version, p.TextDocument.LanguageID)
 		params = res
 
 	case *lsp.CompletionParams:
@@ -279,6 +280,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 		return err
 	}
 	handler.buildSketchCpp = handler.buildSketchRoot.Join(handler.sketchName + ".ino.cpp")
+	handler.buildSketchCppVersion = 1
 
 	if cppContent, err := handler.buildSketchCpp.ReadFile(); err == nil {
 		handler.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
@@ -351,7 +353,7 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.
 func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
 	// Add the TextDocumentItem in the tracked files list
 	doc := params.TextDocument
-	handler.trackedFiles[doc.URI] = doc
+	handler.trackedFiles[doc.URI] = &doc
 
 	// If we are tracking a .ino...
 	if doc.URI.AsPath().Ext() == ".ino" {
@@ -366,7 +368,7 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 					URI:        lsp.NewDocumenteURIFromPath(handler.buildSketchCpp),
 					Text:       string(sketchCpp),
 					LanguageID: "cpp",
-					Version:    1,
+					Version:    handler.buildSketchCppVersion,
 				},
 			}
 			return newParam, err
