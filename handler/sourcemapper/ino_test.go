@@ -1,7 +1,7 @@
 package sourcemapper
 
 import (
-	"strings"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,7 +27,7 @@ void loop() {
 	
 }
 `
-	sourceMap := CreateInoMapper(strings.NewReader(input))
+	sourceMap := CreateInoMapper([]byte(input))
 	require.EqualValues(t, map[InoLine]int{
 		{"sketch_july2a.ino", 0}:  3,
 		{"sketch_july2a.ino", 1}:  9,
@@ -42,9 +42,15 @@ void loop() {
 		{"sketch_july2a.ino", 10}: 18,
 	}, sourceMap.toCpp)
 	require.EqualValues(t, map[int]InoLine{
+		0:  NotIno,
+		1:  NotIno,
+		2:  NotIno,
 		3:  {"sketch_july2a.ino", 0},
+		4:  NotIno,
 		5:  {"sketch_july2a.ino", 1}, // setup
+		6:  NotIno,
 		7:  {"sketch_july2a.ino", 6}, // loop
+		8:  NotIno,
 		9:  {"sketch_july2a.ino", 1},
 		10: {"sketch_july2a.ino", 2},
 		11: {"sketch_july2a.ino", 3},
@@ -60,6 +66,18 @@ void loop() {
 		5: {"sketch_july2a.ino", 1}, // setup
 		7: {"sketch_july2a.ino", 6}, // loop
 	}, sourceMap.cppPreprocessed)
+
+	dumpCppToInoMap(sourceMap.toIno)
+	dumpInoToCppMap(sourceMap.toCpp)
+	dumpCppToInoMap(sourceMap.cppPreprocessed)
+	dumpInoToCppMap(sourceMap.inoPreprocessed)
+	//sourceMap.addInoLine(InoLine{"sketch_july2a.ino", 0})
+	sourceMap.addInoLine(3)
+	fmt.Println("\nAdded line 13")
+	dumpCppToInoMap(sourceMap.toIno)
+	dumpInoToCppMap(sourceMap.toCpp)
+	dumpCppToInoMap(sourceMap.cppPreprocessed)
+	dumpInoToCppMap(sourceMap.inoPreprocessed)
 }
 
 func TestCreateMultifileSourceMap(t *testing.T) {
@@ -104,7 +122,7 @@ void vino() {
 void secondFunction() {
 
 }`
-	sourceMap := CreateInoMapper(strings.NewReader(input))
+	sourceMap := CreateInoMapper([]byte(input))
 	require.EqualValues(t, sourceMap.toCpp, map[InoLine]int{
 		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 0}:  2,
 		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 1}:  3,
@@ -138,13 +156,20 @@ void secondFunction() {
 		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 4}:     41,
 	})
 	require.EqualValues(t, sourceMap.toIno, map[int]InoLine{
+		0:  NotIno,
+		1:  NotIno,
 		2:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 0},
 		3:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 1},
 		4:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 2},
-		6:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3},  // setup
-		8:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8},  // loop
+		5:  NotIno,
+		6:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3}, // setup
+		7:  NotIno,
+		8:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8}, // loop
+		9:  NotIno,
 		10: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22}, // vino
-		12: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1},     // secondFunction
+		11: NotIno,
+		12: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1}, // secondFunction
+		13: NotIno,
 		14: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3},
 		15: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 4},
 		16: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 5},
@@ -167,6 +192,7 @@ void secondFunction() {
 		33: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22},
 		34: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 23},
 		35: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 24},
+		36: {"not-ino", 0},
 		37: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 0},
 		38: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1},
 		39: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 2},
@@ -179,6 +205,16 @@ void secondFunction() {
 		10: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22}, // vino
 		12: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1},     // secondFunction
 	}, sourceMap.cppPreprocessed)
+	dumpCppToInoMap(sourceMap.toIno)
+	dumpInoToCppMap(sourceMap.toCpp)
+	dumpCppToInoMap(sourceMap.cppPreprocessed)
+	dumpInoToCppMap(sourceMap.inoPreprocessed)
+	sourceMap.deleteCppLine(21)
+	fmt.Println("\nRemoved line 21")
+	dumpCppToInoMap(sourceMap.toIno)
+	dumpInoToCppMap(sourceMap.toCpp)
+	dumpCppToInoMap(sourceMap.cppPreprocessed)
+	dumpInoToCppMap(sourceMap.inoPreprocessed)
 }
 
 // func TestUpdateSourceMaps1(t *testing.T) {

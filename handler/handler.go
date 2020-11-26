@@ -1,13 +1,13 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -281,7 +281,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 	handler.buildSketchCpp = handler.buildSketchRoot.Join(handler.sketchName + ".ino.cpp")
 
 	if cppContent, err := handler.buildSketchCpp.ReadFile(); err == nil {
-		handler.sketchMapper = sourcemapper.CreateInoMapper(bytes.NewReader(cppContent))
+		handler.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
 	} else {
 		return errors.WithMessage(err, "reading generated cpp file from sketch")
 	}
@@ -399,14 +399,14 @@ func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, c
 			} else {
 				// Fallback: try to apply a multi-line update
 				data.sourceText = newSourceText
-				data.sourceMap.Update(rang.End.Line-rang.Start.Line, rang.Start.Line, change.Text)
+				//data.sourceMap.Update(rang.End.Line-rang.Start.Line, rang.Start.Line, change.Text)
 				*rang = data.sourceMap.InoToCppLSPRange(data.sourceURI, *rang)
 				return nil
 			}
 		}
 
 		data.sourceText = newSourceText
-		data.sourceMap = sourcemapper.CreateInoMapper(bytes.NewReader(targetBytes))
+		data.sourceMap = sourcemapper.CreateInoMapper(targetBytes)
 
 		change.Text = string(targetBytes)
 		change.Range = nil
@@ -417,7 +417,7 @@ func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, c
 		if err != nil {
 			return err
 		}
-		data.sourceMap.Update(0, rang.Start.Line, change.Text)
+		//data.sourceMap.Update(0, rang.Start.Line, change.Text)
 
 		*rang = data.sourceMap.InoToCppLSPRange(data.sourceURI, *rang)
 	}

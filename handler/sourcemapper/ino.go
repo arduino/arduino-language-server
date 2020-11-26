@@ -2,10 +2,13 @@ package sourcemapper
 
 import (
 	"bufio"
-	"io"
+	"bytes"
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
 	"github.com/bcmi-labs/arduino-language-server/lsp"
 )
 
@@ -16,8 +19,12 @@ type InoMapper struct {
 	CppFile         lsp.DocumentURI
 	toCpp           map[InoLine]int // Converts File.ino:line -> line
 	toIno           map[int]InoLine // Convers line -> File.ino:line
+	inoPreprocessed map[InoLine]int // map of the lines taken by the preprocessor: File.ino:line -> preprocessed line
 	cppPreprocessed map[int]InoLine // map of the lines added by the preprocessor: preprocessed line -> File.ino:line
 }
+
+// NotIno are lines that do not belongs to an .ino file
+var NotIno = InoLine{"not-ino", 0}
 
 type SourceRevision struct {
 	Version int
@@ -41,11 +48,29 @@ func (s *InoMapper) InoToCppLineOk(sourceURI lsp.DocumentURI, line int) (int, bo
 	return res, ok
 }
 
+// InoToCppLSPRange convert a lsp.Ranger reference to a .ino into a lsp.Range to .cpp
 func (s *InoMapper) InoToCppLSPRange(sourceURI lsp.DocumentURI, r lsp.Range) lsp.Range {
 	res := r
 	res.Start.Line = s.InoToCppLine(sourceURI, r.Start.Line)
 	res.End.Line = s.InoToCppLine(sourceURI, r.End.Line)
 	return res
+}
+
+// InoToCppLSPRangeOk convert a lsp.Ranger reference to a .ino into a lsp.Range to .cpp and returns
+// true if the conversion is successful or false if the conversion is invalid.
+func (s *InoMapper) InoToCppLSPRangeOk(sourceURI lsp.DocumentURI, r lsp.Range) (lsp.Range, bool) {
+	res := r
+	if l, ok := s.InoToCppLineOk(sourceURI, r.Start.Line); ok {
+		res.Start.Line = l
+	} else {
+		return res, false
+	}
+	if l, ok := s.InoToCppLineOk(sourceURI, r.End.Line); ok {
+		res.End.Line = l
+	} else {
+		return res, false
+	}
+	return res, true
 }
 
 // CppToInoLine converts a target (.cpp) line into a source.ino:line
@@ -75,17 +100,22 @@ func (s *InoMapper) CppToInoLineOk(targetLine int) (string, int, bool) {
 }
 
 // CreateInoMapper create a InoMapper from the given target file
-func CreateInoMapper(targetFile io.Reader) *InoMapper {
+func CreateInoMapper(targetFile []byte) *InoMapper {
 	mapper := &InoMapper{
 		toCpp:           map[InoLine]int{},
 		toIno:           map[int]InoLine{},
+		inoPreprocessed: map[InoLine]int{},
 		cppPreprocessed: map[int]InoLine{},
+		CppText: &SourceRevision{
+			Version: 1,
+			Text:    string(targetFile),
+		},
 	}
 
 	sourceFile := ""
 	sourceLine := -1
 	targetLine := 0
-	scanner := bufio.NewScanner(targetFile)
+	scanner := bufio.NewScanner(bytes.NewReader(targetFile))
 	for scanner.Scan() {
 		lineStr := scanner.Text()
 		if strings.HasPrefix(lineStr, "#line") {
@@ -95,9 +125,12 @@ func CreateInoMapper(targetFile io.Reader) *InoMapper {
 				sourceLine = l - 1
 			}
 			sourceFile = unquoteCppString(tokens[2])
+			mapper.toIno[targetLine] = NotIno
 		} else if sourceFile != "" {
 			mapper.mapLine(sourceFile, sourceLine, targetLine)
 			sourceLine++
+		} else {
+			mapper.toIno[targetLine] = NotIno
 		}
 		targetLine++
 	}
@@ -109,6 +142,7 @@ func (s *InoMapper) mapLine(sourceFile string, sourceLine, targetLine int) {
 	inoLine := InoLine{sourceFile, sourceLine}
 	if line, ok := s.toCpp[inoLine]; ok {
 		s.cppPreprocessed[line] = inoLine
+		s.inoPreprocessed[inoLine] = line
 	}
 	s.toCpp[inoLine] = targetLine
 	s.toIno[targetLine] = inoLine
@@ -123,76 +157,156 @@ func unquoteCppString(str string) string {
 	return str
 }
 
-// Update performs an update to the SourceMap considering the deleted lines, the
-// insertion line and the inserted text
-func (s *InoMapper) Update(deletedLines, insertLine int, insertText string) {
-	// for i := 1; i <= deletedLines; i++ {
-	// 	sourceLine := insertLine + 1
-	// 	targetLine := s.toCpp[sourceLine]
+// ApplyTextChange performs the text change and updates both .ino and .cpp files.
+// It returns true if the change is "dirty", this happens when the change alters preprocessed lines
+// and a new preprocessing may be probably required.
+func (s *InoMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDocumentContentChangeEvent) (dirty bool) {
+	inoRange := *inoChange.Range
+	cppRange := s.InoToCppLSPRange(inoURI, inoRange)
+	deletedLines := inoRange.End.Line - inoRange.Start.Line
 
-	// 	// Shift up all following lines by one and put them into a new map
-	// 	newMappings := make(map[int]int)
-	// 	maxSourceLine, maxTargetLine := 0, 0
-	// 	for t, s := range s.toIno {
-	// 		if t > targetLine && s > sourceLine {
-	// 			newMappings[t-1] = s - 1
-	// 		} else if s > sourceLine {
-	// 			newMappings[t] = s - 1
-	// 		} else if t > targetLine {
-	// 			newMappings[t-1] = s
-	// 		}
-	// 		if s > maxSourceLine {
-	// 			maxSourceLine = s
-	// 		}
-	// 		if t > maxTargetLine {
-	// 			maxTargetLine = t
-	// 		}
-	// 	}
+	// Apply text changes
+	newText, err := textutils.ApplyTextChange(s.CppText.Text, cppRange, inoChange.Text)
+	if err != nil {
+		panic("error replacing text: " + err.Error())
+	}
+	s.CppText.Text = newText
+	s.CppText.Version++
 
-	// 	// Remove mappings for the deleted line
-	// 	delete(s.toIno, maxTargetLine)
-	// 	delete(s.toCpp, maxSourceLine)
-
-	// 	// Copy the mappings from the intermediate map
-	// 	copyMappings(s.toIno, s.toCpp, newMappings)
-	// }
-
-	// addedLines := strings.Count(insertText, "\n")
-	// if addedLines > 0 {
-	// 	targetLine := s.toCpp[insertLine]
-
-	// 	// Shift down all following lines and put them into a new map
-	// 	newMappings := make(map[int]int)
-	// 	for t, s := range s.toIno {
-	// 		if t > targetLine && s > insertLine {
-	// 			newMappings[t+addedLines] = s + addedLines
-	// 		} else if s > insertLine {
-	// 			newMappings[t] = s + addedLines
-	// 		} else if t > targetLine {
-	// 			newMappings[t+addedLines] = s
-	// 		}
-	// 	}
-
-	// 	// Add mappings for the added lines
-	// 	for i := 1; i <= addedLines; i++ {
-	// 		s.toIno[targetLine+i] = insertLine + i
-	// 		s.toCpp[insertLine+i] = targetLine + i
-	// 	}
-
-	// 	// Copy the mappings from the intermediate map
-	// 	copyMappings(s.toIno, s.toCpp, newMappings)
-	// }
+	// Update line references
+	for deletedLines > 0 {
+		dirty = dirty || s.deleteCppLine(cppRange.Start.Line)
+		deletedLines--
+	}
+	addedLines := strings.Count(inoChange.Text, "\n") - 1
+	for addedLines > 0 {
+		dirty = dirty || s.addInoLine(cppRange.Start.Line)
+	}
+	if _, is := s.cppPreprocessed[cppRange.Start.Line]; is {
+		dirty = true
+	}
+	return
 }
 
-func copyMappings(sourceLineMap, targetLineMap, newMappings map[int]int) {
-	for t, s := range newMappings {
-		sourceLineMap[t] = s
-		targetLineMap[s] = t
-	}
-	for t, s := range newMappings {
-		// In case multiple target lines are present for a source line, use the last one
-		if t > targetLineMap[s] {
-			targetLineMap[s] = t
+func (s *InoMapper) addInoLine(cppLine int) (dirty bool) {
+	preprocessToShiftCpp := map[InoLine]bool{}
+
+	addedInoLine := s.toIno[cppLine]
+	carry := s.toIno[cppLine]
+	carry.Line++
+	for {
+		next, ok := s.toIno[cppLine+1]
+		s.toIno[cppLine+1] = carry
+		s.toCpp[carry] = cppLine + 1
+		if !ok {
+			break
 		}
+
+		if next.File == addedInoLine.File && next.Line >= addedInoLine.Line {
+			if _, is := s.inoPreprocessed[next]; is {
+				// fmt.Println("Adding", next, "to cpp to shift")
+				preprocessToShiftCpp[next] = true
+			}
+			next.Line++
+		}
+
+		carry = next
+		cppLine++
+	}
+
+	// dumpCppToInoMap(s.toIno)
+
+	preprocessToShiftIno := []InoLine{}
+	for inoPre := range s.inoPreprocessed {
+		// fmt.Println(">", inoPre, addedInoLine)
+		if inoPre.File == addedInoLine.File && inoPre.Line >= addedInoLine.Line {
+			preprocessToShiftIno = append(preprocessToShiftIno, inoPre)
+		}
+	}
+	for inoPre := range preprocessToShiftCpp {
+		l := s.inoPreprocessed[inoPre]
+		delete(s.cppPreprocessed, l)
+		s.inoPreprocessed[inoPre] = l + 1
+		s.cppPreprocessed[l+1] = inoPre
+	}
+	for _, inoPre := range preprocessToShiftIno {
+		l := s.inoPreprocessed[inoPre]
+		delete(s.inoPreprocessed, inoPre)
+		inoPre.Line++
+		s.inoPreprocessed[inoPre] = l
+		s.cppPreprocessed[l] = inoPre
+		s.toIno[l] = inoPre
+	}
+
+	return
+}
+
+func (s *InoMapper) deleteCppLine(line int) (dirty bool) {
+	removed := s.toIno[line]
+	for i := line + 1; ; i++ {
+		shifted, ok := s.toIno[i]
+		if !ok {
+			delete(s.toIno, i-1)
+			break
+		}
+		s.toIno[i-1] = shifted
+		if shifted != NotIno {
+			s.toCpp[shifted] = i - 1
+		}
+	}
+
+	if _, ok := s.inoPreprocessed[removed]; ok {
+		dirty = true
+	}
+
+	for curr := removed; ; curr.Line++ {
+		next := curr
+		next.Line++
+
+		shifted, ok := s.toCpp[next]
+		if !ok {
+			delete(s.toCpp, curr)
+			break
+		}
+		s.toCpp[curr] = shifted
+		s.toIno[shifted] = curr
+
+		if l, ok := s.inoPreprocessed[next]; ok {
+			s.inoPreprocessed[curr] = l
+			s.cppPreprocessed[l] = curr
+			delete(s.inoPreprocessed, next)
+
+			s.toIno[l] = curr
+		}
+	}
+	return
+}
+
+func dumpCppToInoMap(s map[int]InoLine) {
+	last := 0
+	for cppLine := range s {
+		if last < cppLine {
+			last = cppLine
+		}
+	}
+	for line := 0; line <= last; line++ {
+		target := s[line]
+		fmt.Printf("%5d -> %s:%d\n", line, target.File, target.Line)
+	}
+}
+
+func dumpInoToCppMap(s map[InoLine]int) {
+	keys := []InoLine{}
+	for k := range s {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i].File < keys[j].File ||
+			(keys[i].File == keys[j].File && keys[i].Line < keys[j].Line)
+	})
+	for _, k := range keys {
+		inoLine := k
+		cppLine := s[inoLine]
+		fmt.Printf("%s:%d -> %d\n", inoLine.File, inoLine.Line, cppLine)
 	}
 }
