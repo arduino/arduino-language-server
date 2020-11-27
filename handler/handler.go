@@ -929,6 +929,23 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 			// we should transform back N diagnostics of sketch.cpp.ino into
 			// their .ino counter parts (that may span over multiple files...)
 
+			// Remove diagnostics from all .ino if there are no errors coming from clang
+			if len(p.Diagnostics) == 0 {
+				// XXX: Optimize this to publish "empty diagnostics" only to .ino that are
+				//      currently showing previous diagnostics.
+
+				for sourceURI := range handler.trackedFiles {
+					msg := lsp.PublishDiagnosticsParams{
+						URI:         sourceURI,
+						Diagnostics: []lsp.Diagnostic{},
+					}
+					if err := handler.StdioConn.Notify(ctx, "textDocument/publishDiagnostics", msg); err != nil {
+						return nil, err
+					}
+				}
+				return nil, nil
+			}
+
 			convertedDiagnostics := map[string][]lsp.Diagnostic{}
 			for _, cppDiag := range p.Diagnostics {
 				inoSource, inoRange := handler.sketchMapper.CppToInoRange(cppDiag.Range)
