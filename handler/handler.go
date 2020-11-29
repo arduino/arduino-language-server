@@ -697,18 +697,36 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	handler.synchronizer.DataMux.RLock()
 	defer handler.synchronizer.DataMux.RUnlock()
 
+	cppToIno := uri != "" && uri.AsPath().EquivalentTo(handler.buildSketchCpp)
+
 	switch r := result.(type) {
 	case *lsp.Hover:
 		// method "textDocument/hover"
 		if len(r.Contents.Value) == 0 {
 			return nil
 		}
-		if uri.AsPath().EquivalentTo(handler.buildSketchCpp) {
+		if cppToIno {
 			_, *r.Range = handler.sketchMapper.CppToInoRange(*r.Range)
 		}
+		log.Printf("<-- hover(%s)", strconv.Quote(r.Contents.Value))
+		return r
 
-	case *lsp.CompletionList: // "textDocument/completion":
-		handler.cpp2inoCompletionList(r, uri)
+	case *lsp.CompletionList:
+		// method "textDocument/completion"
+		newItems := make([]lsp.CompletionItem, 0)
+
+		for _, item := range r.Items {
+			if !strings.HasPrefix(item.InsertText, "_") {
+				if cppToIno && item.TextEdit != nil {
+					_, item.TextEdit.Range = handler.sketchMapper.CppToInoRange(item.TextEdit.Range)
+				}
+				newItems = append(newItems, item)
+			}
+		}
+		r.Items = newItems
+		log.Printf("<-- completion(%d items)", len(r.Items))
+		return r
+
 	case *[]*lsp.CommandOrCodeAction: // "textDocument/codeAction":
 		for index := range *r {
 			command := (*r)[index].Command
@@ -772,22 +790,6 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		}
 	}
 	return result
-}
-
-func (handler *InoHandler) cpp2inoCompletionList(list *lsp.CompletionList, uri lsp.DocumentURI) {
-	panic("not implemented")
-	// if data, ok := handler.data[uri]; ok {
-	// 	newItems := make([]lsp.CompletionItem, 0, len(list.Items))
-	// 	for _, item := range list.Items {
-	// 		if !strings.HasPrefix(item.InsertText, "_") {
-	// 			if item.TextEdit != nil {
-	// 				_, item.TextEdit.Range = data.sourceMap.CppToInoRange(item.TextEdit.Range)
-	// 			}
-	// 			newItems = append(newItems, item)
-	// 		}
-	// 	}
-	// 	list.Items = newItems
-	// }
 }
 
 func (handler *InoHandler) cpp2inoCodeAction(codeAction *lsp.CodeAction, uri lsp.DocumentURI) {
