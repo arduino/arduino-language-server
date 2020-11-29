@@ -691,6 +691,15 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	defer handler.synchronizer.DataMux.RUnlock()
 
 	switch r := result.(type) {
+	case *lsp.Hover:
+		// method "textDocument/hover"
+		if len(r.Contents.Value) == 0 {
+			return nil
+		}
+		if uri.AsPath().EquivalentTo(handler.buildSketchCpp) {
+			_, *r.Range = handler.sketchMapper.CppToInoRange(*r.Range)
+		}
+
 	case *lsp.CompletionList: // "textDocument/completion":
 		handler.cpp2inoCompletionList(r, uri)
 	case *[]*lsp.CommandOrCodeAction: // "textDocument/codeAction":
@@ -704,11 +713,6 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 				handler.cpp2inoCodeAction(codeAction, uri)
 			}
 		}
-	case *lsp.Hover: // "textDocument/hover":
-		if len(r.Contents.Value) == 0 {
-			return nil
-		}
-		handler.cpp2inoHover(r, uri)
 	// case "textDocument/definition":
 	// 	fallthrough
 	// case "textDocument/typeDefinition":
@@ -814,15 +818,6 @@ func (handler *InoHandler) cpp2inoWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *ls
 		}
 	}
 	return &newEdit
-}
-
-func (handler *InoHandler) cpp2inoHover(hover *lsp.Hover, uri lsp.DocumentURI) {
-	if data, ok := handler.data[uri]; ok {
-		r := hover.Range
-		if r != nil {
-			_, *r = data.sourceMap.CppToInoRange(*r)
-		}
-	}
 }
 
 func (handler *InoHandler) cpp2inoLocation(location *lsp.Location) {
