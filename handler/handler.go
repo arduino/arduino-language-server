@@ -41,7 +41,7 @@ type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io
 // NewInoHandler creates and configures an InoHandler.
 func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler := &InoHandler{
-		data:         map[lsp.DocumentURI]*FileData{},
+		//data:         map[lsp.DocumentURI]*FileData{},
 		trackedFiles: map[lsp.DocumentURI]*lsp.TextDocumentItem{},
 		config: lsp.BoardConfig{
 			SelectedBoard: board,
@@ -77,7 +77,7 @@ type InoHandler struct {
 	sketchTrackedFilesCount int
 	trackedFiles            map[lsp.DocumentURI]*lsp.TextDocumentItem
 
-	data         map[lsp.DocumentURI]*FileData
+	//data         map[lsp.DocumentURI]*FileData
 	config       lsp.BoardConfig
 	synchronizer Synchronizer
 }
@@ -524,10 +524,10 @@ func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, c
 }
 
 func (handler *InoHandler) deleteFileData(sourceURI lsp.DocumentURI) {
-	if data, ok := handler.data[sourceURI]; ok {
-		delete(handler.data, data.sourceURI)
-		delete(handler.data, data.targetURI)
-	}
+	// if data, ok := handler.data[sourceURI]; ok {
+	// 	delete(handler.data, data.sourceURI)
+	// 	delete(handler.data, data.targetURI)
+	// }
 }
 
 func (handler *InoHandler) handleError(ctx context.Context, err error) error {
@@ -608,81 +608,88 @@ func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDoc
 }
 
 func (handler *InoHandler) ino2cppCodeActionParams(params *lsp.CodeActionParams) error {
-	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
-	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		params.Range = data.sourceMap.InoToCppLSPRange(data.sourceURI, params.Range)
-		for index := range params.Context.Diagnostics {
-			r := &params.Context.Diagnostics[index].Range
-			*r = data.sourceMap.InoToCppLSPRange(data.sourceURI, *r)
-		}
-		return nil
-	}
+	panic("not implemented")
+	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
+	// if data, ok := handler.data[params.TextDocument.URI]; ok {
+	// 	params.Range = data.sourceMap.InoToCppLSPRange(data.sourceURI, params.Range)
+	// 	for index := range params.Context.Diagnostics {
+	// 		r := &params.Context.Diagnostics[index].Range
+	// 		*r = data.sourceMap.InoToCppLSPRange(data.sourceURI, *r)
+	// 	}
+	// 	return nil
+	// }
 	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.DocumentRangeFormattingParams) error {
-	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
-	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		params.Range = data.sourceMap.InoToCppLSPRange(data.sourceURI, params.Range)
-		return nil
-	}
+	panic("not implemented")
+	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
+	// if data, ok := handler.data[params.TextDocument.URI]; ok {
+	// 	params.Range = data.sourceMap.InoToCppLSPRange(data.sourceURI, params.Range)
+	// 	return nil
+	// }
 	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
-	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
-	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
-		return nil
-	}
+	panic("not implemented")
+	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
+	// if data, ok := handler.data[params.TextDocument.URI]; ok {
+	// 	params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
+	// 	return nil
+	// }
 	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppRenameParams(params *lsp.RenameParams) error {
-	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
-	if data, ok := handler.data[params.TextDocument.URI]; ok {
-		params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
-		return nil
-	}
+	panic("not implemented")
+	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
+	// if data, ok := handler.data[params.TextDocument.URI]; ok {
+	// 	params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
+	// 	return nil
+	// }
 	return unknownURI(params.TextDocument.URI)
 }
 
 func (handler *InoHandler) ino2cppDidChangeWatchedFilesParams(params *lsp.DidChangeWatchedFilesParams) error {
-	for index := range params.Changes {
-		fileEvent := &params.Changes[index]
-		if data, ok := handler.data[fileEvent.URI]; ok {
-			fileEvent.URI = data.targetURI
-		}
-	}
+	panic("not implemented")
+	// for index := range params.Changes {
+	// 	fileEvent := &params.Changes[index]
+	// 	if data, ok := handler.data[fileEvent.URI]; ok {
+	// 		fileEvent.URI = data.targetURI
+	// 	}
+	// }
 	return nil
 }
 
 func (handler *InoHandler) ino2cppExecuteCommand(executeCommand *lsp.ExecuteCommandParams) error {
-	if len(executeCommand.Arguments) == 1 {
-		arg := handler.parseCommandArgument(executeCommand.Arguments[0])
-		if workspaceEdit, ok := arg.(*lsp.WorkspaceEdit); ok {
-			executeCommand.Arguments[0] = handler.ino2cppWorkspaceEdit(workspaceEdit)
-		}
-	}
+	panic("not implemented")
+	// if len(executeCommand.Arguments) == 1 {
+	// 	arg := handler.parseCommandArgument(executeCommand.Arguments[0])
+	// 	if workspaceEdit, ok := arg.(*lsp.WorkspaceEdit); ok {
+	// 		executeCommand.Arguments[0] = handler.ino2cppWorkspaceEdit(workspaceEdit)
+	// 	}
+	// }
 	return nil
 }
 
 func (handler *InoHandler) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
+	panic("not implemented")
 	newEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
-	for uri, edit := range origEdit.Changes {
-		if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
-			newValue := make([]lsp.TextEdit, len(edit))
-			for index := range edit {
-				newValue[index] = lsp.TextEdit{
-					NewText: edit[index].NewText,
-					Range:   data.sourceMap.InoToCppLSPRange(data.sourceURI, edit[index].Range),
-				}
-			}
-			newEdit.Changes[string(data.targetURI)] = newValue
-		} else {
-			newEdit.Changes[uri] = edit
-		}
-	}
+	// for uri, edit := range origEdit.Changes {
+	// 	if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
+	// 		newValue := make([]lsp.TextEdit, len(edit))
+	// 		for index := range edit {
+	// 			newValue[index] = lsp.TextEdit{
+	// 				NewText: edit[index].NewText,
+	// 				Range:   data.sourceMap.InoToCppLSPRange(data.sourceURI, edit[index].Range),
+	// 			}
+	// 		}
+	// 		newEdit.Changes[string(data.targetURI)] = newValue
+	// 	} else {
+	// 		newEdit.Changes[uri] = edit
+	// 	}
+	// }
 	return &newEdit
 }
 
@@ -768,135 +775,144 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 }
 
 func (handler *InoHandler) cpp2inoCompletionList(list *lsp.CompletionList, uri lsp.DocumentURI) {
-	if data, ok := handler.data[uri]; ok {
-		newItems := make([]lsp.CompletionItem, 0, len(list.Items))
-		for _, item := range list.Items {
-			if !strings.HasPrefix(item.InsertText, "_") {
-				if item.TextEdit != nil {
-					_, item.TextEdit.Range = data.sourceMap.CppToInoRange(item.TextEdit.Range)
-				}
-				newItems = append(newItems, item)
-			}
-		}
-		list.Items = newItems
-	}
+	panic("not implemented")
+	// if data, ok := handler.data[uri]; ok {
+	// 	newItems := make([]lsp.CompletionItem, 0, len(list.Items))
+	// 	for _, item := range list.Items {
+	// 		if !strings.HasPrefix(item.InsertText, "_") {
+	// 			if item.TextEdit != nil {
+	// 				_, item.TextEdit.Range = data.sourceMap.CppToInoRange(item.TextEdit.Range)
+	// 			}
+	// 			newItems = append(newItems, item)
+	// 		}
+	// 	}
+	// 	list.Items = newItems
+	// }
 }
 
 func (handler *InoHandler) cpp2inoCodeAction(codeAction *lsp.CodeAction, uri lsp.DocumentURI) {
-	codeAction.Edit = handler.cpp2inoWorkspaceEdit(codeAction.Edit)
-	if data, ok := handler.data[uri]; ok {
-		for index := range codeAction.Diagnostics {
-			_, codeAction.Diagnostics[index].Range = data.sourceMap.CppToInoRange(codeAction.Diagnostics[index].Range)
-		}
-	}
+	panic("not implemented")
+	// codeAction.Edit = handler.cpp2inoWorkspaceEdit(codeAction.Edit)
+	// if data, ok := handler.data[uri]; ok {
+	// 	for index := range codeAction.Diagnostics {
+	// 		_, codeAction.Diagnostics[index].Range = data.sourceMap.CppToInoRange(codeAction.Diagnostics[index].Range)
+	// 	}
+	// }
 }
 
 func (handler *InoHandler) cpp2inoCommand(command *lsp.Command) {
-	if len(command.Arguments) == 1 {
-		arg := handler.parseCommandArgument(command.Arguments[0])
-		if workspaceEdit, ok := arg.(*lsp.WorkspaceEdit); ok {
-			command.Arguments[0] = handler.cpp2inoWorkspaceEdit(workspaceEdit)
-		}
-	}
+	panic("not implemented")
+	// if len(command.Arguments) == 1 {
+	// 	arg := handler.parseCommandArgument(command.Arguments[0])
+	// 	if workspaceEdit, ok := arg.(*lsp.WorkspaceEdit); ok {
+	// 		command.Arguments[0] = handler.cpp2inoWorkspaceEdit(workspaceEdit)
+	// 	}
+	// }
 }
 
 func (handler *InoHandler) cpp2inoWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
-	newEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
-	for uri, edit := range origEdit.Changes {
-		if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
-			newValue := make([]lsp.TextEdit, len(edit))
-			for index := range edit {
-				_, newRange := data.sourceMap.CppToInoRange(edit[index].Range)
-				newValue[index] = lsp.TextEdit{
-					NewText: edit[index].NewText,
-					Range:   newRange,
-				}
-			}
-			newEdit.Changes[string(data.sourceURI)] = newValue
-		} else {
-			newEdit.Changes[uri] = edit
-		}
-	}
-	return &newEdit
+	panic("not implemented")
+	// newEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
+	// for uri, edit := range origEdit.Changes {
+	// 	if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
+	// 		newValue := make([]lsp.TextEdit, len(edit))
+	// 		for index := range edit {
+	// 			_, newRange := data.sourceMap.CppToInoRange(edit[index].Range)
+	// 			newValue[index] = lsp.TextEdit{
+	// 				NewText: edit[index].NewText,
+	// 				Range:   newRange,
+	// 			}
+	// 		}
+	// 		newEdit.Changes[string(data.sourceURI)] = newValue
+	// 	} else {
+	// 		newEdit.Changes[uri] = edit
+	// 	}
+	// }
+	// return &newEdit
 }
 
 func (handler *InoHandler) cpp2inoLocation(location *lsp.Location) {
-	if data, ok := handler.data[location.URI]; ok {
-		location.URI = data.sourceURI
-		_, location.Range = data.sourceMap.CppToInoRange(location.Range)
-	}
+	panic("not implemented")
+	// if data, ok := handler.data[location.URI]; ok {
+	// 	location.URI = data.sourceURI
+	// 	_, location.Range = data.sourceMap.CppToInoRange(location.Range)
+	// }
 }
 
 func (handler *InoHandler) cpp2inoDocumentHighlight(highlight *lsp.DocumentHighlight, uri lsp.DocumentURI) {
-	if data, ok := handler.data[uri]; ok {
-		_, highlight.Range = data.sourceMap.CppToInoRange(highlight.Range)
-	}
+	panic("not implemented")
+	// if data, ok := handler.data[uri]; ok {
+	// 	_, highlight.Range = data.sourceMap.CppToInoRange(highlight.Range)
+	// }
 }
 
 func (handler *InoHandler) cpp2inoTextEdit(edit *lsp.TextEdit, uri lsp.DocumentURI) {
-	if data, ok := handler.data[uri]; ok {
-		_, edit.Range = data.sourceMap.CppToInoRange(edit.Range)
-	}
+	panic("not implemented")
+	// if data, ok := handler.data[uri]; ok {
+	// 	_, edit.Range = data.sourceMap.CppToInoRange(edit.Range)
+	// }
 }
 
 func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymbol, uri lsp.DocumentURI) []lsp.DocumentSymbol {
-	data, ok := handler.data[uri]
-	if !ok || len(origSymbols) == 0 {
-		return origSymbols
-	}
+	panic("not implemented")
+	// data, ok := handler.data[uri]
+	// if !ok || len(origSymbols) == 0 {
+	// 	return origSymbols
+	// }
 
-	symbolIdx := make(map[string]*lsp.DocumentSymbol)
-	for i := 0; i < len(origSymbols); i++ {
-		symbol := &origSymbols[i]
-		_, symbol.Range = data.sourceMap.CppToInoRange(symbol.Range)
+	// symbolIdx := make(map[string]*lsp.DocumentSymbol)
+	// for i := 0; i < len(origSymbols); i++ {
+	// 	symbol := &origSymbols[i]
+	// 	_, symbol.Range = data.sourceMap.CppToInoRange(symbol.Range)
 
-		duplicate := false
-		other, duplicate := symbolIdx[symbol.Name]
-		if duplicate {
-			// We prefer symbols later in the file due to the function header generation. E.g. if one has a function `void foo() {}` somehwre in the code
-			// the code generation will add a `void foo();` header at the beginning of the cpp file. We care about the function body later in the file, not
-			// the header early on.
-			if other.Range.Start.Line < symbol.Range.Start.Line {
-				continue
-			}
-		}
+	// 	duplicate := false
+	// 	other, duplicate := symbolIdx[symbol.Name]
+	// 	if duplicate {
+	// 		// We prefer symbols later in the file due to the function header generation. E.g. if one has a function `void foo() {}` somehwre in the code
+	// 		// the code generation will add a `void foo();` header at the beginning of the cpp file. We care about the function body later in the file, not
+	// 		// the header early on.
+	// 		if other.Range.Start.Line < symbol.Range.Start.Line {
+	// 			continue
+	// 		}
+	// 	}
 
-		_, symbol.SelectionRange = data.sourceMap.CppToInoRange(symbol.SelectionRange)
-		symbol.Children = handler.cpp2inoDocumentSymbols(symbol.Children, uri)
-		symbolIdx[symbol.Name] = symbol
-	}
+	// 	_, symbol.SelectionRange = data.sourceMap.CppToInoRange(symbol.SelectionRange)
+	// 	symbol.Children = handler.cpp2inoDocumentSymbols(symbol.Children, uri)
+	// 	symbolIdx[symbol.Name] = symbol
+	// }
 
-	newSymbols := make([]lsp.DocumentSymbol, len(symbolIdx))
-	j := 0
-	for _, s := range symbolIdx {
-		newSymbols[j] = *s
-		j++
-	}
-	return newSymbols
+	// newSymbols := make([]lsp.DocumentSymbol, len(symbolIdx))
+	// j := 0
+	// for _, s := range symbolIdx {
+	// 	newSymbols[j] = *s
+	// 	j++
+	// }
+	// return newSymbols
 }
 
 func (handler *InoHandler) cpp2inoSymbolInformation(syms []*lsp.SymbolInformation) []lsp.SymbolInformation {
-	// Much like in cpp2inoDocumentSymbols we de-duplicate symbols based on file in-file location.
-	idx := make(map[string]*lsp.SymbolInformation)
-	for _, sym := range syms {
-		handler.cpp2inoLocation(&sym.Location)
+	panic("not implemented")
+	// // Much like in cpp2inoDocumentSymbols we de-duplicate symbols based on file in-file location.
+	// idx := make(map[string]*lsp.SymbolInformation)
+	// for _, sym := range syms {
+	// 	handler.cpp2inoLocation(&sym.Location)
 
-		nme := fmt.Sprintf("%s::%s", sym.ContainerName, sym.Name)
-		other, duplicate := idx[nme]
-		if duplicate && other.Location.Range.Start.Line < sym.Location.Range.Start.Line {
-			continue
-		}
+	// 	nme := fmt.Sprintf("%s::%s", sym.ContainerName, sym.Name)
+	// 	other, duplicate := idx[nme]
+	// 	if duplicate && other.Location.Range.Start.Line < sym.Location.Range.Start.Line {
+	// 		continue
+	// 	}
 
-		idx[nme] = sym
-	}
+	// 	idx[nme] = sym
+	// }
 
-	var j int
-	symbols := make([]lsp.SymbolInformation, len(idx))
-	for _, sym := range idx {
-		symbols[j] = *sym
-		j++
-	}
-	return symbols
+	// var j int
+	// symbols := make([]lsp.SymbolInformation, len(idx))
+	// for _, sym := range idx {
+	// 	symbols[j] = *sym
+	// 	j++
+	// }
+	// return symbols
 }
 
 // FromClangd handles a message received from clangd.
@@ -998,31 +1014,32 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 }
 
 func (handler *InoHandler) parseCommandArgument(rawArg interface{}) interface{} {
-	if m1, ok := rawArg.(map[string]interface{}); ok && len(m1) == 1 && m1["changes"] != nil {
-		m2 := m1["changes"].(map[string]interface{})
-		workspaceEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
-		for uri, rawValue := range m2 {
-			rawTextEdits := rawValue.([]interface{})
-			textEdits := make([]lsp.TextEdit, len(rawTextEdits))
-			for index := range rawTextEdits {
-				m3 := rawTextEdits[index].(map[string]interface{})
-				rawRange := m3["range"]
-				m4 := rawRange.(map[string]interface{})
-				rawStart := m4["start"]
-				m5 := rawStart.(map[string]interface{})
-				textEdits[index].Range.Start.Line = int(m5["line"].(float64))
-				textEdits[index].Range.Start.Character = int(m5["character"].(float64))
-				rawEnd := m4["end"]
-				m6 := rawEnd.(map[string]interface{})
-				textEdits[index].Range.End.Line = int(m6["line"].(float64))
-				textEdits[index].Range.End.Character = int(m6["character"].(float64))
-				textEdits[index].NewText = m3["newText"].(string)
-			}
-			workspaceEdit.Changes[uri] = textEdits
-		}
-		return &workspaceEdit
-	}
-	return nil
+	panic("not implemented")
+	// if m1, ok := rawArg.(map[string]interface{}); ok && len(m1) == 1 && m1["changes"] != nil {
+	// 	m2 := m1["changes"].(map[string]interface{})
+	// 	workspaceEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
+	// 	for uri, rawValue := range m2 {
+	// 		rawTextEdits := rawValue.([]interface{})
+	// 		textEdits := make([]lsp.TextEdit, len(rawTextEdits))
+	// 		for index := range rawTextEdits {
+	// 			m3 := rawTextEdits[index].(map[string]interface{})
+	// 			rawRange := m3["range"]
+	// 			m4 := rawRange.(map[string]interface{})
+	// 			rawStart := m4["start"]
+	// 			m5 := rawStart.(map[string]interface{})
+	// 			textEdits[index].Range.Start.Line = int(m5["line"].(float64))
+	// 			textEdits[index].Range.Start.Character = int(m5["character"].(float64))
+	// 			rawEnd := m4["end"]
+	// 			m6 := rawEnd.(map[string]interface{})
+	// 			textEdits[index].Range.End.Line = int(m6["line"].(float64))
+	// 			textEdits[index].Range.End.Character = int(m6["character"].(float64))
+	// 			textEdits[index].NewText = m3["newText"].(string)
+	// 		}
+	// 		workspaceEdit.Changes[uri] = textEdits
+	// 	}
+	// 	return &workspaceEdit
+	// }
+	// return nil
 }
 
 func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {

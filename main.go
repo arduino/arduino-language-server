@@ -2,10 +2,9 @@ package main
 
 import (
 	"flag"
-	"io"
 	"log"
 	"os"
-	"runtime/debug"
+	"syscall"
 
 	"github.com/arduino/go-paths-helper"
 	"github.com/bcmi-labs/arduino-language-server/handler"
