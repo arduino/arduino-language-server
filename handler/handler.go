@@ -180,6 +180,23 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
 		log.Printf("    --> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
 
+	case *lsp.CodeActionParams:
+		// method "textDocument/codeAction"
+		uri = p.TextDocument.URI
+		log.Printf("--> codeAction(%s:%s)", p.TextDocument.URI, p.Range.Start)
+
+		if err := handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument); err != nil {
+			break
+		}
+		if p.TextDocument.URI.AsPath().EquivalentTo(handler.buildSketchCpp) {
+			p.Range = handler.sketchMapper.InoToCppLSPRange(uri, p.Range)
+			for index := range p.Context.Diagnostics {
+				r := &p.Context.Diagnostics[index].Range
+				*r = handler.sketchMapper.InoToCppLSPRange(uri, *r)
+			}
+		}
+		log.Printf("    --> codeAction(%s:%s)", p.TextDocument.URI, p.Range.Start)
+
 	case *lsp.HoverParams:
 		// method: "textDocument/hover"
 		uri = p.TextDocument.URI
@@ -200,11 +217,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		uri = p.TextDocument.URI
 		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 		handler.deleteFileData(uri)
-	case *lsp.CodeActionParams: // "textDocument/codeAction":
-		log.Printf("--X " + req.Method)
-		return nil, nil
-		uri = p.TextDocument.URI
-		err = handler.ino2cppCodeActionParams(p)
 	// case "textDocument/signatureHelp":
 	// 	fallthrough
 	// case "textDocument/definition":
@@ -607,20 +619,6 @@ func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDoc
 	return nil
 }
 
-func (handler *InoHandler) ino2cppCodeActionParams(params *lsp.CodeActionParams) error {
-	panic("not implemented")
-	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
-	// if data, ok := handler.data[params.TextDocument.URI]; ok {
-	// 	params.Range = data.sourceMap.InoToCppLSPRange(data.sourceURI, params.Range)
-	// 	for index := range params.Context.Diagnostics {
-	// 		r := &params.Context.Diagnostics[index].Range
-	// 		*r = data.sourceMap.InoToCppLSPRange(data.sourceURI, *r)
-	// 	}
-	// 	return nil
-	// }
-	return unknownURI(params.TextDocument.URI)
-}
-
 func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.DocumentRangeFormattingParams) error {
 	panic("not implemented")
 	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
@@ -727,7 +725,12 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		log.Printf("<-- completion(%d items)", len(r.Items))
 		return r
 
-	case *[]*lsp.CommandOrCodeAction: // "textDocument/codeAction":
+	case *[]*lsp.CommandOrCodeAction:
+		// method "textDocument/codeAction"
+		// TODO: implement response
+		r = &[]*lsp.CommandOrCodeAction{}
+		log.Printf("<-- codeAction(empty)")
+		break
 		for index := range *r {
 			command := (*r)[index].Command
 			if command != nil {
@@ -738,6 +741,7 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 				handler.cpp2inoCodeAction(codeAction, uri)
 			}
 		}
+
 	// case "textDocument/definition":
 	// 	fallthrough
 	// case "textDocument/typeDefinition":
