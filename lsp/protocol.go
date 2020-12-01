@@ -154,7 +154,7 @@ func SendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/documentSymbol":
-		result := new([]*DocumentSymbolOrSymbolInformation)
+		result := new(DocumentSymbolArrayOrSymbolInformationArray)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/rename":
@@ -252,35 +252,40 @@ type DocumentSymbol struct {
 	Children       []DocumentSymbol `json:"children,omitempty"`
 }
 
-type DocumentSymbolOrSymbolInformation struct {
-	DocumentSymbol    *DocumentSymbol
-	SymbolInformation *SymbolInformation
+type DocumentSymbolArrayOrSymbolInformationArray struct {
+	DocumentSymbolArray    *[]DocumentSymbol
+	SymbolInformationArray *[]SymbolInformation
 }
 
-type documentSymbolOrSymbolInformationDiscriminator struct {
-	Range    *Range    `json:"range,omitempty"`
-	Location *Location `json:"location,omitempty"`
-}
-
-func (entry *DocumentSymbolOrSymbolInformation) UnmarshalJSON(raw []byte) error {
-	discriminator := new(documentSymbolOrSymbolInformationDiscriminator)
-	err := json.Unmarshal(raw, discriminator)
-	if err != nil {
+func (entry *DocumentSymbolArrayOrSymbolInformationArray) UnmarshalJSON(raw []byte) error {
+	intermediate := []json.RawMessage{}
+	if err := json.Unmarshal(raw, &intermediate); err != nil {
+		return err
+	}
+	discriminator := struct {
+		Range    *Range    `json:"range,omitempty"`
+		Location *Location `json:"location,omitempty"`
+	}{}
+	if err := json.Unmarshal(intermediate[0], &discriminator); err != nil {
 		return err
 	}
 	if discriminator.Range != nil {
-		entry.DocumentSymbol = new(DocumentSymbol)
-		err = json.Unmarshal(raw, entry.DocumentSymbol)
-		if err != nil {
-			return err
+		res := make([]DocumentSymbol, len(intermediate))
+		for i, item := range intermediate {
+			if err := json.Unmarshal(item, &res[i]); err != nil {
+				return err
+			}
 		}
+		entry.DocumentSymbolArray = &res
 	}
 	if discriminator.Location != nil {
-		entry.SymbolInformation = new(SymbolInformation)
-		err = json.Unmarshal(raw, entry.SymbolInformation)
-		if err != nil {
-			return err
+		res := make([]SymbolInformation, len(intermediate))
+		for i, item := range intermediate {
+			if err := json.Unmarshal(item, &res[i]); err != nil {
+				return err
+			}
 		}
+		entry.SymbolInformationArray = &res
 	}
 	return nil
 }

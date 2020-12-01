@@ -206,6 +206,14 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ino2cppTextDocumentPositionParams(doc)
 		log.Printf("    --> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
 
+	case *lsp.DocumentSymbolParams:
+		// method "textDocument/documentSymbol"
+		uri = p.TextDocument.URI
+		log.Printf("--> documentSymbol(%s)", p.TextDocument.URI)
+
+		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
+		log.Printf("    --> documentSymbol(%s)", p.TextDocument.URI)
+
 	case *lsp.DidSaveTextDocumentParams: // "textDocument/didSave":
 		log.Printf("--X " + req.Method)
 		return nil, nil
@@ -250,11 +258,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		return nil, nil
 		uri = p.TextDocument.URI
 		err = handler.ino2cppDocumentOnTypeFormattingParams(p)
-	case *lsp.DocumentSymbolParams: // "textDocument/documentSymbol":
-		log.Printf("--X " + req.Method)
-		return nil, nil
-		uri = p.TextDocument.URI
-		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
 	case *lsp.RenameParams: // "textDocument/rename":
 		log.Printf("--X " + req.Method)
 		return nil, nil
@@ -725,6 +728,19 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		log.Printf("<-- completion(%d items)", len(r.Items))
 		return r
 
+	case *lsp.DocumentSymbolArrayOrSymbolInformationArray:
+		// method "textDocument/documentSymbol"
+
+		if r.DocumentSymbolArray != nil {
+			// Treat the input as []DocumentSymbol
+			return handler.cpp2inoDocumentSymbols(*r.DocumentSymbolArray, uri)
+		} else if r.SymbolInformationArray != nil {
+			// Treat the input as []SymbolInformation
+			return handler.cpp2inoSymbolInformation(*r.SymbolInformationArray)
+		} else {
+			// Treat the input as null
+		}
+
 	case *[]*lsp.CommandOrCodeAction:
 		// method "textDocument/codeAction"
 		// TODO: implement response
@@ -763,28 +779,6 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	case *[]lsp.TextEdit: // "textDocument/onTypeFormatting":
 		for index := range *r {
 			handler.cpp2inoTextEdit(&(*r)[index], uri)
-		}
-	case *[]*lsp.DocumentSymbolOrSymbolInformation: // "textDocument/documentSymbol":
-		if len(*r) == 0 {
-			return result
-		}
-
-		slice := *r
-		if slice[0].DocumentSymbol != nil {
-			// Treat the input as []DocumentSymbol
-			symbols := make([]lsp.DocumentSymbol, len(slice))
-			for index := range slice {
-				symbols[index] = *slice[index].DocumentSymbol
-			}
-			return handler.cpp2inoDocumentSymbols(symbols, uri)
-		}
-		if slice[0].SymbolInformation != nil {
-			// Treat the input as []SymbolInformation
-			symbols := make([]*lsp.SymbolInformation, len(slice))
-			for i, s := range slice {
-				symbols[i] = s.SymbolInformation
-			}
-			return handler.cpp2inoSymbolInformation(symbols)
 		}
 	case *lsp.WorkspaceEdit: // "textDocument/rename":
 		return handler.cpp2inoWorkspaceEdit(r)
@@ -859,44 +853,47 @@ func (handler *InoHandler) cpp2inoTextEdit(edit *lsp.TextEdit, uri lsp.DocumentU
 	// }
 }
 
-func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymbol, uri lsp.DocumentURI) []lsp.DocumentSymbol {
-	panic("not implemented")
-	// data, ok := handler.data[uri]
-	// if !ok || len(origSymbols) == 0 {
-	// 	return origSymbols
-	// }
+func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymbol, origURI lsp.DocumentURI) []lsp.DocumentSymbol {
+	if origURI.AsPath().Ext() != ".ino" || len(origSymbols) == 0 {
+		return origSymbols
+	}
 
-	// symbolIdx := make(map[string]*lsp.DocumentSymbol)
-	// for i := 0; i < len(origSymbols); i++ {
-	// 	symbol := &origSymbols[i]
-	// 	_, symbol.Range = data.sourceMap.CppToInoRange(symbol.Range)
+	inoSymbols := []lsp.DocumentSymbol{}
+	for _, symbol := range origSymbols {
+		if handler.sketchMapper.IsPreprocessedCppLine(symbol.Range.Start.Line) {
+			continue
+		}
 
-	// 	duplicate := false
-	// 	other, duplicate := symbolIdx[symbol.Name]
-	// 	if duplicate {
-	// 		// We prefer symbols later in the file due to the function header generation. E.g. if one has a function `void foo() {}` somehwre in the code
-	// 		// the code generation will add a `void foo();` header at the beginning of the cpp file. We care about the function body later in the file, not
-	// 		// the header early on.
-	// 		if other.Range.Start.Line < symbol.Range.Start.Line {
-	// 			continue
-	// 		}
-	// 	}
+		inoFile, inoRange := handler.sketchMapper.CppToInoRange(symbol.Range)
+		inoSelectionURI, inoSelectionRange := handler.sketchMapper.CppToInoRange(symbol.SelectionRange)
 
-	// 	_, symbol.SelectionRange = data.sourceMap.CppToInoRange(symbol.SelectionRange)
-	// 	symbol.Children = handler.cpp2inoDocumentSymbols(symbol.Children, uri)
-	// 	symbolIdx[symbol.Name] = symbol
-	// }
+		if inoFile != inoSelectionURI {
+			log.Printf("    ERROR: symbol range and selection belongs to different URI!")
+			log.Printf("           > %s != %s", symbol.Range, symbol.SelectionRange)
+			log.Printf("           > %s:%s != %s:%s", inoFile, inoRange, inoSelectionURI, inoSelectionRange)
+			continue
+		}
 
-	// newSymbols := make([]lsp.DocumentSymbol, len(symbolIdx))
-	// j := 0
-	// for _, s := range symbolIdx {
-	// 	newSymbols[j] = *s
-	// 	j++
-	// }
-	// return newSymbols
+		if inoFile != origURI.Unbox() {
+			//log.Printf("    skipping symbol related to %s", inoFile)
+			continue
+		}
+
+		inoSymbols = append(inoSymbols, lsp.DocumentSymbol{
+			Name:           symbol.Name,
+			Detail:         symbol.Detail,
+			Deprecated:     symbol.Deprecated,
+			Kind:           symbol.Kind,
+			Range:          inoRange,
+			SelectionRange: inoSelectionRange,
+			Children:       handler.cpp2inoDocumentSymbols(symbol.Children, origURI),
+		})
+	}
+
+	return inoSymbols
 }
 
-func (handler *InoHandler) cpp2inoSymbolInformation(syms []*lsp.SymbolInformation) []lsp.SymbolInformation {
+func (handler *InoHandler) cpp2inoSymbolInformation(syms []lsp.SymbolInformation) []lsp.SymbolInformation {
 	panic("not implemented")
 	// // Much like in cpp2inoDocumentSymbols we de-duplicate symbols based on file in-file location.
 	// idx := make(map[string]*lsp.SymbolInformation)

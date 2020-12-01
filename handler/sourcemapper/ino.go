@@ -99,6 +99,14 @@ func (s *InoMapper) CppToInoLineOk(targetLine int) (string, int, bool) {
 	return res.File, res.Line, ok
 }
 
+// IsPreprocessedCppLine returns true if the give .cpp line is part of the
+// section added by the arduino preprocessor.
+func (s *InoMapper) IsPreprocessedCppLine(cppLine int) bool {
+	_, preprocessed := s.cppPreprocessed[cppLine]
+	_, mapsToIno := s.toIno[cppLine]
+	return preprocessed || !mapsToIno
+}
+
 // CreateInoMapper create a InoMapper from the given target file
 func CreateInoMapper(targetFile []byte) *InoMapper {
 	mapper := &InoMapper{
