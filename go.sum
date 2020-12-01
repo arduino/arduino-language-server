@@ -14,6 +14,8 @@ github.com/arduino/go-paths-helper v1.0.1/go.mod h1:HpxtKph+g238EJHq4geEPv9p+gl3
 github.com/arduino/go-paths-helper v1.2.0/go.mod h1:HpxtKph+g238EJHq4geEPv9p+gl3v5YYu35Yb+w31Ck=
 github.com/arduino/go-paths-helper v1.3.2 h1:5U9TSKQODiwSVgTxskC0PNl0l0Vf40GUlp99Zy2SK8w=
 github.com/arduino/go-paths-helper v1.3.2/go.mod h1:HpxtKph+g238EJHq4geEPv9p+gl3v5YYu35Yb+w31Ck=
+github.com/arduino/go-paths-helper v1.3.3 h1:r51Mix4GkYqiaF9IuRTtRE3Y/WFA0C47WwG/VZAkbcI=
+github.com/arduino/go-paths-helper v1.3.3/go.mod h1:HpxtKph+g238EJHq4geEPv9p+gl3v5YYu35Yb+w31Ck=
 github.com/arduino/go-properties-orderedmap v1.3.0/go.mod h1:DKjD2VXY/NZmlingh4lSFMEYCVubfeArCsGPGDwb2yk=
 github.com/arduino/go-properties-orderedmap v1.4.0 h1:YEbbzPqm1gXWDM/Jaq8tlvmh09z2qeHPJTUw9/VA4Dk=
 github.com/arduino/go-properties-orderedmap v1.4.0/go.mod h1:DKjD2VXY/NZmlingh4lSFMEYCVubfeArCsGPGDwb2yk=

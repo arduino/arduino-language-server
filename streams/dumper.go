@@ -34,7 +34,7 @@ func LogReadWriteCloserToFile(upstream io.ReadWriteCloser, file *os.File) io.Rea
 // OpenLogFileAs creates a log file in GlobalLogDirectory.
 func OpenLogFileAs(filename string) *os.File {
 	path := GlobalLogDirectory.Join(filename)
-	res, err := path.Create()
+	res, err := path.Append()
 	if err != nil {
 		log.Fatalf("Error opening log file: %s", err)
 	} else {
