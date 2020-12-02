@@ -150,17 +150,16 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			log.Printf("     > %s -> '%s'", change.Range, strconv.Quote(change.Text))
 		}
 
-		res, err := handler.didChange(ctx, p)
-		if err != nil {
+		if res, err := handler.didChange(ctx, p); err != nil {
 			log.Printf("    --E error: %s", err)
 			return nil, err
-		}
-		if res == nil {
+		} else if res == nil {
 			log.Println("    --X notification is not propagated to clangd")
 			return nil, err // do not propagate to clangd
+		} else {
+			p = res
 		}
 
-		p = res
 		log.Printf("    --> didChange(%s@%d)", p.TextDocument.URI, p.TextDocument.Version)
 		for _, change := range p.ContentChanges {
 			log.Printf("         > %s -> '%s'", change.Range, strconv.Quote(change.Text))
@@ -432,11 +431,13 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 	if trackedDoc.Version+1 != doc.Version {
 		return nil, errors.Errorf("document out-of-sync: expected version %d but got %d", trackedDoc.Version+1, doc.Version)
 	}
-	trackedDoc.Version++
+	for _, change := range req.ContentChanges {
+		textutils.ApplyLSPTextDocumentContentChangeEvent(trackedDoc, &change)
+	}
 
+	// If changes are applied to a .ino file we increment the global .ino.cpp versioning
+	// for each increment of the single .ino file.
 	if doc.URI.AsPath().Ext() == ".ino" {
-		// If changes are applied to a .ino file we increment the global .ino.cpp versioning
-		// for each increment of the single .ino file.
 
 		cppChanges := []lsp.TextDocumentContentChangeEvent{}
 		for _, inoChange := range req.ContentChanges {
@@ -475,14 +476,15 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 			},
 		}
 		return cppReq, nil
-	} else {
-
-		// TODO
-		return nil, unknownURI(doc.URI)
-
 	}
 
-	return nil, unknownURI(doc.URI)
+	// If changes are applied to other files pass them by converting just the URI
+	cppReq := &lsp.DidChangeTextDocumentParams{
+		TextDocument:   req.TextDocument,
+		ContentChanges: req.ContentChanges,
+	}
+	err := handler.sketchToBuildPathTextDocumentIdentifier(&cppReq.TextDocument.TextDocumentIdentifier)
+	return cppReq, err
 }
 
 func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, change *lsp.TextDocumentContentChangeEvent) (err error) {

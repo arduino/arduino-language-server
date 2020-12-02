@@ -6,6 +6,17 @@ import (
 	"github.com/bcmi-labs/arduino-language-server/lsp"
 )
 
+// ApplyLSPTextDocumentContentChangeEvent applies the LSP change in the given text
+func ApplyLSPTextDocumentContentChangeEvent(textDoc *lsp.TextDocumentItem, change *lsp.TextDocumentContentChangeEvent) error {
+	newText, err := ApplyTextChange(textDoc.Text, *change.Range, change.Text)
+	if err != nil {
+		return err
+	}
+	textDoc.Text = newText
+	textDoc.Version++
+	return nil
+}
+
 // ApplyTextChange replaces startingText substring specified by replaceRange with insertText
 func ApplyTextChange(startingText string, replaceRange lsp.Range, insertText string) (res string, err error) {
 	start, err := getOffset(startingText, replaceRange.Start)
