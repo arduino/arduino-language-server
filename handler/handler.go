@@ -100,6 +100,7 @@ func (handler *InoHandler) StopClangd() {
 // HandleMessageFromIDE handles a message received from the IDE client (via stdio).
 func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
 	needsWriteLock := map[string]bool{
+		"initialize":             true,
 		"textDocument/didOpen":   true,
 		"textDocument/didChange": true,
 		"textDocument/didClose":  true,
@@ -697,9 +698,6 @@ func (handler *InoHandler) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *ls
 }
 
 func (handler *InoHandler) transformClangdResult(method string, uri lsp.DocumentURI, result interface{}) interface{} {
-	handler.synchronizer.DataMux.RLock()
-	defer handler.synchronizer.DataMux.RUnlock()
-
 	cppToIno := uri != "" && uri.AsPath().EquivalentTo(handler.buildSketchCpp)
 
 	switch r := result.(type) {
