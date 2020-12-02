@@ -105,11 +105,11 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		"textDocument/didClose":  true,
 	}
 	if needsWriteLock[req.Method] {
-		// handler.synchronizer.DataMux.Lock()
-		// defer handler.synchronizer.DataMux.Unlock()
+		handler.synchronizer.DataMux.Lock()
+		defer handler.synchronizer.DataMux.Unlock()
 	} else {
-		// handler.synchronizer.DataMux.RLock()
-		// defer handler.synchronizer.DataMux.RUnlock()
+		handler.synchronizer.DataMux.RLock()
+		defer handler.synchronizer.DataMux.RUnlock()
 	}
 
 	// Handle LSP methods: transform parameters and send to clangd
@@ -125,18 +125,14 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	switch p := params.(type) {
 	case *lsp.InitializeParams:
 		// method "initialize"
-		handler.synchronizer.DataMux.RLock()
 		err = handler.initializeWorkbench(ctx, p)
-		handler.synchronizer.DataMux.RUnlock()
 
 	case *lsp.DidOpenTextDocumentParams:
 		// method "textDocument/didOpen"
 		uri = p.TextDocument.URI
 		log.Printf("--> didOpen(%s@%d as '%s')", p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.LanguageID)
 
-		handler.synchronizer.DataMux.Lock()
 		res, err := handler.didOpen(ctx, p)
-		handler.synchronizer.DataMux.Unlock()
 
 		if res == nil {
 			log.Println("    --X notification is not propagated to clangd")
