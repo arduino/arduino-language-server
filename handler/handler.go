@@ -672,7 +672,7 @@ func (handler *InoHandler) ino2cppExecuteCommand(executeCommand *lsp.ExecuteComm
 
 func (handler *InoHandler) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
 	panic("not implemented")
-	newEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
+	newEdit := lsp.WorkspaceEdit{Changes: make(map[lsp.DocumentURI][]lsp.TextEdit)}
 	// for uri, edit := range origEdit.Changes {
 	// 	if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
 	// 		newValue := make([]lsp.TextEdit, len(edit))
@@ -737,22 +737,22 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 			// Treat the input as null
 		}
 
-	case *[]*lsp.CommandOrCodeAction:
+	case *[]lsp.CommandOrCodeAction:
 		// method "textDocument/codeAction"
-		// TODO: implement response
-		r = &[]*lsp.CommandOrCodeAction{}
-		log.Printf("<-- codeAction(empty)")
-		break
-		for index := range *r {
-			command := (*r)[index].Command
-			if command != nil {
-				handler.cpp2inoCommand(command)
+		log.Printf("    <-- codeAction(%d elements)", len(*r))
+		for i, item := range *r {
+			(*r)[i] = lsp.CommandOrCodeAction{
+				Command:    handler.cpp2inoCommand(item.Command),
+				CodeAction: handler.cpp2inoCodeAction(item.CodeAction, uri),
 			}
-			codeAction := (*r)[index].CodeAction
-			if codeAction != nil {
-				handler.cpp2inoCodeAction(codeAction, uri)
+			if item.Command != nil {
+				log.Printf("        > Command: %s", item.Command.Title)
+			}
+			if item.CodeAction != nil {
+				log.Printf("        > CodeAction: %s", item.CodeAction.Title)
 			}
 		}
+		log.Printf("<-- codeAction(%d elements)", len(*r))
 
 	// case "textDocument/definition":
 	// 	fallthrough
@@ -786,45 +786,73 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	return result
 }
 
-func (handler *InoHandler) cpp2inoCodeAction(codeAction *lsp.CodeAction, uri lsp.DocumentURI) {
-	panic("not implemented")
-	// codeAction.Edit = handler.cpp2inoWorkspaceEdit(codeAction.Edit)
-	// if data, ok := handler.data[uri]; ok {
-	// 	for index := range codeAction.Diagnostics {
-	// 		_, codeAction.Diagnostics[index].Range = data.sourceMap.CppToInoRange(codeAction.Diagnostics[index].Range)
-	// 	}
-	// }
+func (handler *InoHandler) cpp2inoCodeAction(codeAction *lsp.CodeAction, uri lsp.DocumentURI) *lsp.CodeAction {
+	if codeAction == nil {
+		return nil
+	}
+	inoCodeAction := &lsp.CodeAction{
+		Title:       codeAction.Title,
+		Kind:        codeAction.Kind,
+		Edit:        handler.cpp2inoWorkspaceEdit(codeAction.Edit),
+		Diagnostics: codeAction.Diagnostics,
+		Command:     handler.cpp2inoCommand(codeAction.Command),
+	}
+	if uri.AsPath().Ext() == ".ino" {
+		for i, diag := range inoCodeAction.Diagnostics {
+			_, inoCodeAction.Diagnostics[i].Range = handler.sketchMapper.CppToInoRange(diag.Range)
+		}
+	}
+	return inoCodeAction
 }
 
-func (handler *InoHandler) cpp2inoCommand(command *lsp.Command) {
-	panic("not implemented")
-	// if len(command.Arguments) == 1 {
-	// 	arg := handler.parseCommandArgument(command.Arguments[0])
-	// 	if workspaceEdit, ok := arg.(*lsp.WorkspaceEdit); ok {
-	// 		command.Arguments[0] = handler.cpp2inoWorkspaceEdit(workspaceEdit)
-	// 	}
-	// }
+func (handler *InoHandler) cpp2inoCommand(command *lsp.Command) *lsp.Command {
+	if command == nil {
+		return nil
+	}
+	inoCommand := &lsp.Command{
+		Title:     command.Title,
+		Command:   command.Command,
+		Arguments: command.Arguments,
+	}
+	if len(command.Arguments) == 1 {
+		arg := handler.parseCommandArgument(inoCommand.Arguments[0])
+		if workspaceEdit, ok := arg.(*lsp.WorkspaceEdit); ok {
+			inoCommand.Arguments[0] = handler.cpp2inoWorkspaceEdit(workspaceEdit)
+		}
+	}
+	return inoCommand
 }
 
-func (handler *InoHandler) cpp2inoWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
-	panic("not implemented")
-	// newEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
-	// for uri, edit := range origEdit.Changes {
-	// 	if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
-	// 		newValue := make([]lsp.TextEdit, len(edit))
-	// 		for index := range edit {
-	// 			_, newRange := data.sourceMap.CppToInoRange(edit[index].Range)
-	// 			newValue[index] = lsp.TextEdit{
-	// 				NewText: edit[index].NewText,
-	// 				Range:   newRange,
-	// 			}
-	// 		}
-	// 		newEdit.Changes[string(data.sourceURI)] = newValue
-	// 	} else {
-	// 		newEdit.Changes[uri] = edit
-	// 	}
-	// }
-	// return &newEdit
+func (handler *InoHandler) cpp2inoWorkspaceEdit(origWorkspaceEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
+	if origWorkspaceEdit == nil {
+		return nil
+	}
+	resWorkspaceEdit := &lsp.WorkspaceEdit{
+		Changes: map[lsp.DocumentURI][]lsp.TextEdit{},
+	}
+	for editURI, edits := range origWorkspaceEdit.Changes {
+		// if the edits are not relative to sketch file...
+		if !editURI.AsPath().EquivalentTo(handler.buildSketchCpp) {
+			// ...pass them through...
+			resWorkspaceEdit.Changes[editURI] = edits
+			continue
+		}
+
+		// ...otherwise convert edits to the sketch.ino.cpp into multilpe .ino edits
+		for _, edit := range edits {
+			cppRange := edit.Range
+			inoFile, inoRange := handler.sketchMapper.CppToInoRange(cppRange)
+			inoURI := lsp.NewDocumentURI(inoFile)
+			if _, have := resWorkspaceEdit.Changes[inoURI]; !have {
+				resWorkspaceEdit.Changes[inoURI] = []lsp.TextEdit{}
+			}
+			resWorkspaceEdit.Changes[inoURI] = append(resWorkspaceEdit.Changes[inoURI], lsp.TextEdit{
+				NewText: edit.NewText,
+				Range:   inoRange,
+			})
+		}
+	}
+	return resWorkspaceEdit
 }
 
 func (handler *InoHandler) cpp2inoLocation(location *lsp.Location) {
@@ -1013,7 +1041,9 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 }
 
 func (handler *InoHandler) parseCommandArgument(rawArg interface{}) interface{} {
+	log.Printf("        TRY TO PARSE: %+v", rawArg)
 	panic("not implemented")
+	return nil
 	// if m1, ok := rawArg.(map[string]interface{}); ok && len(m1) == 1 && m1["changes"] != nil {
 	// 	m2 := m1["changes"].(map[string]interface{})
 	// 	workspaceEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}

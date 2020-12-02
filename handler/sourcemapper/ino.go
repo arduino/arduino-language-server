@@ -16,7 +16,6 @@ import (
 type InoMapper struct {
 	InoText         map[lsp.DocumentURI]*SourceRevision
 	CppText         *SourceRevision
-	CppFile         lsp.DocumentURI
 	toCpp           map[InoLine]int // Converts File.ino:line -> line
 	toIno           map[int]InoLine // Convers line -> File.ino:line
 	inoPreprocessed map[InoLine]int // map of the lines taken by the preprocessor: File.ino:line -> preprocessed line

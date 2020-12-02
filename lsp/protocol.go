@@ -116,7 +116,7 @@ func SendRequest(ctx context.Context, conn *jsonrpc2.Conn, method string, params
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "textDocument/codeAction":
-		result := new([]*CommandOrCodeAction)
+		result := new([]CommandOrCodeAction)
 		err := conn.Call(ctx, method, params, result)
 		return result, err
 	case "completionItem/resolve":
