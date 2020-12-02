@@ -13,6 +13,8 @@ func ReadParams(method string, raw *json.RawMessage) (interface{}, error) {
 		params := new(InitializeParams)
 		err := json.Unmarshal(*raw, params)
 		return params, err
+	case "initialized":
+		return &InitializedParams{}, nil
 	case "textDocument/didOpen":
 		params := new(DidOpenTextDocumentParams)
 		err := json.Unmarshal(*raw, params)

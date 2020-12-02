@@ -127,6 +127,10 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		// method "initialize"
 		err = handler.initializeWorkbench(ctx, p)
 
+	case *lsp.InitializedParams:
+		// method "initialized"
+		log.Println("--> initialized")
+
 	case *lsp.DidOpenTextDocumentParams:
 		// method "textDocument/didOpen"
 		uri = p.TextDocument.URI
