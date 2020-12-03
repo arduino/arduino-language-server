@@ -67,10 +67,14 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 type InoHandler struct {
 	StdioConn               *jsonrpc2.Conn
 	ClangdConn              *jsonrpc2.Conn
+	lspInitializeParams     *lsp.InitializeParams
 	buildPath               *paths.Path
 	buildSketchRoot         *paths.Path
 	buildSketchCpp          *paths.Path
 	buildSketchCppVersion   int
+	buildSketchSymbols      []lsp.DocumentSymbol
+	buildSketchSymbolsLoad  bool
+	buildSketchSymbolsCheck bool
 	sketchRoot              *paths.Path
 	sketchName              string
 	sketchMapper            *sourcemapper.InoMapper
@@ -125,7 +129,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	switch p := params.(type) {
 	case *lsp.InitializeParams:
 		// method "initialize"
-		err = handler.initializeWorkbench(ctx, p)
+		err = handler.initializeWorkbench(p)
 
 	case *lsp.InitializedParams:
 		// method "initialized"
@@ -290,6 +294,11 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			log.Println("    sent", req.Method, "request id", req.ID, " to clangd")
 		}
 	}
+	if err == nil && handler.buildSketchSymbolsLoad {
+		handler.buildSketchSymbolsLoad = false
+		log.Println("Resfreshing document symbols")
+		err = handler.refreshCppDocumentSymbols()
+	}
 	if err != nil {
 		// Exit the process and trigger a restart by the client in case of a severe error
 		if err.Error() == "context deadline exceeded" {
@@ -315,10 +324,11 @@ func (handler *InoHandler) exit() {
 	os.Exit(1)
 }
 
-func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.InitializeParams) error {
+func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) error {
 	rootURI := params.RootURI
 	log.Printf("--> initializeWorkbench(%s)\n", rootURI)
 
+	handler.lspInitializeParams = params
 	handler.sketchRoot = rootURI.AsPath()
 	handler.sketchName = handler.sketchRoot.Base()
 	if buildPath, err := generateBuildEnvironment(handler.sketchRoot, handler.config.SelectedBoard.Fqbn); err == nil {
@@ -329,6 +339,8 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 	}
 	handler.buildSketchCpp = handler.buildSketchRoot.Join(handler.sketchName + ".ino.cpp")
 	handler.buildSketchCppVersion = 1
+	handler.lspInitializeParams.RootPath = handler.buildSketchRoot.String()
+	handler.lspInitializeParams.RootURI = lsp.NewDocumenteURIFromPath(handler.buildSketchRoot)
 
 	if cppContent, err := handler.buildSketchCpp.ReadFile(); err == nil {
 		handler.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
@@ -349,8 +361,26 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 	clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
 	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
 
-	params.RootPath = handler.buildSketchRoot.String()
-	params.RootURI = lsp.NewDocumenteURIFromPath(handler.buildSketchRoot)
+	return nil
+}
+
+func (handler *InoHandler) refreshCppDocumentSymbols() error {
+	// Query source code symbols
+	cppURI := lsp.NewDocumenteURIFromPath(handler.buildSketchCpp)
+	log.Printf("    --> documentSymbol(%s)", cppURI)
+	result, err := lsp.SendRequest(context.Background(), handler.ClangdConn, "textDocument/documentSymbol", &lsp.DocumentSymbolParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
+	})
+	if err != nil {
+		return errors.WithMessage(err, "quering source code symbols")
+	}
+	result = handler.transformClangdResult("textDocument/documentSymbol", cppURI, result)
+	if symbols, ok := result.([]lsp.DocumentSymbol); !ok {
+		return errors.WithMessage(err, "quering source code symbols (2)")
+	} else {
+		handler.buildSketchSymbols = symbols
+		log.Printf("%+v\n", symbols)
+	}
 	return nil
 }
 
@@ -419,6 +449,9 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 					Version:    handler.buildSketchCppVersion,
 				},
 			}
+
+			// Trigger a documentSymbol load
+			handler.buildSketchSymbolsLoad = true
 			return newParam, err
 		}
 	}
