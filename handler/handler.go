@@ -432,7 +432,7 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 	if !ok {
 		return nil, unknownURI(doc.URI)
 	}
-	if trackedDoc.Version+1 != doc.Version {
+	if trackedDoc.Version+len(req.ContentChanges) != doc.Version {
 		return nil, errors.Errorf("document out-of-sync: expected version %d but got %d", trackedDoc.Version+1, doc.Version)
 	}
 	for _, change := range req.ContentChanges {
