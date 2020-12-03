@@ -77,7 +77,6 @@ type InoHandler struct {
 	sketchTrackedFilesCount int
 	trackedFiles            map[lsp.DocumentURI]*lsp.TextDocumentItem
 
-	//data         map[lsp.DocumentURI]*FileData
 	config       lsp.BoardConfig
 	synchronizer Synchronizer
 }
