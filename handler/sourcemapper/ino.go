@@ -180,6 +180,10 @@ func (s *InoMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDo
 	s.CppText.Text = newText
 	s.CppText.Version++
 
+	if _, is := s.inoPreprocessed[s.toIno[cppRange.Start.Line]]; is {
+		dirty = true
+	}
+
 	// Update line references
 	for deletedLines > 0 {
 		dirty = dirty || s.deleteCppLine(cppRange.Start.Line)
@@ -188,9 +192,6 @@ func (s *InoMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDo
 	addedLines := strings.Count(inoChange.Text, "\n") - 1
 	for addedLines > 0 {
 		dirty = dirty || s.addInoLine(cppRange.Start.Line)
-	}
-	if _, is := s.cppPreprocessed[cppRange.Start.Line]; is {
-		dirty = true
 	}
 	return
 }
