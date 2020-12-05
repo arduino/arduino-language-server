@@ -41,7 +41,6 @@ type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io
 // NewInoHandler creates and configures an InoHandler.
 func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler := &InoHandler{
-		//data:         map[lsp.DocumentURI]*FileData{},
 		trackedFiles: map[lsp.DocumentURI]*lsp.TextDocumentItem{},
 		config: lsp.BoardConfig{
 			SelectedBoard: board,
@@ -225,9 +224,9 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	case *lsp.DidCloseTextDocumentParams: // "textDocument/didClose":
 		log.Printf("--X " + req.Method)
 		return nil, nil
-		uri = p.TextDocument.URI
-		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
-		handler.deleteFileData(uri)
+		// uri = p.TextDocument.URI
+		// err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
+		// handler.deleteFileData(uri)
 	// case "textDocument/signatureHelp":
 	// 	fallthrough
 	// case "textDocument/definition":
@@ -522,62 +521,6 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 	}
 	err := handler.sketchToBuildPathTextDocumentIdentifier(&cppReq.TextDocument.TextDocumentIdentifier)
 	return cppReq, err
-}
-
-func (handler *InoHandler) updateFileData(ctx context.Context, data *FileData, change *lsp.TextDocumentContentChangeEvent) (err error) {
-	rang := change.Range
-	if rang == nil || rang.Start.Line != rang.End.Line {
-		// Update the source text and regenerate the cpp code
-		var newSourceText string
-		if rang == nil {
-			newSourceText = change.Text
-		} else {
-			newSourceText, err = textutils.ApplyTextChange(data.sourceText, *rang, change.Text)
-			if err != nil {
-				return err
-			}
-		}
-		targetBytes, err := updateCpp([]byte(newSourceText), data.sourceURI.Unbox(), handler.config.SelectedBoard.Fqbn, false, data.targetURI.Unbox())
-		if err != nil {
-			if rang == nil {
-				// Fallback: use the source text unchanged
-				targetBytes, err = copyIno2Cpp(newSourceText, data.targetURI.Unbox())
-				if err != nil {
-					return err
-				}
-			} else {
-				// Fallback: try to apply a multi-line update
-				data.sourceText = newSourceText
-				//data.sourceMap.Update(rang.End.Line-rang.Start.Line, rang.Start.Line, change.Text)
-				*rang = data.sourceMap.InoToCppLSPRange(data.sourceURI, *rang)
-				return nil
-			}
-		}
-
-		data.sourceText = newSourceText
-		data.sourceMap = sourcemapper.CreateInoMapper(targetBytes)
-
-		change.Text = string(targetBytes)
-		change.Range = nil
-		change.RangeLength = 0
-	} else {
-		// Apply an update to a single line both to the source and the target text
-		data.sourceText, err = textutils.ApplyTextChange(data.sourceText, *rang, change.Text)
-		if err != nil {
-			return err
-		}
-		//data.sourceMap.Update(0, rang.Start.Line, change.Text)
-
-		*rang = data.sourceMap.InoToCppLSPRange(data.sourceURI, *rang)
-	}
-	return nil
-}
-
-func (handler *InoHandler) deleteFileData(sourceURI lsp.DocumentURI) {
-	// if data, ok := handler.data[sourceURI]; ok {
-	// 	delete(handler.data, data.sourceURI)
-	// 	delete(handler.data, data.targetURI)
-	// }
 }
 
 func (handler *InoHandler) handleError(ctx context.Context, err error) error {
