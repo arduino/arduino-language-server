@@ -80,7 +80,7 @@ type WorkspaceClientCapabilities struct {
 	Symbol struct {
 		SymbolKind struct {
 			ValueSet []int `json:"valueSet,omitempty"`
-		} `json:"symbolKind,omitEmpty"`
+		} `json:"symbolKind,omitempty"`
 	} `json:"symbol,omitempty"`
 
 	ExecuteCommand *struct {
@@ -124,7 +124,7 @@ type TextDocumentClientCapabilities struct {
 	DocumentSymbol struct {
 		SymbolKind struct {
 			ValueSet []int `json:"valueSet,omitempty"`
-		} `json:"symbolKind,omitEmpty"`
+		} `json:"symbolKind,omitempty"`
 
 		HierarchicalDocumentSymbolSupport bool `json:"hierarchicalDocumentSymbolSupport,omitempty"`
 	} `json:"documentSymbol,omitempty"`
@@ -725,8 +725,8 @@ type DidChangeTextDocumentParams struct {
 }
 
 type TextDocumentContentChangeEvent struct {
-	Range       *Range `json:"range,omitEmpty"`
-	RangeLength uint   `json:"rangeLength,omitEmpty"`
+	Range       *Range `json:"range,omitempty"`
+	RangeLength uint   `json:"rangeLength,omitempty"`
 	Text        string `json:"text"`
 }
 
