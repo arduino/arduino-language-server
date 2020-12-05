@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/arduino/arduino-cli/arduino/builder"
@@ -59,26 +60,30 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	if enableLogging {
 		log.Println("Initial board configuration:", board)
 	}
+
+	go handler.rebuildEnvironmentLoop()
 	return handler
 }
 
 // InoHandler is a JSON-RPC handler that delegates messages to clangd.
 type InoHandler struct {
-	StdioConn               *jsonrpc2.Conn
-	ClangdConn              *jsonrpc2.Conn
-	lspInitializeParams     *lsp.InitializeParams
-	buildPath               *paths.Path
-	buildSketchRoot         *paths.Path
-	buildSketchCpp          *paths.Path
-	buildSketchCppVersion   int
-	buildSketchSymbols      []lsp.DocumentSymbol
-	buildSketchSymbolsLoad  bool
-	buildSketchSymbolsCheck bool
-	sketchRoot              *paths.Path
-	sketchName              string
-	sketchMapper            *sourcemapper.InoMapper
-	sketchTrackedFilesCount int
-	trackedFiles            map[lsp.DocumentURI]*lsp.TextDocumentItem
+	StdioConn                  *jsonrpc2.Conn
+	ClangdConn                 *jsonrpc2.Conn
+	lspInitializeParams        *lsp.InitializeParams
+	buildPath                  *paths.Path
+	buildSketchRoot            *paths.Path
+	buildSketchCpp             *paths.Path
+	buildSketchCppVersion      int
+	buildSketchSymbols         []lsp.DocumentSymbol
+	buildSketchSymbolsLoad     bool
+	buildSketchSymbolsCheck    bool
+	rebuildSketchDeadline      *time.Time
+	rebuildSketchDeadlineMutex sync.Mutex
+	sketchRoot                 *paths.Path
+	sketchName                 string
+	sketchMapper               *sourcemapper.InoMapper
+	sketchTrackedFilesCount    int
+	trackedFiles               map[lsp.DocumentURI]*lsp.TextDocumentItem
 
 	config       lsp.BoardConfig
 	synchronizer Synchronizer
@@ -324,13 +329,18 @@ func (handler *InoHandler) exit() {
 }
 
 func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) error {
-	rootURI := params.RootURI
-	log.Printf("--> initializeWorkbench(%s)\n", rootURI)
+	currCppTextVersion := 0
+	if params != nil {
+		log.Printf("--> initialize(%s)\n", params.RootURI)
+		handler.lspInitializeParams = params
+		handler.sketchRoot = params.RootURI.AsPath()
+		handler.sketchName = handler.sketchRoot.Base()
+	} else {
+		currCppTextVersion = handler.sketchMapper.CppText.Version
+		log.Printf("--> RE-initialize()\n")
+	}
 
-	handler.lspInitializeParams = params
-	handler.sketchRoot = rootURI.AsPath()
-	handler.sketchName = handler.sketchRoot.Base()
-	if buildPath, err := generateBuildEnvironment(handler.sketchRoot, handler.config.SelectedBoard.Fqbn); err == nil {
+	if buildPath, err := handler.generateBuildEnvironment(); err == nil {
 		handler.buildPath = buildPath
 		handler.buildSketchRoot = buildPath.Join("sketch")
 	} else {
@@ -343,22 +353,48 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 
 	if cppContent, err := handler.buildSketchCpp.ReadFile(); err == nil {
 		handler.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
+		handler.sketchMapper.CppText.Version = currCppTextVersion + 1
 	} else {
 		return errors.WithMessage(err, "reading generated cpp file from sketch")
 	}
 
-	clangdStdout, clangdStdin, clangdStderr := startClangd(handler.buildPath, handler.buildSketchCpp)
-	clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
-	if enableLogging {
-		clangdStdio = streams.LogReadWriteCloserAs(clangdStdio, "inols-clangd.log")
-		go io.Copy(streams.OpenLogFileAs("inols-clangd-err.log"), clangdStderr)
-	} else {
-		go io.Copy(os.Stderr, clangdStderr)
-	}
+	if params == nil {
+		// If we are restarting re-synchronize clangd
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
 
-	clangdStream := jsonrpc2.NewBufferedStream(clangdStdio, jsonrpc2.VSCodeObjectCodec{})
-	clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
-	handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
+		cppURI := lsp.NewDocumenteURIFromPath(handler.buildSketchCpp)
+		cppTextDocumentIdentifier := lsp.TextDocumentIdentifier{URI: cppURI}
+
+		syncEvent := &lsp.DidChangeTextDocumentParams{
+			TextDocument: lsp.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: cppTextDocumentIdentifier,
+				Version:                handler.sketchMapper.CppText.Version,
+			},
+			ContentChanges: []lsp.TextDocumentContentChangeEvent{
+				{Text: handler.sketchMapper.CppText.Text}, // Full text change
+			},
+		}
+
+		if err := handler.ClangdConn.Notify(ctx, "textDocument/didChange", syncEvent); err != nil {
+			log.Println("    error reinitilizing clangd:", err)
+			return err
+		}
+	} else {
+		// Otherwise start clangd!
+		clangdStdout, clangdStdin, clangdStderr := startClangd(handler.buildPath, handler.buildSketchCpp)
+		clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
+		if enableLogging {
+			clangdStdio = streams.LogReadWriteCloserAs(clangdStdio, "inols-clangd.log")
+			go io.Copy(streams.OpenLogFileAs("inols-clangd-err.log"), clangdStderr)
+		} else {
+			go io.Copy(os.Stderr, clangdStderr)
+		}
+
+		clangdStream := jsonrpc2.NewBufferedStream(clangdStdio, jsonrpc2.VSCodeObjectCodec{})
+		clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
+		handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
+	}
 
 	return nil
 }
@@ -483,6 +519,7 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 				//       and trigger arduino-preprocessing + clangd restart.
 
 				log.Println("    uh oh DIRTY CHANGE!")
+				handler.scheduleRebuildEnvironment()
 			}
 
 			// log.Println("New version:----------")

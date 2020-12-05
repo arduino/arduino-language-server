@@ -4,6 +4,8 @@ go 1.12
 
 replace github.com/arduino/arduino-cli => ../arduino-cli
 
+replace github.com/arduino/go-paths-helper => ../go-paths-helper
+
 require (
 	github.com/arduino/arduino-cli v0.0.0-20201201130510-05ce1509a4f1
 	github.com/arduino/go-paths-helper v1.3.3

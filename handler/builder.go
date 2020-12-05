@@ -1,73 +1,90 @@
 package handler
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
 	"log"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/arduino/arduino-cli/arduino/libraries"
 	"github.com/arduino/arduino-cli/executils"
 	"github.com/arduino/go-paths-helper"
-	"github.com/arduino/go-properties-orderedmap"
 	"github.com/pkg/errors"
 )
 
-// func generateCpp(sourcePath, fqbn string) (*paths.Path, []byte, error) {
-// 	// Generate target file
-// 	if cppPath, err := generateBuildEnvironment(paths.New(sourcePath), fqbn); err != nil {
-// 		return nil, nil, err
-// 	} else if cppCode, err := cppPath.ReadFile(); err != nil {
-// 		return nil, nil, err
-// 	} else {
-// 		return cppPath, cppCode, err
-// 	}
-// }
-
-func updateCpp(inoCode []byte, sourcePath, fqbn string, fqbnChanged bool, cppPath string) (cppCode []byte, err error) {
-	// 	tempDir := filepath.Dir(cppPath)
-	// 	inoPath := strings.TrimSuffix(cppPath, ".cpp")
-	// 	if inoCode != nil {
-	// 		// Write source file to temp dir
-	// 		err = ioutil.WriteFile(inoPath, inoCode, 0600)
-	// 		if err != nil {
-	// 			err = errors.Wrap(err, "Error while writing source file to temporary directory.")
-	// 			return
-	// 		}
-	// 		if enableLogging {
-	// 			log.Println("Source file written to", inoPath)
-	// 		}
-	// 	}
-
-	// 	if fqbnChanged {
-	// 		// Generate compile_flags.txt
-	// 		var flagsPath string
-	// 		flagsPath, err = generateCompileFlags(tempDir, inoPath, sourcePath, fqbn)
-	// 		if err != nil {
-	// 			return
-	// 		}
-	// 		if enableLogging {
-	// 			log.Println("Compile flags written to", flagsPath)
-	// 		}
-	// 	}
-
-	// 	// Generate target file
-	// 	cppCode, err = generateTargetFile(tempDir, inoPath, cppPath, fqbn)
-	return
+func (handler *InoHandler) scheduleRebuildEnvironment() {
+	handler.rebuildSketchDeadlineMutex.Lock()
+	defer handler.rebuildSketchDeadlineMutex.Unlock()
+	d := time.Now().Add(time.Second)
+	handler.rebuildSketchDeadline = &d
 }
 
-func generateBuildEnvironment(sketchDir *paths.Path, fqbn string) (*paths.Path, error) {
+func (handler *InoHandler) rebuildEnvironmentLoop() {
+	grabDeadline := func() *time.Time {
+		handler.rebuildSketchDeadlineMutex.Lock()
+		defer handler.rebuildSketchDeadlineMutex.Unlock()
+
+		res := handler.rebuildSketchDeadline
+		handler.rebuildSketchDeadline = nil
+		return res
+	}
+
+	for {
+		// Wait for someone to schedule a preprocessing...
+		time.Sleep(100 * time.Millisecond)
+		deadline := grabDeadline()
+		if deadline == nil {
+			continue
+		}
+
+		for time.Now().Before(*deadline) {
+			time.Sleep(100 * time.Millisecond)
+
+			if d := grabDeadline(); d != nil {
+				deadline = d
+			}
+		}
+
+		// Regenerate preprocessed sketch!
+		handler.synchronizer.DataMux.Lock()
+		handler.initializeWorkbench(nil)
+		handler.synchronizer.DataMux.Unlock()
+	}
+}
+
+func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
+	sketchDir := handler.sketchRoot
+	fqbn := handler.config.SelectedBoard.Fqbn
+
+	// Export temporary files
+	type overridesFile struct {
+		Overrides map[string]string `json:"overrides"`
+	}
+	data := overridesFile{Overrides: map[string]string{}}
+	for uri, trackedFile := range handler.trackedFiles {
+		rel, err := uri.AsPath().RelFrom(handler.sketchRoot)
+		if err != nil {
+			return nil, errors.WithMessage(err, "dumping tracked files")
+		}
+		data.Overrides[rel.String()] = trackedFile.Text
+	}
+	var overridesJSON string
+	if jsonBytes, err := json.MarshalIndent(data, "", "  "); err != nil {
+		return nil, errors.WithMessage(err, "dumping tracked files")
+	} else if tmpFile, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
+		return nil, errors.WithMessage(err, "dumping tracked files")
+	} else {
+		overridesJSON = tmpFile.String()
+	}
+
 	// XXX: do this from IDE or via gRPC
 	args := []string{globalCliPath,
 		"compile",
 		"--fqbn", fqbn,
 		"--only-compilation-database",
 		"--clean",
+		"--source-override", overridesJSON,
 		"--format", "json",
 		sketchDir.String(),
 	}
