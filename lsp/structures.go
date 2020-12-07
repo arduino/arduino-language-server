@@ -1,6 +1,9 @@
 package lsp
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 type Position struct {
 	/**
@@ -90,7 +93,7 @@ type Command struct {
 	 * Arguments that the command handler should be
 	 * invoked with.
 	 */
-	Arguments []interface{} `json:"arguments"`
+	Arguments []json.RawMessage `json:"arguments"`
 }
 
 type TextEdit struct {

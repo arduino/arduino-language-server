@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -757,15 +758,15 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		// method "textDocument/codeAction"
 		log.Printf("    <-- codeAction(%d elements)", len(*r))
 		for i, item := range *r {
-			(*r)[i] = lsp.CommandOrCodeAction{
-				Command:    handler.cpp2inoCommand(item.Command),
-				CodeAction: handler.cpp2inoCodeAction(item.CodeAction, uri),
-			}
 			if item.Command != nil {
 				log.Printf("        > Command: %s", item.Command.Title)
 			}
 			if item.CodeAction != nil {
 				log.Printf("        > CodeAction: %s", item.CodeAction.Title)
+			}
+			(*r)[i] = lsp.CommandOrCodeAction{
+				Command:    handler.Cpp2InoCommand(item.Command),
+				CodeAction: handler.cpp2inoCodeAction(item.CodeAction, uri),
 			}
 		}
 		log.Printf("<-- codeAction(%d elements)", len(*r))
@@ -811,7 +812,7 @@ func (handler *InoHandler) cpp2inoCodeAction(codeAction *lsp.CodeAction, uri lsp
 		Kind:        codeAction.Kind,
 		Edit:        handler.cpp2inoWorkspaceEdit(codeAction.Edit),
 		Diagnostics: codeAction.Diagnostics,
-		Command:     handler.cpp2inoCommand(codeAction.Command),
+		Command:     handler.Cpp2InoCommand(codeAction.Command),
 	}
 	if uri.AsPath().Ext() == ".ino" {
 		for i, diag := range inoCodeAction.Diagnostics {
@@ -821,7 +822,7 @@ func (handler *InoHandler) cpp2inoCodeAction(codeAction *lsp.CodeAction, uri lsp
 	return inoCodeAction
 }
 
-func (handler *InoHandler) cpp2inoCommand(command *lsp.Command) *lsp.Command {
+func (handler *InoHandler) Cpp2InoCommand(command *lsp.Command) *lsp.Command {
 	if command == nil {
 		return nil
 	}
@@ -830,10 +831,29 @@ func (handler *InoHandler) cpp2inoCommand(command *lsp.Command) *lsp.Command {
 		Command:   command.Command,
 		Arguments: command.Arguments,
 	}
-	if len(command.Arguments) == 1 {
-		arg := handler.parseCommandArgument(inoCommand.Arguments[0])
-		if workspaceEdit, ok := arg.(*lsp.WorkspaceEdit); ok {
-			inoCommand.Arguments[0] = handler.cpp2inoWorkspaceEdit(workspaceEdit)
+	if command.Command == "clangd.applyTweak" {
+		for i := range command.Arguments {
+			v := struct {
+				TweakID   string          `json:"tweakID"`
+				File      lsp.DocumentURI `json:"file"`
+				Selection lsp.Range       `json:"selection"`
+			}{}
+			if err := json.Unmarshal(command.Arguments[0], &v); err == nil {
+				if v.TweakID == "ExtractVariable" {
+					log.Println("            > converted clangd ExtractVariable")
+					if v.File.AsPath().EquivalentTo(handler.buildSketchCpp) {
+						inoFile, inoSelection := handler.sketchMapper.CppToInoRange(v.Selection)
+						v.File = lsp.NewDocumentURI(inoFile)
+						v.Selection = inoSelection
+					}
+				}
+			}
+
+			converted, err := json.Marshal(v)
+			if err != nil {
+				panic("Internal Error: json conversion of codeAcion command arguments")
+			}
+			inoCommand.Arguments[i] = converted
 		}
 	}
 	return inoCommand
@@ -1054,37 +1074,6 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 		}
 	}
 	return result, err
-}
-
-func (handler *InoHandler) parseCommandArgument(rawArg interface{}) interface{} {
-	log.Printf("        TRY TO PARSE: %+v", rawArg)
-	panic("not implemented")
-	return nil
-	// if m1, ok := rawArg.(map[string]interface{}); ok && len(m1) == 1 && m1["changes"] != nil {
-	// 	m2 := m1["changes"].(map[string]interface{})
-	// 	workspaceEdit := lsp.WorkspaceEdit{Changes: make(map[string][]lsp.TextEdit)}
-	// 	for uri, rawValue := range m2 {
-	// 		rawTextEdits := rawValue.([]interface{})
-	// 		textEdits := make([]lsp.TextEdit, len(rawTextEdits))
-	// 		for index := range rawTextEdits {
-	// 			m3 := rawTextEdits[index].(map[string]interface{})
-	// 			rawRange := m3["range"]
-	// 			m4 := rawRange.(map[string]interface{})
-	// 			rawStart := m4["start"]
-	// 			m5 := rawStart.(map[string]interface{})
-	// 			textEdits[index].Range.Start.Line = int(m5["line"].(float64))
-	// 			textEdits[index].Range.Start.Character = int(m5["character"].(float64))
-	// 			rawEnd := m4["end"]
-	// 			m6 := rawEnd.(map[string]interface{})
-	// 			textEdits[index].Range.End.Line = int(m6["line"].(float64))
-	// 			textEdits[index].Range.End.Character = int(m6["character"].(float64))
-	// 			textEdits[index].NewText = m3["newText"].(string)
-	// 		}
-	// 		workspaceEdit.Changes[uri] = textEdits
-	// 	}
-	// 	return &workspaceEdit
-	// }
-	// return nil
 }
 
 func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {
