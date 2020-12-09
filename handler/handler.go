@@ -301,8 +301,13 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	}
 	if err == nil && handler.buildSketchSymbolsLoad {
 		handler.buildSketchSymbolsLoad = false
-		log.Println("Resfreshing document symbols")
+		log.Println("--! Resfreshing document symbols")
 		err = handler.refreshCppDocumentSymbols()
+	}
+	if err == nil && handler.buildSketchSymbolsCheck {
+		handler.buildSketchSymbolsCheck = false
+		log.Println("--! Resfreshing document symbols")
+		err = handler.checkCppDocumentSymbols()
 	}
 	if err != nil {
 		// Exit the process and trigger a restart by the client in case of a severe error
@@ -414,8 +419,40 @@ func (handler *InoHandler) refreshCppDocumentSymbols() error {
 	if symbols, ok := result.([]lsp.DocumentSymbol); !ok {
 		return errors.WithMessage(err, "quering source code symbols (2)")
 	} else {
+		// Filter non-functions symbols
+		i := 0
+		for _, symbol := range symbols {
+			if symbol.Kind != lsp.SKFunction {
+				continue
+			}
+			symbols[i] = symbol
+			i++
+		}
+		symbols = symbols[:i]
+		for _, symbol := range symbols {
+			log.Printf("    symbol: %s %s", symbol.Kind, symbol.Name)
+		}
 		handler.buildSketchSymbols = symbols
-		log.Printf("%+v\n", symbols)
+	}
+	return nil
+}
+
+func (handler *InoHandler) checkCppDocumentSymbols() error {
+	oldSymbols := handler.buildSketchSymbols
+	if err := handler.refreshCppDocumentSymbols(); err != nil {
+		return err
+	}
+	if len(oldSymbols) != len(handler.buildSketchSymbols) {
+		log.Println("--! new symbols detected, triggering sketch rebuild!")
+		handler.scheduleRebuildEnvironment()
+		return nil
+	}
+	for i, old := range oldSymbols {
+		if newName := handler.buildSketchSymbols[i].Name; old.Name != newName {
+			log.Printf("--! symbols changed, triggering sketch rebuild: '%s' -> '%s'", old.Name, newName)
+			handler.scheduleRebuildEnvironment()
+			return nil
+		}
 	}
 	return nil
 }
@@ -519,7 +556,7 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 				// TODO: Detect changes in critical lines (for example function definitions)
 				//       and trigger arduino-preprocessing + clangd restart.
 
-				log.Println("    uh oh DIRTY CHANGE!")
+				log.Println("--! DIRTY CHANGE, force sketch rebuild!")
 				handler.scheduleRebuildEnvironment()
 			}
 
@@ -1042,6 +1079,17 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 					log.Printf("<-- publishDiagnostics(%s):", msg.URI)
 					for _, diag := range msg.Diagnostics {
 						log.Printf("    > %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+					}
+				}
+
+				// If we have an "undefined reference" in the .ino code trigger a
+				// check for newly created symbols (that in turn may trigger a
+				// new arduino-preprocessing of the sketch).
+				if msg.URI.AsPath().Ext() == ".ino" {
+					for _, diag := range msg.Diagnostics {
+						if diag.Code == "undeclared_var_use_suggest" {
+							handler.buildSketchSymbolsCheck = true
+						}
 					}
 				}
 				if err := handler.StdioConn.Notify(ctx, "textDocument/publishDiagnostics", msg); err != nil {
