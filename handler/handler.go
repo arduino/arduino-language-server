@@ -59,6 +59,7 @@ type InoHandler struct {
 	sketchMapper               *sourcemapper.InoMapper
 	sketchTrackedFilesCount    int
 	docs                       map[lsp.DocumentURI]*lsp.TextDocumentItem
+	docHasDiagnostics          map[lsp.DocumentURI]bool
 
 	config       lsp.BoardConfig
 	synchronizer Synchronizer
@@ -68,6 +69,7 @@ type InoHandler struct {
 func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler := &InoHandler{
 		docs:              map[lsp.DocumentURI]*lsp.TextDocumentItem{},
+		docHasDiagnostics: map[lsp.DocumentURI]bool{},
 		config: lsp.BoardConfig{
 			SelectedBoard: board,
 		},
@@ -1040,23 +1042,6 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 			// we should transform back N diagnostics of sketch.cpp.ino into
 			// their .ino counter parts (that may span over multiple files...)
 
-			// Remove diagnostics from all .ino if there are no errors coming from clang
-			if len(p.Diagnostics) == 0 {
-				// XXX: Optimize this to publish "empty diagnostics" only to .ino that are
-				//      currently showing previous diagnostics.
-
-				for sourceURI := range handler.docs {
-					msg := lsp.PublishDiagnosticsParams{
-						URI:         sourceURI,
-						Diagnostics: []lsp.Diagnostic{},
-					}
-					if err := handler.StdioConn.Notify(ctx, "textDocument/publishDiagnostics", msg); err != nil {
-						return nil, err
-					}
-				}
-				return nil, nil
-			}
-
 			convertedDiagnostics := map[string][]lsp.Diagnostic{}
 			for _, cppDiag := range p.Diagnostics {
 				inoSource, inoRange := handler.sketchMapper.CppToInoRange(cppDiag.Range)
@@ -1070,11 +1055,13 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 			}
 
 			// Push back to IDE the converted diagnostics
+			docsWithDiagnostics := map[lsp.DocumentURI]bool{}
 			for filename, inoDiags := range convertedDiagnostics {
 				msg := lsp.PublishDiagnosticsParams{
 					URI:         lsp.NewDocumentURI(filename),
 					Diagnostics: inoDiags,
 				}
+				docsWithDiagnostics[msg.URI] = true
 				if enableLogging {
 					log.Printf("<-- publishDiagnostics(%s):", msg.URI)
 					for _, diag := range msg.Diagnostics {
@@ -1097,6 +1084,30 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 				}
 			}
 
+			// Remove diagnostics from all .ino where there are no errors coming from clang
+			for sourceURI := range handler.docs {
+				if !handler.docHasDiagnostics[sourceURI] {
+					// skip if the document didn't have previously sent diagnostics
+					continue
+				}
+				if docsWithDiagnostics[sourceURI] {
+					// skip if we already sent updated diagnostics
+					continue
+				}
+				// otherwise clear previous diagnostics
+				msg := lsp.PublishDiagnosticsParams{
+					URI:         sourceURI,
+					Diagnostics: []lsp.Diagnostic{},
+				}
+				if enableLogging {
+					log.Printf("<-- publishDiagnostics(%s):", msg.URI)
+				}
+				if err := handler.StdioConn.Notify(ctx, "textDocument/publishDiagnostics", msg); err != nil {
+					return nil, err
+				}
+			}
+
+			handler.docHasDiagnostics = docsWithDiagnostics
 			return nil, err
 		}
 
