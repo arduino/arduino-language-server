@@ -192,6 +192,7 @@ func (s *InoMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDo
 	addedLines := strings.Count(inoChange.Text, "\n") - 1
 	for addedLines > 0 {
 		dirty = dirty || s.addInoLine(cppRange.Start.Line)
+		addedLines--
 	}
 	return
 }
