@@ -39,6 +39,10 @@ func (uri DocumentURI) Unbox() string {
 	return path
 }
 
+func (uri DocumentURI) String() string {
+	return string(uri)
+}
+
 // NewDocumenteURIFromPath create a DocumentURI from the given Path object
 func NewDocumenteURIFromPath(path *paths.Path) DocumentURI {
 	return NewDocumentURI(path.String())
