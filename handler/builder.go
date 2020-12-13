@@ -62,7 +62,7 @@ func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
 		Overrides map[string]string `json:"overrides"`
 	}
 	data := overridesFile{Overrides: map[string]string{}}
-	for uri, trackedFile := range handler.trackedFiles {
+	for uri, trackedFile := range handler.docs {
 		rel, err := uri.AsPath().RelFrom(handler.sketchRoot)
 		if err != nil {
 			return nil, errors.WithMessage(err, "dumping tracked files")

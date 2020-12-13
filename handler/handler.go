@@ -40,10 +40,34 @@ func Setup(cliPath string, clangdPath string, _enableLogging bool, _asyncProcess
 // CLangdStarter starts clangd and returns its stdin/out/err
 type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser)
 
+// InoHandler is a JSON-RPC handler that delegates messages to clangd.
+type InoHandler struct {
+	StdioConn                  *jsonrpc2.Conn
+	ClangdConn                 *jsonrpc2.Conn
+	lspInitializeParams        *lsp.InitializeParams
+	buildPath                  *paths.Path
+	buildSketchRoot            *paths.Path
+	buildSketchCpp             *paths.Path
+	buildSketchCppVersion      int
+	buildSketchSymbols         []lsp.DocumentSymbol
+	buildSketchSymbolsLoad     bool
+	buildSketchSymbolsCheck    bool
+	rebuildSketchDeadline      *time.Time
+	rebuildSketchDeadlineMutex sync.Mutex
+	sketchRoot                 *paths.Path
+	sketchName                 string
+	sketchMapper               *sourcemapper.InoMapper
+	sketchTrackedFilesCount    int
+	docs                       map[lsp.DocumentURI]*lsp.TextDocumentItem
+
+	config       lsp.BoardConfig
+	synchronizer Synchronizer
+}
+
 // NewInoHandler creates and configures an InoHandler.
 func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler := &InoHandler{
-		trackedFiles: map[lsp.DocumentURI]*lsp.TextDocumentItem{},
+		docs:              map[lsp.DocumentURI]*lsp.TextDocumentItem{},
 		config: lsp.BoardConfig{
 			SelectedBoard: board,
 		},
@@ -64,30 +88,6 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 
 	go handler.rebuildEnvironmentLoop()
 	return handler
-}
-
-// InoHandler is a JSON-RPC handler that delegates messages to clangd.
-type InoHandler struct {
-	StdioConn                  *jsonrpc2.Conn
-	ClangdConn                 *jsonrpc2.Conn
-	lspInitializeParams        *lsp.InitializeParams
-	buildPath                  *paths.Path
-	buildSketchRoot            *paths.Path
-	buildSketchCpp             *paths.Path
-	buildSketchCppVersion      int
-	buildSketchSymbols         []lsp.DocumentSymbol
-	buildSketchSymbolsLoad     bool
-	buildSketchSymbolsCheck    bool
-	rebuildSketchDeadline      *time.Time
-	rebuildSketchDeadlineMutex sync.Mutex
-	sketchRoot                 *paths.Path
-	sketchName                 string
-	sketchMapper               *sourcemapper.InoMapper
-	sketchTrackedFilesCount    int
-	trackedFiles               map[lsp.DocumentURI]*lsp.TextDocumentItem
-
-	config       lsp.BoardConfig
-	synchronizer Synchronizer
 }
 
 // FileData gathers information on a .ino source file.
@@ -504,7 +504,7 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.
 func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
 	// Add the TextDocumentItem in the tracked files list
 	doc := params.TextDocument
-	handler.trackedFiles[doc.URI] = &doc
+	handler.docs[doc.URI] = &doc
 
 	// If we are tracking a .ino...
 	if doc.URI.AsPath().Ext() == ".ino" {
@@ -534,7 +534,7 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
 	doc := req.TextDocument
 
-	trackedDoc, ok := handler.trackedFiles[doc.URI]
+	trackedDoc, ok := handler.docs[doc.URI]
 	if !ok {
 		return nil, unknownURI(doc.URI)
 	}
@@ -1045,7 +1045,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 				// XXX: Optimize this to publish "empty diagnostics" only to .ino that are
 				//      currently showing previous diagnostics.
 
-				for sourceURI := range handler.trackedFiles {
+				for sourceURI := range handler.docs {
 					msg := lsp.PublishDiagnosticsParams{
 						URI:         sourceURI,
 						Diagnostics: []lsp.Diagnostic{},
