@@ -357,7 +357,7 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 	handler.buildSketchCpp = handler.buildSketchRoot.Join(handler.sketchName + ".ino.cpp")
 	handler.buildSketchCppVersion = 1
 	handler.lspInitializeParams.RootPath = handler.buildSketchRoot.String()
-	handler.lspInitializeParams.RootURI = lsp.NewDocumenteURIFromPath(handler.buildSketchRoot)
+	handler.lspInitializeParams.RootURI = lsp.NewDocumentURIFromPath(handler.buildSketchRoot)
 
 	if cppContent, err := handler.buildSketchCpp.ReadFile(); err == nil {
 		handler.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
@@ -371,7 +371,7 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
-		cppURI := lsp.NewDocumenteURIFromPath(handler.buildSketchCpp)
+		cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
 		cppTextDocumentIdentifier := lsp.TextDocumentIdentifier{URI: cppURI}
 
 		syncEvent := &lsp.DidChangeTextDocumentParams{
@@ -409,7 +409,7 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 
 func (handler *InoHandler) refreshCppDocumentSymbols() error {
 	// Query source code symbols
-	cppURI := lsp.NewDocumenteURIFromPath(handler.buildSketchCpp)
+	cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
 	log.Printf("    --> documentSymbol(%s)", cppURI)
 	result, err := lsp.SendRequest(context.Background(), handler.ClangdConn, "textDocument/documentSymbol", &lsp.DocumentSymbolParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
@@ -518,7 +518,7 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 			sketchCpp, err := handler.buildSketchCpp.ReadFile()
 			newParam := &lsp.DidOpenTextDocumentParams{
 				TextDocument: lsp.TextDocumentItem{
-					URI:        lsp.NewDocumenteURIFromPath(handler.buildSketchCpp),
+					URI:        lsp.NewDocumentURIFromPath(handler.buildSketchCpp),
 					Text:       string(sketchCpp),
 					LanguageID: "cpp",
 					Version:    handler.buildSketchCppVersion,
@@ -583,7 +583,7 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 			ContentChanges: cppChanges,
 			TextDocument: lsp.VersionedTextDocumentIdentifier{
 				TextDocumentIdentifier: lsp.TextDocumentIdentifier{
-					URI: lsp.NewDocumenteURIFromPath(handler.buildSketchCpp),
+					URI: lsp.NewDocumentURIFromPath(handler.buildSketchCpp),
 				},
 				Version: handler.sketchMapper.CppText.Version,
 			},
@@ -659,7 +659,7 @@ func (handler *InoHandler) sketchToBuildPathTextDocumentIdentifier(doc *lsp.Text
 		newDocFile = handler.buildSketchRoot.JoinPath(rel)
 	}
 	log.Printf("    URI: '%s' -> '%s'", docFile, newDocFile)
-	doc.URI = lsp.NewDocumenteURIFromPath(newDocFile)
+	doc.URI = lsp.NewDocumentURIFromPath(newDocFile)
 	return nil
 }
 
