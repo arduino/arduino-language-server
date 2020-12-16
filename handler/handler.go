@@ -195,7 +195,8 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		uri = p.TextDocument.URI
 		log.Printf("--> codeAction(%s:%s)", p.TextDocument.URI, p.Range.Start)
 
-		if err := handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument); err != nil {
+		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
+		if err != nil {
 			break
 		}
 		if p.TextDocument.URI.AsPath().EquivalentTo(handler.buildSketchCpp) {
@@ -221,14 +222,14 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		uri = p.TextDocument.URI
 		log.Printf("--> documentSymbol(%s)", p.TextDocument.URI)
 
-		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
+		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
 		log.Printf("    --> documentSymbol(%s)", p.TextDocument.URI)
 
 	case *lsp.DidSaveTextDocumentParams: // "textDocument/didSave":
 		log.Printf("--X " + req.Method)
 		return nil, nil
 		uri = p.TextDocument.URI
-		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
+		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
 	case *lsp.DidCloseTextDocumentParams: // "textDocument/didClose":
 		log.Printf("--X " + req.Method)
 		return nil, nil
@@ -257,7 +258,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		log.Printf("--X " + req.Method)
 		return nil, nil
 		uri = p.TextDocument.URI
-		err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
+		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
 	case *lsp.DocumentRangeFormattingParams: // "textDocument/rangeFormatting":
 		log.Printf("--X " + req.Method)
 		return nil, nil
@@ -503,34 +504,48 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.
 	}
 }
 
-func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
+func (handler *InoHandler) didOpen(ctx context.Context, inoDidOpen *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
 	// Add the TextDocumentItem in the tracked files list
-	doc := params.TextDocument
-	handler.docs[doc.URI] = &doc
+	inoItem := inoDidOpen.TextDocument
+	handler.docs[inoItem.URI] = &inoItem
 
 	// If we are tracking a .ino...
-	if doc.URI.Ext() == ".ino" {
+	if inoItem.URI.Ext() == ".ino" {
 		handler.sketchTrackedFilesCount++
 		log.Printf("    increasing .ino tracked files count: %d", handler.sketchTrackedFilesCount)
 
-		// ...notify clang that sketchCpp is no longer valid on disk
-		if handler.sketchTrackedFilesCount == 1 {
-			sketchCpp, err := handler.buildSketchCpp.ReadFile()
-			newParam := &lsp.DidOpenTextDocumentParams{
-				TextDocument: lsp.TextDocumentItem{
-					URI:        lsp.NewDocumentURIFromPath(handler.buildSketchCpp),
-					Text:       string(sketchCpp),
-					LanguageID: "cpp",
-					Version:    handler.buildSketchCppVersion,
-				},
-			}
-
-			// Trigger a documentSymbol load
-			handler.buildSketchSymbolsLoad = true
-			return newParam, err
+		// notify clang that sketchCpp has been opened only once
+		if handler.sketchTrackedFilesCount != 1 {
+			return nil, nil
 		}
+
+		// trigger a documentSymbol load
+		handler.buildSketchSymbolsLoad = true
 	}
-	return nil, nil
+
+	cppItem, err := handler.ino2cppTextDocumentItem(inoItem)
+	return &lsp.DidOpenTextDocumentParams{
+		TextDocument: cppItem,
+	}, err
+}
+
+func (handler *InoHandler) ino2cppTextDocumentItem(inoItem lsp.TextDocumentItem) (cppItem lsp.TextDocumentItem, err error) {
+	cppURI, err := handler.ino2cppDocumentURI(inoItem.URI)
+	if err != nil {
+		return cppItem, err
+	}
+	cppItem.URI = cppURI
+
+	if cppURI.AsPath().EquivalentTo(handler.buildSketchCpp) {
+		cppItem.LanguageID = "cpp"
+		cppItem.Text = handler.sketchMapper.CppText.Text
+		cppItem.Version = handler.sketchMapper.CppText.Version
+	} else {
+		cppItem.Text = handler.docs[inoItem.URI].Text
+		cppItem.Version = handler.docs[inoItem.URI].Version
+	}
+
+	return cppItem, nil
 }
 
 func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
@@ -592,11 +607,14 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 	}
 
 	// If changes are applied to other files pass them by converting just the URI
+	cppDoc, err := handler.ino2cppVersionedTextDocumentIdentifier(req.TextDocument)
+	if err != nil {
+		return nil, err
+	}
 	cppReq := &lsp.DidChangeTextDocumentParams{
-		TextDocument:   req.TextDocument,
+		TextDocument:   cppDoc,
 		ContentChanges: req.ContentChanges,
 	}
-	err := handler.sketchToBuildPathTextDocumentIdentifier(&cppReq.TextDocument.TextDocumentIdentifier)
 	return cppReq, err
 }
 
@@ -635,32 +653,45 @@ func (handler *InoHandler) handleError(ctx context.Context, err error) error {
 	return errors.New(message)
 }
 
-func (handler *InoHandler) sketchToBuildPathTextDocumentIdentifier(doc *lsp.TextDocumentIdentifier) error {
+func (handler *InoHandler) ino2cppVersionedTextDocumentIdentifier(doc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
+	cppURI, err := handler.ino2cppDocumentURI(doc.URI)
+	res := doc
+	res.URI = cppURI
+	return res, err
+}
+
+func (handler *InoHandler) ino2cppTextDocumentIdentifier(doc lsp.TextDocumentIdentifier) (lsp.TextDocumentIdentifier, error) {
+	cppURI, err := handler.ino2cppDocumentURI(doc.URI)
+	res := doc
+	res.URI = cppURI
+	return res, err
+}
+
+func (handler *InoHandler) ino2cppDocumentURI(uri lsp.DocumentURI) (lsp.DocumentURI, error) {
 	// Sketchbook/Sketch/Sketch.ino      -> build-path/sketch/Sketch.ino.cpp
 	// Sketchbook/Sketch/AnotherTab.ino  -> build-path/sketch/Sketch.ino.cpp  (different section from above)
 	// Sketchbook/Sketch/AnotherFile.cpp -> build-path/sketch/AnotherFile.cpp (1:1)
 	// another/path/source.cpp           -> unchanged
 
 	// Convert sketch path to build path
-	docFile := doc.URI.AsPath()
-	newDocFile := docFile
+	inoPath := uri.AsPath()
+	cppPath := inoPath
 
-	if docFile.Ext() == ".ino" {
-		newDocFile = handler.buildSketchCpp
-	} else if inside, err := docFile.IsInsideDir(handler.sketchRoot); err != nil {
-		log.Printf("    could not determine if '%s' is inside '%s'", docFile, handler.sketchRoot)
-		return unknownURI(doc.URI)
+	if inoPath.Ext() == ".ino" {
+		cppPath = handler.buildSketchCpp
+	} else if inside, err := inoPath.IsInsideDir(handler.sketchRoot); err != nil {
+		log.Printf("    could not determine if '%s' is inside '%s'", inoPath, handler.sketchRoot)
+		return "", unknownURI(uri)
 	} else if !inside {
-		log.Printf("    passing doc identifier to '%s' as-is", docFile)
-	} else if rel, err := handler.sketchRoot.RelTo(docFile); err != nil {
-		log.Printf("    could not determine rel-path of '%s' in '%s", docFile, handler.sketchRoot)
-		return unknownURI(doc.URI)
+		log.Printf("    passing doc identifier to '%s' as-is", inoPath)
+	} else if rel, err := handler.sketchRoot.RelTo(inoPath); err != nil {
+		log.Printf("    could not determine rel-path of '%s' in '%s", inoPath, handler.sketchRoot)
+		return "", unknownURI(uri)
 	} else {
-		newDocFile = handler.buildSketchRoot.JoinPath(rel)
+		cppPath = handler.buildSketchRoot.JoinPath(rel)
 	}
-	log.Printf("    URI: '%s' -> '%s'", docFile, newDocFile)
-	doc.URI = lsp.NewDocumentURIFromPath(newDocFile)
-	return nil
+	log.Printf("    URI: '%s' -> '%s'", inoPath, cppPath)
+	return lsp.NewDocumentURIFromPath(cppPath), nil
 }
 
 func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDocumentPositionParams) error {
@@ -673,7 +704,11 @@ func (handler *InoHandler) ino2cppTextDocumentPositionParams(params *lsp.TextDoc
 		}
 		params.Position.Line = line
 	}
-	handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
+	cppDoc, err := handler.ino2cppTextDocumentIdentifier(params.TextDocument)
+	if err != nil {
+		return err
+	}
+	params.TextDocument = cppDoc
 	return nil
 }
 
