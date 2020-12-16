@@ -43,6 +43,11 @@ func (uri DocumentURI) String() string {
 	return string(uri)
 }
 
+// Ext returns the extension of the file pointed by the URI
+func (uri DocumentURI) Ext() string {
+	return filepath.Ext(string(uri))
+}
+
 // NewDocumentURIFromPath create a DocumentURI from the given Path object
 func NewDocumentURIFromPath(path *paths.Path) DocumentURI {
 	return NewDocumentURI(path.String())

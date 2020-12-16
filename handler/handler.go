@@ -509,7 +509,7 @@ func (handler *InoHandler) didOpen(ctx context.Context, params *lsp.DidOpenTextD
 	handler.docs[doc.URI] = &doc
 
 	// If we are tracking a .ino...
-	if doc.URI.AsPath().Ext() == ".ino" {
+	if doc.URI.Ext() == ".ino" {
 		handler.sketchTrackedFilesCount++
 		log.Printf("    increasing .ino tracked files count: %d", handler.sketchTrackedFilesCount)
 
@@ -549,7 +549,7 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 
 	// If changes are applied to a .ino file we increment the global .ino.cpp versioning
 	// for each increment of the single .ino file.
-	if doc.URI.AsPath().Ext() == ".ino" {
+	if doc.URI.Ext() == ".ino" {
 
 		cppChanges := []lsp.TextDocumentContentChangeEvent{}
 		for _, inoChange := range req.ContentChanges {
@@ -853,7 +853,7 @@ func (handler *InoHandler) cpp2inoCodeAction(codeAction *lsp.CodeAction, uri lsp
 		Diagnostics: codeAction.Diagnostics,
 		Command:     handler.Cpp2InoCommand(codeAction.Command),
 	}
-	if uri.AsPath().Ext() == ".ino" {
+	if uri.Ext() == ".ino" {
 		for i, diag := range inoCodeAction.Diagnostics {
 			_, inoCodeAction.Diagnostics[i].Range = handler.sketchMapper.CppToInoRange(diag.Range)
 		}
@@ -953,7 +953,7 @@ func (handler *InoHandler) cpp2inoTextEdit(edit *lsp.TextEdit, uri lsp.DocumentU
 }
 
 func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymbol, origURI lsp.DocumentURI) []lsp.DocumentSymbol {
-	if origURI.AsPath().Ext() != ".ino" || len(origSymbols) == 0 {
+	if origURI.Ext() != ".ino" || len(origSymbols) == 0 {
 		return origSymbols
 	}
 
@@ -1072,7 +1072,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 				// If we have an "undefined reference" in the .ino code trigger a
 				// check for newly created symbols (that in turn may trigger a
 				// new arduino-preprocessing of the sketch).
-				if msg.URI.AsPath().Ext() == ".ino" {
+				if msg.URI.Ext() == ".ino" {
 					for _, diag := range msg.Diagnostics {
 						if diag.Code == "undeclared_var_use_suggest" {
 							handler.buildSketchSymbolsCheck = true
