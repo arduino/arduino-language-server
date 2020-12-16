@@ -162,7 +162,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		uri = p.TextDocument.URI
 		log.Printf("--> didChange(%s@%d)", p.TextDocument.URI, p.TextDocument.Version)
 		for _, change := range p.ContentChanges {
-			log.Printf("     > %s -> '%s'", change.Range, strconv.Quote(change.Text))
+			log.Printf("     > %s -> %s", change.Range, strconv.Quote(change.Text))
 		}
 
 		if res, err := handler.didChange(ctx, p); err != nil {
@@ -177,7 +177,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 		log.Printf("    --> didChange(%s@%d)", p.TextDocument.URI, p.TextDocument.Version)
 		for _, change := range p.ContentChanges {
-			log.Printf("         > %s -> '%s'", change.Range, strconv.Quote(change.Text))
+			log.Printf("         > %s -> %s", change.Range, strconv.Quote(change.Text))
 		}
 		err = handler.ClangdConn.Notify(ctx, req.Method, p)
 		return nil, err
@@ -291,16 +291,12 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	var result interface{}
 	if req.Notif {
 		err = handler.ClangdConn.Notify(ctx, req.Method, params)
-		if enableLogging {
-			log.Println("    sent", req.Method, "notification to clangd")
-		}
+		// log.Println("    sent", req.Method, "notification to clangd")
 	} else {
 		ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
 		defer cancel()
 		result, err = lsp.SendRequest(ctx, handler.ClangdConn, req.Method, params)
-		if enableLogging {
-			log.Println("    sent", req.Method, "request id", req.ID, " to clangd")
-		}
+		// log.Println("    sent", req.Method, "request id", req.ID, " to clangd")
 	}
 	if err == nil && handler.buildSketchSymbolsLoad {
 		handler.buildSketchSymbolsLoad = false
@@ -555,12 +551,7 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 	if !ok {
 		return nil, unknownURI(doc.URI)
 	}
-	if trackedDoc.Version+len(req.ContentChanges) != doc.Version {
-		return nil, errors.Errorf("document out-of-sync: expected version %d but got %d", trackedDoc.Version+1, doc.Version)
-	}
-	for _, change := range req.ContentChanges {
-		textutils.ApplyLSPTextDocumentContentChangeEvent(trackedDoc, &change)
-	}
+	textutils.ApplyLSPTextDocumentContentChangeEvent(trackedDoc, req.ContentChanges, doc.Version)
 
 	// If changes are applied to a .ino file we increment the global .ino.cpp versioning
 	// for each increment of the single .ino file.

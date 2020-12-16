@@ -7,13 +7,17 @@ import (
 )
 
 // ApplyLSPTextDocumentContentChangeEvent applies the LSP change in the given text
-func ApplyLSPTextDocumentContentChangeEvent(textDoc *lsp.TextDocumentItem, change *lsp.TextDocumentContentChangeEvent) error {
-	newText, err := ApplyTextChange(textDoc.Text, *change.Range, change.Text)
-	if err != nil {
-		return err
+func ApplyLSPTextDocumentContentChangeEvent(textDoc *lsp.TextDocumentItem, changes []lsp.TextDocumentContentChangeEvent, version int) error {
+	newText := textDoc.Text
+	for _, change := range changes {
+		if t, err := ApplyTextChange(newText, *change.Range, change.Text); err == nil {
+			newText = t
+		} else {
+			return err
+		}
 	}
 	textDoc.Text = newText
-	textDoc.Version++
+	textDoc.Version = version
 	return nil
 }
 
