@@ -2,13 +2,14 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/exec"
 
+	"github.com/arduino/go-paths-helper"
 	"github.com/bcmi-labs/arduino-language-server/handler"
+	"github.com/bcmi-labs/arduino-language-server/lsp"
+	"github.com/bcmi-labs/arduino-language-server/streams"
 )
 
 var clangdPath string
@@ -29,46 +30,29 @@ func main() {
 	flag.StringVar(&loggingBasePath, "logpath", ".", "Location where to write logging files to when logging is enabled")
 	flag.Parse()
 
-	// var stdinLog, stdoutLog, clangdinLog, clangdoutLog, clangderrLog io.Writer
-	var logStreams *handler.StreamLogger
-	if enableLogging {
-		var err error
-		logStreams, err = handler.NewStreamLogger(loggingBasePath)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer logStreams.Close()
+	if loggingBasePath != "" {
+		streams.GlobalLogDirectory = paths.New(loggingBasePath)
+	} else if enableLogging {
+		log.Fatalf("Please specify logpath")
+	}
 
-		log.SetOutput(logStreams.Default)
+	if enableLogging {
+		logfile := streams.OpenLogFileAs("inols-err.log")
+		log.SetOutput(io.MultiWriter(logfile, os.Stderr))
+		defer streams.CatchAndLogPanic()
 	} else {
-		logStreams = handler.NewNoopLogger()
 		log.SetOutput(os.Stderr)
 	}
 
-	handler.Setup(cliPath, enableLogging, true)
-	initialBoard := handler.Board{Fqbn: initialFqbn, Name: initialBoardName}
-	inoHandler := handler.NewInoHandler(os.Stdin, os.Stdout, logStreams, startClangd, initialBoard)
+	handler.Setup(cliPath, clangdPath, enableLogging, true)
+	initialBoard := lsp.Board{Fqbn: initialFqbn, Name: initialBoardName}
+
+	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
+	if enableLogging {
+		stdio = streams.LogReadWriteCloserAs(stdio, "inols.log")
+	}
+
+	inoHandler := handler.NewInoHandler(stdio, initialBoard)
 	defer inoHandler.StopClangd()
 	<-inoHandler.StdioConn.DisconnectNotify()
-}
-
-func startClangd() (clangdIn io.WriteCloser, clangdOut io.ReadCloser, clangdErr io.ReadCloser) {
-	if enableLogging {
-		log.Println("Starting clangd process:", clangdPath)
-	}
-	var clangdCmd *exec.Cmd
-	if compileCommandsDir != "" {
-		clangdCmd = exec.Command(clangdPath)
-	} else {
-		clangdCmd = exec.Command(clangdPath, fmt.Sprintf(`--compile-commands-dir="%s"`, compileCommandsDir))
-	}
-	clangdIn, _ = clangdCmd.StdinPipe()
-	clangdOut, _ = clangdCmd.StdoutPipe()
-	clangdErr, _ = clangdCmd.StderrPipe()
-
-	err := clangdCmd.Start()
-	if err != nil {
-		panic(err)
-	}
-	return
 }

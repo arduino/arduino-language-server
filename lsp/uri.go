@@ -1,4 +1,4 @@
-package handler
+package lsp
 
 import (
 	"net/url"
@@ -7,13 +7,18 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/pkg/errors"
-	lsp "github.com/sourcegraph/go-lsp"
+	"github.com/arduino/go-paths-helper"
 )
 
 var expDriveID = regexp.MustCompile("[a-zA-Z]:")
 
-func uriToPath(uri lsp.DocumentURI) string {
+// AsPath convert the DocumentURI to a paths.Path
+func (uri DocumentURI) AsPath() *paths.Path {
+	return paths.New(uri.Unbox())
+}
+
+// Unbox convert the DocumentURI to a file path string
+func (uri DocumentURI) Unbox() string {
 	urlObj, err := url.Parse(string(uri))
 	if err != nil {
 		return string(uri)
@@ -34,7 +39,22 @@ func uriToPath(uri lsp.DocumentURI) string {
 	return path
 }
 
-func pathToURI(path string) lsp.DocumentURI {
+func (uri DocumentURI) String() string {
+	return string(uri)
+}
+
+// Ext returns the extension of the file pointed by the URI
+func (uri DocumentURI) Ext() string {
+	return filepath.Ext(string(uri))
+}
+
+// NewDocumentURIFromPath create a DocumentURI from the given Path object
+func NewDocumentURIFromPath(path *paths.Path) DocumentURI {
+	return NewDocumentURI(path.String())
+}
+
+// NewDocumentURI create a DocumentURI from the given string path
+func NewDocumentURI(path string) DocumentURI {
 	urlObj, err := url.Parse("file://")
 	if err != nil {
 		panic(err)
@@ -45,9 +65,5 @@ func pathToURI(path string) lsp.DocumentURI {
 			urlObj.Path += "/" + url.PathEscape(segment)
 		}
 	}
-	return lsp.DocumentURI(urlObj.String())
-}
-
-func unknownURI(uri lsp.DocumentURI) error {
-	return errors.New("Document is not available: " + string(uri))
+	return DocumentURI(urlObj.String())
 }
