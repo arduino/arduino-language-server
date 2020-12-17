@@ -1182,7 +1182,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 				inoDocsWithDiagnostics[inoDiag.URI] = true
 				cleanUpInoDiagnostics = true
 				for _, diag := range inoDiag.Diagnostics {
-					if diag.Code == "undeclared_var_use_suggest" {
+					if diag.Code == "undeclared_var_use_suggest" || diag.Code == "undeclared_var_use" {
 						handler.buildSketchSymbolsCheck = true
 					}
 				}
