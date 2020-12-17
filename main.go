@@ -2,9 +2,9 @@ package main
 
 import (
 	"flag"
+	"io"
 	"log"
 	"os"
-	"syscall"
 
 	"github.com/arduino/go-paths-helper"
 	"github.com/bcmi-labs/arduino-language-server/handler"
@@ -38,22 +38,11 @@ func main() {
 
 	if enableLogging {
 		logfile := streams.OpenLogFileAs("inols-err.log")
-		// log.SetOutput(io.MultiWriter(logfile, os.Stderr))
-		defer func() {
-			// // In case of panic output the stack trace in the log file before exiting
-			// if r := recover(); r != nil {
-			// 	log.Println(string(debug.Stack()))
-			// }
-
-			logfile.Close()
-		}()
-		err := syscall.Dup2(int(logfile.Fd()), int(os.Stderr.Fd()))
-		if err != nil {
-			log.Fatalf("Failed to redirect stderr to file: %v", err)
-		}
-		// log.SetOutput(logfile)
+		log.SetOutput(io.MultiWriter(logfile, os.Stderr))
+		defer streams.CatchAndLogPanic()
+	} else {
+		log.SetOutput(os.Stderr)
 	}
-	log.SetOutput(os.Stderr)
 
 	handler.Setup(cliPath, clangdPath, enableLogging, true)
 	initialBoard := lsp.Board{Fqbn: initialFqbn, Name: initialBoardName}

@@ -109,6 +109,8 @@ func (handler *InoHandler) StopClangd() {
 
 // HandleMessageFromIDE handles a message received from the IDE client (via stdio).
 func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
+	defer streams.CatchAndLogPanic()
+
 	needsWriteLock := map[string]bool{
 		"initialize":             true,
 		"textDocument/didOpen":   true,
@@ -1131,6 +1133,8 @@ func (handler *InoHandler) cpp2inoDiagnostics(cppDiags *lsp.PublishDiagnosticsPa
 
 // FromClangd handles a message received from clangd.
 func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
+	defer streams.CatchAndLogPanic()
+
 	handler.synchronizer.DataMux.RLock()
 	defer handler.synchronizer.DataMux.RUnlock()
 
@@ -1238,6 +1242,8 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 }
 
 func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {
+	defer streams.CatchAndLogPanic()
+
 	params := lsp.ShowMessageParams{
 		Type:    msgType,
 		Message: message,

@@ -10,6 +10,7 @@ import (
 	"github.com/arduino/arduino-cli/arduino/libraries"
 	"github.com/arduino/arduino-cli/executils"
 	"github.com/arduino/go-paths-helper"
+	"github.com/bcmi-labs/arduino-language-server/streams"
 	"github.com/pkg/errors"
 )
 
@@ -21,6 +22,8 @@ func (handler *InoHandler) scheduleRebuildEnvironment() {
 }
 
 func (handler *InoHandler) rebuildEnvironmentLoop() {
+	defer streams.CatchAndLogPanic()
+
 	grabDeadline := func() *time.Time {
 		handler.rebuildSketchDeadlineMutex.Lock()
 		defer handler.rebuildSketchDeadlineMutex.Unlock()
