@@ -10,6 +10,7 @@ import (
 
 	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
 	"github.com/bcmi-labs/arduino-language-server/lsp"
+	"github.com/pkg/errors"
 )
 
 // InoMapper is a mapping between the .ino sketch and the preprocessed .cpp file
@@ -78,17 +79,28 @@ func (s *InoMapper) CppToInoLine(targetLine int) (string, int) {
 	return res.File, res.Line
 }
 
-// CppToInoRange converts a target (.cpp) lsp.Range into a source.ino:lsp.Range
-func (s *InoMapper) CppToInoRange(r lsp.Range) (string, lsp.Range) {
-	startFile, startLine := s.CppToInoLine(r.Start.Line)
-	endFile, endLine := s.CppToInoLine(r.End.Line)
-	res := r
-	res.Start.Line = startLine
-	res.End.Line = endLine
-	if startFile != endFile {
-		panic("invalid range conversion")
+// CppToInoRange converts a target (.cpp) lsp.Range into a source.ino:lsp.Range.
+// It will panic if the range spans across multiple ino files.
+func (s *InoMapper) CppToInoRange(cppRange lsp.Range) (string, lsp.Range) {
+	inoFile, inoRange, err := s.CppToInoRangeOk(cppRange)
+	if err != nil {
+		panic(err.Error())
 	}
-	return startFile, res
+	return inoFile, inoRange
+}
+
+// CppToInoRangeOk converts a target (.cpp) lsp.Range into a source.ino:lsp.Range.
+// It returns an error if the range spans across multiple ino files.
+func (s *InoMapper) CppToInoRangeOk(cppRange lsp.Range) (string, lsp.Range, error) {
+	inoFile, startLine := s.CppToInoLine(cppRange.Start.Line)
+	endInoFile, endLine := s.CppToInoLine(cppRange.End.Line)
+	inoRange := cppRange
+	inoRange.Start.Line = startLine
+	inoRange.End.Line = endLine
+	if inoFile != endInoFile {
+		return "", lsp.Range{}, errors.Errorf("invalid range conversion %s -> %s:%d-%s:%d", cppRange, inoFile, startLine, endInoFile, endLine)
+	}
+	return inoFile, inoRange, nil
 }
 
 // CppToInoLineOk converts a target (.cpp) line into a source (.ino) line and
