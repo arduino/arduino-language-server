@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
 	"github.com/bcmi-labs/arduino-language-server/lsp"
+	"github.com/pkg/errors"
 )
 
 // InoMapper is a mapping between the .ino sketch and the preprocessed .cpp file
@@ -78,17 +80,50 @@ func (s *InoMapper) CppToInoLine(targetLine int) (string, int) {
 	return res.File, res.Line
 }
 
-// CppToInoRange converts a target (.cpp) lsp.Range into a source.ino:lsp.Range
-func (s *InoMapper) CppToInoRange(r lsp.Range) (string, lsp.Range) {
-	startFile, startLine := s.CppToInoLine(r.Start.Line)
-	endFile, endLine := s.CppToInoLine(r.End.Line)
-	res := r
-	res.Start.Line = startLine
-	res.End.Line = endLine
-	if startFile != endFile {
-		panic("invalid range conversion")
+// CppToInoRange converts a target (.cpp) lsp.Range into a source.ino:lsp.Range.
+// It will panic if the range spans across multiple ino files.
+func (s *InoMapper) CppToInoRange(cppRange lsp.Range) (string, lsp.Range) {
+	inoFile, inoRange, err := s.CppToInoRangeOk(cppRange)
+	if err != nil {
+		panic(err.Error())
 	}
-	return startFile, res
+	return inoFile, inoRange
+}
+
+// AdjustedRangeErr is returned if the range overlaps with a non-ino section by just the
+// last newline character.
+type AdjustedRangeErr struct{}
+
+func (e AdjustedRangeErr) Error() string {
+	return "the range has been adjusted to allow final newline"
+}
+
+// CppToInoRangeOk converts a target (.cpp) lsp.Range into a source.ino:lsp.Range.
+// It returns an error if the range spans across multiple ino files.
+// If the range ends on the beginning of a new line in another .ino file, the range
+// is adjusted and AdjustedRangeErr is reported as err: the range may be still valid.
+func (s *InoMapper) CppToInoRangeOk(cppRange lsp.Range) (string, lsp.Range, error) {
+	inoFile, startLine := s.CppToInoLine(cppRange.Start.Line)
+	endInoFile, endLine := s.CppToInoLine(cppRange.End.Line)
+	inoRange := cppRange
+	inoRange.Start.Line = startLine
+	inoRange.End.Line = endLine
+	if inoFile == endInoFile {
+		// All done
+		return inoFile, inoRange, nil
+	}
+
+	// Special case: the last line ends up in the "not-ino" area
+	if inoRange.End.Character == 0 {
+		if checkFile, checkLine := s.CppToInoLine(cppRange.End.Line - 1); checkFile == inoFile {
+			// Adjust the range and return it with an AdjustedRange notification
+			inoRange.End.Line = checkLine + 1
+			return inoFile, inoRange, AdjustedRangeErr{}
+		}
+	}
+
+	// otherwise the range is not recoverable, just report error
+	return inoFile, inoRange, errors.Errorf("invalid range conversion %s -> %s:%d-%s:%d", cppRange, inoFile, startLine, endInoFile, endLine)
 }
 
 // CppToInoLineOk converts a target (.cpp) line into a source (.ino) line and
@@ -317,5 +352,15 @@ func dumpInoToCppMap(s map[InoLine]int) {
 		inoLine := k
 		cppLine := s[inoLine]
 		fmt.Printf("%s:%d -> %d\n", inoLine.File, inoLine.Line, cppLine)
+	}
+}
+
+// DebugLogAll dumps the internal status of the mapper
+func (s *InoMapper) DebugLogAll() {
+	cpp := strings.Split(s.CppText.Text, "\n")
+	log.Printf("  > Current sketchmapper content:")
+	for l, cppLine := range cpp {
+		inoFile, inoLine := s.CppToInoLine(l)
+		log.Printf("  %3d: %-40s : %s:%d", l, cppLine, inoFile, inoLine)
 	}
 }
