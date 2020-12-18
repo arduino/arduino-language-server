@@ -126,7 +126,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	}
 
 	// Handle LSP methods: transform parameters and send to clangd
-	var uri lsp.DocumentURI
+	var inoURI, cppURI lsp.DocumentURI
 
 	params, err := lsp.ReadParams(req.Method, req.Params)
 	if err != nil {
@@ -146,7 +146,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.DidOpenTextDocumentParams:
 		// method "textDocument/didOpen"
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		log.Printf("--> didOpen(%s@%d as '%s')", p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.LanguageID)
 
 		res, err := handler.didOpen(ctx, p)
@@ -161,7 +161,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.DidChangeTextDocumentParams:
 		// notification "textDocument/didChange"
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		log.Printf("--> didChange(%s@%d)", p.TextDocument.URI, p.TextDocument.Version)
 		for _, change := range p.ContentChanges {
 			log.Printf("     > %s -> %s", change.Range, strconv.Quote(change.Text))
@@ -186,7 +186,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.CompletionParams:
 		// method: "textDocument/completion"
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		log.Printf("--> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
 
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
@@ -194,7 +194,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.CodeActionParams:
 		// method "textDocument/codeAction"
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		log.Printf("--> codeAction(%s:%s)", p.TextDocument.URI, p.Range.Start)
 
 		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
@@ -202,17 +202,17 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			break
 		}
 		if p.TextDocument.URI.AsPath().EquivalentTo(handler.buildSketchCpp) {
-			p.Range = handler.sketchMapper.InoToCppLSPRange(uri, p.Range)
+			p.Range = handler.sketchMapper.InoToCppLSPRange(inoURI, p.Range)
 			for index := range p.Context.Diagnostics {
 				r := &p.Context.Diagnostics[index].Range
-				*r = handler.sketchMapper.InoToCppLSPRange(uri, *r)
+				*r = handler.sketchMapper.InoToCppLSPRange(inoURI, *r)
 			}
 		}
 		log.Printf("    --> codeAction(%s:%s)", p.TextDocument.URI, p.Range.Start)
 
 	case *lsp.HoverParams:
 		// method: "textDocument/hover"
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		doc := &p.TextDocumentPositionParams
 		log.Printf("--> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
 
@@ -221,7 +221,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.DocumentSymbolParams:
 		// method "textDocument/documentSymbol"
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		log.Printf("--> documentSymbol(%s)", p.TextDocument.URI)
 
 		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
@@ -230,7 +230,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	case *lsp.DidSaveTextDocumentParams: // "textDocument/didSave":
 		log.Printf("--X " + req.Method)
 		return nil, nil
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
 	case *lsp.DidCloseTextDocumentParams: // "textDocument/didClose":
 		log.Printf("--X " + req.Method)
@@ -249,32 +249,32 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	case *lsp.TextDocumentPositionParams: // "textDocument/documentHighlight":
 		log.Printf("--X " + req.Method)
 		return nil, nil
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(p)
 	case *lsp.ReferenceParams: // "textDocument/references":
 		log.Printf("--X " + req.Method)
 		return nil, nil
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
 	case *lsp.DocumentFormattingParams: // "textDocument/formatting":
 		log.Printf("--X " + req.Method)
 		return nil, nil
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
 	case *lsp.DocumentRangeFormattingParams: // "textDocument/rangeFormatting":
 		log.Printf("--X " + req.Method)
 		return nil, nil
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		err = handler.ino2cppDocumentRangeFormattingParams(p)
 	case *lsp.DocumentOnTypeFormattingParams: // "textDocument/onTypeFormatting":
 		log.Printf("--X " + req.Method)
 		return nil, nil
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		err = handler.ino2cppDocumentOnTypeFormattingParams(p)
 	case *lsp.RenameParams: // "textDocument/rename":
 		log.Printf("--X " + req.Method)
 		return nil, nil
-		uri = p.TextDocument.URI
+		inoURI = p.TextDocument.URI
 		err = handler.ino2cppRenameParams(p)
 	case *lsp.DidChangeWatchedFilesParams: // "workspace/didChangeWatchedFiles":
 		log.Printf("--X " + req.Method)
@@ -324,7 +324,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	// Transform and return the result
 	if result != nil {
-		result = handler.transformClangdResult(req.Method, uri, result)
+		result = handler.transformClangdResult(req.Method, inoURI, cppURI, result)
 	}
 	return result, err
 }
@@ -416,7 +416,7 @@ func (handler *InoHandler) refreshCppDocumentSymbols() error {
 	if err != nil {
 		return errors.WithMessage(err, "quering source code symbols")
 	}
-	result = handler.transformClangdResult("textDocument/documentSymbol", cppURI, result)
+	result = handler.transformClangdResult("textDocument/documentSymbol", cppURI, "", result)
 	if symbols, ok := result.([]lsp.DocumentSymbol); !ok {
 		return errors.WithMessage(err, "quering source code symbols (2)")
 	} else {
@@ -817,8 +817,8 @@ func (handler *InoHandler) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *ls
 	return &newEdit
 }
 
-func (handler *InoHandler) transformClangdResult(method string, uri lsp.DocumentURI, result interface{}) interface{} {
-	cppToIno := uri != "" && uri.AsPath().EquivalentTo(handler.buildSketchCpp)
+func (handler *InoHandler) transformClangdResult(method string, inoURI, cppURI lsp.DocumentURI, result interface{}) interface{} {
+	cppToIno := inoURI != "" && inoURI.AsPath().EquivalentTo(handler.buildSketchCpp)
 
 	switch r := result.(type) {
 	case *lsp.Hover:
@@ -853,7 +853,7 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 
 		if r.DocumentSymbolArray != nil {
 			// Treat the input as []DocumentSymbol
-			return handler.cpp2inoDocumentSymbols(*r.DocumentSymbolArray, uri)
+			return handler.cpp2inoDocumentSymbols(*r.DocumentSymbolArray, inoURI)
 		} else if r.SymbolInformationArray != nil {
 			// Treat the input as []SymbolInformation
 			return handler.cpp2inoSymbolInformation(*r.SymbolInformationArray)
@@ -873,7 +873,7 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 			}
 			(*r)[i] = lsp.CommandOrCodeAction{
 				Command:    handler.Cpp2InoCommand(item.Command),
-				CodeAction: handler.cpp2inoCodeAction(item.CodeAction, uri),
+				CodeAction: handler.cpp2inoCodeAction(item.CodeAction, inoURI),
 			}
 		}
 		log.Printf("<-- codeAction(%d elements)", len(*r))
@@ -890,7 +890,7 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 		}
 	case *[]lsp.DocumentHighlight: // "textDocument/documentHighlight":
 		for index := range *r {
-			handler.cpp2inoDocumentHighlight(&(*r)[index], uri)
+			handler.cpp2inoDocumentHighlight(&(*r)[index], inoURI)
 		}
 	// case "textDocument/formatting":
 	// 	fallthrough
@@ -898,7 +898,7 @@ func (handler *InoHandler) transformClangdResult(method string, uri lsp.Document
 	// 	fallthrough
 	case *[]lsp.TextEdit: // "textDocument/onTypeFormatting":
 		for index := range *r {
-			handler.cpp2inoTextEdit(&(*r)[index], uri)
+			handler.cpp2inoTextEdit(&(*r)[index], inoURI)
 		}
 	case *lsp.WorkspaceEdit: // "textDocument/rename":
 		return handler.cpp2inoWorkspaceEdit(r)
