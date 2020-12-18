@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -329,5 +330,15 @@ func dumpInoToCppMap(s map[InoLine]int) {
 		inoLine := k
 		cppLine := s[inoLine]
 		fmt.Printf("%s:%d -> %d\n", inoLine.File, inoLine.Line, cppLine)
+	}
+}
+
+// DebugLogAll dumps the internal status of the mapper
+func (s *InoMapper) DebugLogAll() {
+	cpp := strings.Split(s.CppText.Text, "\n")
+	log.Printf("  > Current sketchmapper content:")
+	for l, cppLine := range cpp {
+		inoFile, inoLine := s.CppToInoLine(l)
+		log.Printf("  %3d: %-40s : %s:%d", l, cppLine, inoFile, inoLine)
 	}
 }
