@@ -90,18 +90,40 @@ func (s *InoMapper) CppToInoRange(cppRange lsp.Range) (string, lsp.Range) {
 	return inoFile, inoRange
 }
 
+// AdjustedRangeErr is returned if the range overlaps with a non-ino section by just the
+// last newline character.
+type AdjustedRangeErr struct{}
+
+func (e AdjustedRangeErr) Error() string {
+	return "the range has been adjusted to allow final newline"
+}
+
 // CppToInoRangeOk converts a target (.cpp) lsp.Range into a source.ino:lsp.Range.
 // It returns an error if the range spans across multiple ino files.
+// If the range ends on the beginning of a new line in another .ino file, the range
+// is adjusted and AdjustedRangeErr is reported as err: the range may be still valid.
 func (s *InoMapper) CppToInoRangeOk(cppRange lsp.Range) (string, lsp.Range, error) {
 	inoFile, startLine := s.CppToInoLine(cppRange.Start.Line)
 	endInoFile, endLine := s.CppToInoLine(cppRange.End.Line)
 	inoRange := cppRange
 	inoRange.Start.Line = startLine
 	inoRange.End.Line = endLine
-	if inoFile != endInoFile {
-		return "", lsp.Range{}, errors.Errorf("invalid range conversion %s -> %s:%d-%s:%d", cppRange, inoFile, startLine, endInoFile, endLine)
+	if inoFile == endInoFile {
+		// All done
+		return inoFile, inoRange, nil
 	}
-	return inoFile, inoRange, nil
+
+	// Special case: the last line ends up in the "not-ino" area
+	if inoRange.End.Character == 0 {
+		if checkFile, checkLine := s.CppToInoLine(cppRange.End.Line - 1); checkFile == inoFile {
+			// Adjust the range and return it with an AdjustedRange notification
+			inoRange.End.Line = checkLine + 1
+			return inoFile, inoRange, AdjustedRangeErr{}
+		}
+	}
+
+	// otherwise the range is not recoverable, just report error
+	return inoFile, inoRange, errors.Errorf("invalid range conversion %s -> %s:%d-%s:%d", cppRange, inoFile, startLine, endInoFile, endLine)
 }
 
 // CppToInoLineOk converts a target (.cpp) line into a source (.ino) line and
