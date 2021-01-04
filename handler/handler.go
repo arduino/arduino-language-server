@@ -252,6 +252,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		log.Printf("--> %s(%s:%s)", req.Method, p.TextDocument.URI, p.Position)
 		inoURI = p.TextDocument.URI
 		if res, e := handler.ino2cppTextDocumentPositionParams(p); e == nil {
+			cppURI = p.TextDocument.URI
 			params = res
 			log.Printf("    --> %s(%s:%s)", req.Method, p.TextDocument.URI, p.Position)
 		} else {
@@ -960,10 +961,19 @@ func (handler *InoHandler) transformClangdResult(method string, inoURI, cppURI l
 		}
 		return &inoSymbols
 
-	case *[]lsp.DocumentHighlight: // "textDocument/documentHighlight":
-		for index := range *r {
-			handler.cpp2inoDocumentHighlight(&(*r)[index], inoURI)
+	case *[]lsp.DocumentHighlight:
+		// Method: "textDocument/documentHighlight"
+		res := []lsp.DocumentHighlight{}
+		for _, cppHL := range *r {
+			inoHL, err := handler.cpp2inoDocumentHighlight(&cppHL, cppURI)
+			if err != nil {
+				log.Printf("ERROR converting location %s:%s: %s", cppURI, cppHL.Range, err)
+				return nil
+			}
+			res = append(res, *inoHL)
 		}
+		return &res
+
 	case *lsp.WorkspaceEdit: // "textDocument/rename":
 		return handler.cpp2inoWorkspaceEdit(r)
 	}
@@ -1058,19 +1068,23 @@ func (handler *InoHandler) cpp2inoWorkspaceEdit(origWorkspaceEdit *lsp.Workspace
 	return resWorkspaceEdit
 }
 
-func (handler *InoHandler) cpp2inoLocation(inoLocation lsp.Location) (lsp.Location, error) {
-	cppURI, cppRange, err := handler.cpp2inoDocumentURI(inoLocation.URI, inoLocation.Range)
+func (handler *InoHandler) cpp2inoLocation(cppLocation lsp.Location) (lsp.Location, error) {
+	inoURI, inoRange, err := handler.cpp2inoDocumentURI(cppLocation.URI, cppLocation.Range)
 	return lsp.Location{
-		URI:   cppURI,
-		Range: cppRange,
+		URI:   inoURI,
+		Range: inoRange,
 	}, err
 }
 
-func (handler *InoHandler) cpp2inoDocumentHighlight(highlight *lsp.DocumentHighlight, uri lsp.DocumentURI) {
-	panic("not implemented")
-	// if data, ok := handler.data[uri]; ok {
-	// 	_, highlight.Range = data.sourceMap.CppToInoRange(highlight.Range)
-	// }
+func (handler *InoHandler) cpp2inoDocumentHighlight(cppHighlight *lsp.DocumentHighlight, cppURI lsp.DocumentURI) (*lsp.DocumentHighlight, error) {
+	_, inoRange, err := handler.cpp2inoDocumentURI(cppURI, cppHighlight.Range)
+	if err != nil {
+		return nil, err
+	}
+	return &lsp.DocumentHighlight{
+		Kind:  cppHighlight.Kind,
+		Range: inoRange,
+	}, nil
 }
 
 func (handler *InoHandler) cpp2inoTextEdits(cppURI lsp.DocumentURI, cppEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {
