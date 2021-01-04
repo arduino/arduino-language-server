@@ -243,6 +243,18 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		cppURI = p.TextDocument.URI
 		log.Printf("    --> formatting(%s)", p.TextDocument.URI)
 
+	case *lsp.DocumentRangeFormattingParams:
+		// Method: "textDocument/rangeFormatting"
+		log.Printf("--> %s(%s:%s)", req.Method, p.TextDocument.URI, p.Range)
+		inoURI = p.TextDocument.URI
+		if cppParams, e := handler.ino2cppDocumentRangeFormattingParams(p); e == nil {
+			params = cppParams
+			cppURI = cppParams.TextDocument.URI
+			log.Printf("    --> %s(%s:%s)", req.Method, cppParams.TextDocument.URI, cppParams.Range)
+		} else {
+			err = e
+		}
+
 	case *lsp.TextDocumentPositionParams:
 		// Method: "textDocument/signatureHelp"
 		// Method: "textDocument/definition"
@@ -282,11 +294,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		return nil, nil
 		inoURI = p.TextDocument.URI
 		_, err = handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams)
-	case *lsp.DocumentRangeFormattingParams: // "textDocument/rangeFormatting":
-		log.Printf("--X " + req.Method)
-		return nil, nil
-		inoURI = p.TextDocument.URI
-		err = handler.ino2cppDocumentRangeFormattingParams(p)
 	case *lsp.DocumentOnTypeFormattingParams: // "textDocument/onTypeFormatting":
 		log.Printf("--X " + req.Method)
 		return nil, nil
@@ -778,14 +785,30 @@ func (handler *InoHandler) ino2cppTextDocumentPositionParams(inoParams *lsp.Text
 	}, nil
 }
 
-func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(params *lsp.DocumentRangeFormattingParams) error {
-	panic("not implemented")
-	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
-	// if data, ok := handler.data[params.TextDocument.URI]; ok {
-	// 	params.Range = data.sourceMap.InoToCppLSPRange(data.sourceURI, params.Range)
-	// 	return nil
-	// }
-	return unknownURI(params.TextDocument.URI)
+func (handler *InoHandler) ino2cppRange(inoURI lsp.DocumentURI, inoRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
+	cppURI, err := handler.ino2cppDocumentURI(inoURI)
+	if err != nil {
+		return "", lsp.Range{}, err
+	}
+	if cppURI.AsPath().EquivalentTo(handler.buildSketchCpp) {
+		cppRange := handler.sketchMapper.InoToCppLSPRange(inoURI, inoRange)
+		return cppURI, cppRange, nil
+	}
+	return cppURI, inoRange, nil
+}
+
+func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(inoParams *lsp.DocumentRangeFormattingParams) (*lsp.DocumentRangeFormattingParams, error) {
+	cppTextDocument, err := handler.ino2cppTextDocumentIdentifier(inoParams.TextDocument)
+	if err != nil {
+		return nil, err
+	}
+
+	_, cppRange, err := handler.ino2cppRange(inoParams.TextDocument.URI, inoParams.Range)
+	return &lsp.DocumentRangeFormattingParams{
+		TextDocument: cppTextDocument,
+		Range:        cppRange,
+		Options:      inoParams.Options,
+	}, err
 }
 
 func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
