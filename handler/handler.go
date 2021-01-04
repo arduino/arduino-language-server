@@ -149,15 +149,17 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		inoURI = p.TextDocument.URI
 		log.Printf("--> didOpen(%s@%d as '%s')", p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.LanguageID)
 
-		res, err := handler.didOpen(ctx, p)
-
-		if res == nil {
+		if res, e := handler.didOpen(p); e != nil {
+			params = nil
+			err = e
+		} else if res == nil {
 			log.Println("    --X notification is not propagated to clangd")
-			return nil, err // do not propagate to clangd
+			return nil, nil // do not propagate to clangd
+		} else {
+			log.Printf("    --> didOpen(%s@%d as '%s')", res.TextDocument.URI, res.TextDocument.Version, p.TextDocument.LanguageID)
+			params = res
 		}
 
-		log.Printf("    --> didOpen(%s@%d as '%s')", res.TextDocument.URI, res.TextDocument.Version, p.TextDocument.LanguageID)
-		params = res
 
 	case *lsp.DidChangeTextDocumentParams:
 		// notification "textDocument/didChange"
@@ -530,7 +532,7 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.
 	}
 }
 
-func (handler *InoHandler) didOpen(ctx context.Context, inoDidOpen *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
+func (handler *InoHandler) didOpen(inoDidOpen *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
 	// Add the TextDocumentItem in the tracked files list
 	inoItem := inoDidOpen.TextDocument
 	handler.docs[inoItem.URI] = &inoItem
