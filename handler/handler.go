@@ -259,11 +259,18 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			err = e
 		}
 
-	case *lsp.DidSaveTextDocumentParams: // "textDocument/didSave":
-		log.Printf("--X " + req.Method)
-		return nil, nil
+	case *lsp.DidSaveTextDocumentParams:
+		// Method: "textDocument/didSave"
+		log.Printf("--> %s(%s)", req.Method, p.TextDocument.URI)
 		inoURI = p.TextDocument.URI
 		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
+		cppURI = p.TextDocument.URI
+		if cppURI.AsPath().EquivalentTo(handler.buildSketchCpp) {
+			log.Printf("    --| didSave not forwarded to clangd")
+			return nil, nil
+		}
+		log.Printf("    --> %s(%s)", req.Method, p.TextDocument.URI)
+
 	case *lsp.DidCloseTextDocumentParams: // "textDocument/didClose":
 		log.Printf("--X " + req.Method)
 		return nil, nil
