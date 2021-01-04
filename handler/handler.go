@@ -160,6 +160,19 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			params = res
 		}
 
+	case *lsp.DidCloseTextDocumentParams:
+		// Method: "textDocument/didClose"
+		inoURI = p.TextDocument.URI
+		log.Printf("--> didClose(%s)", p.TextDocument.URI)
+
+		if res, e := handler.didClose(p); e != nil {
+		} else if res == nil {
+			log.Println("    --X notification is not propagated to clangd")
+			return nil, nil // do not propagate to clangd
+		} else {
+			log.Printf("    --> didClose(%s)", res.TextDocument.URI)
+			params = res
+		}
 
 	case *lsp.DidChangeTextDocumentParams:
 		// notification "textDocument/didChange"
@@ -285,12 +298,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		}
 		log.Printf("    --> %s(%s)", req.Method, p.TextDocument.URI)
 
-	case *lsp.DidCloseTextDocumentParams: // "textDocument/didClose":
-		log.Printf("--X " + req.Method)
-		return nil, nil
-		// uri = p.TextDocument.URI
-		// err = handler.sketchToBuildPathTextDocumentIdentifier(&p.TextDocument)
-		// handler.deleteFileData(uri)
 	case *lsp.ReferenceParams: // "textDocument/references":
 		log.Printf("--X " + req.Method)
 		return nil, nil
@@ -554,6 +561,32 @@ func (handler *InoHandler) didOpen(inoDidOpen *lsp.DidOpenTextDocumentParams) (*
 	cppItem, err := handler.ino2cppTextDocumentItem(inoItem)
 	return &lsp.DidOpenTextDocumentParams{
 		TextDocument: cppItem,
+	}, err
+}
+
+func (handler *InoHandler) didClose(inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
+	inoIdentifier := inoDidClose.TextDocument
+	if _, exist := handler.docs[inoIdentifier.URI]; exist {
+		delete(handler.docs, inoIdentifier.URI)
+	} else {
+		log.Printf("    didClose of untracked document: %s", inoIdentifier.URI)
+		return nil, unknownURI(inoIdentifier.URI)
+	}
+
+	// If we are tracking a .ino...
+	if inoIdentifier.URI.Ext() == ".ino" {
+		handler.sketchTrackedFilesCount--
+		log.Printf("    decreasing .ino tracked files count: %d", handler.sketchTrackedFilesCount)
+
+		// notify clang that sketchCpp has been close only once all .ino are closed
+		if handler.sketchTrackedFilesCount != 0 {
+			return nil, nil
+		}
+	}
+
+	cppIdentifier, err := handler.ino2cppTextDocumentIdentifier(inoIdentifier)
+	return &lsp.DidCloseTextDocumentParams{
+		TextDocument: cppIdentifier,
 	}, err
 }
 
