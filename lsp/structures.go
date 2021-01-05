@@ -21,6 +21,21 @@ func (p Position) String() string {
 	return fmt.Sprintf("%d:%d", p.Line, p.Character)
 }
 
+// In returns true if the Position is within the Range r
+func (p Position) In(r Range) bool {
+	return p.AfterOrEq(r.Start) && p.BeforeOrEq(r.End)
+}
+
+// BeforeOrEq returns true if the Position is before or equal the give Position
+func (p Position) BeforeOrEq(q Position) bool {
+	return p.Line < q.Line || (p.Line == q.Line && p.Character <= q.Character)
+}
+
+// AfterOrEq returns true if the Position is after or equal the give Position
+func (p Position) AfterOrEq(q Position) bool {
+	return p.Line > q.Line || (p.Line == q.Line && p.Character >= q.Character)
+}
+
 type Range struct {
 	/**
 	 * The range's start position.
@@ -35,6 +50,11 @@ type Range struct {
 
 func (r Range) String() string {
 	return fmt.Sprintf("%s-%s", r.Start, r.End)
+}
+
+// Overlaps returns true if the Range overlaps with the given Range p
+func (r Range) Overlaps(p Range) bool {
+	return r.Start.In(p) || r.End.In(p) || p.Start.In(r) || p.End.In(r)
 }
 
 type Location struct {
