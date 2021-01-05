@@ -1334,6 +1334,11 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 		// Push back to IDE the converted diagnostics
 		inoDocsWithDiagnostics := map[lsp.DocumentURI]bool{}
 		for _, inoDiag := range inoDiagnostics {
+			if inoDiag.URI == lsp.NewDocumentURI(sourcemapper.NotIno.File) {
+				cleanUpInoDiagnostics = true
+				continue
+			}
+
 			if enableLogging {
 				log.Printf("<-- publishDiagnostics(%s):", inoDiag.URI)
 				for _, diag := range inoDiag.Diagnostics {
