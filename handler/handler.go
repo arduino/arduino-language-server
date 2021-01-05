@@ -624,12 +624,26 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 
 		cppChanges := []lsp.TextDocumentContentChangeEvent{}
 		for _, inoChange := range req.ContentChanges {
-			dirty := handler.sketchMapper.ApplyTextChange(doc.URI, inoChange)
-			if dirty {
-				// TODO: Detect changes in critical lines (for example function definitions)
-				//       and trigger arduino-preprocessing + clangd restart.
+			cppRange, ok := handler.sketchMapper.InoToCppLSPRangeOk(doc.URI, *inoChange.Range)
+			if !ok {
+				return nil, errors.Errorf("invalid change range %s:%s", doc.URI, *inoChange.Range)
+			}
 
-				log.Println("--! DIRTY CHANGE, force sketch rebuild!")
+			// Detect changes in critical lines (for example function definitions)
+			// and trigger arduino-preprocessing + clangd restart.
+			dirty := false
+			for _, sym := range handler.buildSketchSymbols {
+				if sym.Range.Overlaps(cppRange) {
+					dirty = true
+					log.Println("--! DIRTY CHANGE detected using symbol tables, force sketch rebuild!")
+					break
+				}
+			}
+			if handler.sketchMapper.ApplyTextChange(doc.URI, inoChange) {
+				dirty = true
+				log.Println("--! DIRTY CHANGE detected with sketch mapper, force sketch rebuild!")
+			}
+			if dirty {
 				handler.scheduleRebuildEnvironment()
 			}
 
@@ -637,10 +651,6 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 			// log.Println(handler.sketchMapper.CppText.Text)
 			// log.Println("----------------------")
 
-			cppRange, ok := handler.sketchMapper.InoToCppLSPRangeOk(doc.URI, *inoChange.Range)
-			if !ok {
-				return nil, errors.Errorf("invalid change range %s:%s", doc.URI, *inoChange.Range)
-			}
 			cppChange := lsp.TextDocumentContentChangeEvent{
 				Range:       &cppRange,
 				RangeLength: inoChange.RangeLength,
