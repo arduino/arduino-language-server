@@ -1,16 +1,23 @@
 package lsp
 
 import (
+	"encoding/json"
 	"net/url"
 	"path/filepath"
 	"regexp"
-	"runtime"
-	"strings"
 
 	"github.com/arduino/go-paths-helper"
+	"github.com/pkg/errors"
 )
 
-var expDriveID = regexp.MustCompile("[a-zA-Z]:")
+type DocumentURI struct {
+	url url.URL
+}
+
+// NilURI is the empty DocumentURI
+var NilURI = DocumentURI{}
+
+var expDriveID = regexp.MustCompile("^/[a-zA-Z]:")
 
 // AsPath convert the DocumentURI to a paths.Path
 func (uri DocumentURI) AsPath() *paths.Path {
@@ -19,33 +26,20 @@ func (uri DocumentURI) AsPath() *paths.Path {
 
 // Unbox convert the DocumentURI to a file path string
 func (uri DocumentURI) Unbox() string {
-	urlObj, err := url.Parse(string(uri))
-	if err != nil {
-		return string(uri)
-	}
-	path := ""
-	segments := strings.Split(urlObj.Path, "/")
-	for _, segment := range segments {
-		decoded, err := url.PathUnescape(segment)
-		if err != nil {
-			decoded = segment
-		}
-		if runtime.GOOS == "windows" && expDriveID.MatchString(decoded) {
-			path += strings.ToUpper(decoded)
-		} else if len(decoded) > 0 {
-			path += string(filepath.Separator) + decoded
-		}
+	path := uri.url.Path
+	if expDriveID.MatchString(path) {
+		return path[1:]
 	}
 	return path
 }
 
 func (uri DocumentURI) String() string {
-	return string(uri)
+	return uri.url.String()
 }
 
 // Ext returns the extension of the file pointed by the URI
 func (uri DocumentURI) Ext() string {
-	return filepath.Ext(string(uri))
+	return filepath.Ext(uri.Unbox())
 }
 
 // NewDocumentURIFromPath create a DocumentURI from the given Path object
@@ -53,17 +47,48 @@ func NewDocumentURIFromPath(path *paths.Path) DocumentURI {
 	return NewDocumentURI(path.String())
 }
 
+var toSlash = filepath.ToSlash
+
 // NewDocumentURI create a DocumentURI from the given string path
 func NewDocumentURI(path string) DocumentURI {
-	urlObj, err := url.Parse("file://")
+	// tranform path into URI
+	path = toSlash(path)
+	if len(path) == 0 || path[0] != '/' {
+		path = "/" + path
+	}
+	uri, err := NewDocumentURIFromURL("file://" + path)
 	if err != nil {
 		panic(err)
 	}
-	segments := strings.Split(path, string(filepath.Separator))
-	for _, segment := range segments {
-		if len(segment) > 0 {
-			urlObj.Path += "/" + url.PathEscape(segment)
-		}
+	return uri
+}
+
+// NewDocumentURIFromURL converts an URL into a DocumentURI
+func NewDocumentURIFromURL(inURL string) (DocumentURI, error) {
+	uri, err := url.Parse(inURL)
+	if err != nil {
+		return NilURI, err
 	}
-	return DocumentURI(urlObj.String())
+	return DocumentURI{url: *uri}, nil
+}
+
+// UnmarshalJSON implements json.Unmarshaller interface
+func (uri *DocumentURI) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return errors.WithMessage(err, "expoected JSON string for DocumentURI")
+	}
+
+	newDocURI, err := NewDocumentURIFromURL(s)
+	if err != nil {
+		return errors.WithMessage(err, "parsing DocumentURI")
+	}
+
+	*uri = newDocURI
+	return nil
+}
+
+// MarshalJSON implements json.Marshaller interface
+func (uri DocumentURI) MarshalJSON() ([]byte, error) {
+	return json.Marshal(uri.url.String())
 }

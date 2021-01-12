@@ -27,8 +27,6 @@ type InitializeParams struct {
 
 type InitializedParams struct{}
 
-type DocumentURI string
-
 type ClientInfo struct {
 	Name    string `json:"name,omitempty"`
 	Version string `json:"version,omitempty"`
