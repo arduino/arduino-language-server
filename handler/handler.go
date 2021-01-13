@@ -279,9 +279,9 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		log.Printf("--> %s(%s:%s)", req.Method, p.TextDocument.URI, p.Position)
 		inoURI = p.TextDocument.URI
 		if res, e := handler.ino2cppTextDocumentPositionParams(p); e == nil {
-			cppURI = p.TextDocument.URI
+			cppURI = res.TextDocument.URI
 			params = res
-			log.Printf("    --> %s(%s:%s)", req.Method, p.TextDocument.URI, p.Position)
+			log.Printf("    --> %s(%s:%s)", req.Method, res.TextDocument.URI, res.Position)
 		} else {
 			err = e
 		}
