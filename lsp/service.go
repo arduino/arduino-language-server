@@ -244,7 +244,45 @@ type TextDocumentSyncOptions struct {
 	Change            TextDocumentSyncKind `json:"change"`
 	WillSave          bool                 `json:"willSave,omitempty"`
 	WillSaveWaitUntil bool                 `json:"willSaveWaitUntil,omitempty"`
-	Save              *SaveOptions         `json:"save,omitempty"`
+	Save              *BoolOrSaveOptions   `json:"save,omitempty"`
+}
+
+type BoolOrSaveOptions struct {
+	Save        *bool
+	SaveOptions *SaveOptions
+}
+
+// MarshalJSON implements json.Marshaler.
+func (v *BoolOrSaveOptions) MarshalJSON() ([]byte, error) {
+	if v.Save != nil {
+		return json.Marshal(v.Save)
+	}
+	if v.SaveOptions != nil {
+		return json.Marshal(v.SaveOptions)
+	}
+	return []byte("null"), nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (v *BoolOrSaveOptions) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(data, []byte("null")) {
+		v.Save = nil
+		v.SaveOptions = nil
+		return nil
+	}
+	var save bool
+	if err := json.Unmarshal(data, &save); err == nil {
+		v.Save = &save
+		v.SaveOptions = nil
+		return nil
+	}
+	var saveOpts SaveOptions
+	if err := json.Unmarshal(data, &saveOpts); err != nil {
+		return err
+	}
+	v.Save = nil
+	v.SaveOptions = &saveOpts
+	return nil
 }
 
 // TextDocumentSyncOptions holds either a TextDocumentSyncKind or
@@ -309,12 +347,12 @@ type ServerCapabilities struct {
 	DocumentSymbolProvider           bool                             `json:"documentSymbolProvider,omitempty"`
 	WorkspaceSymbolProvider          bool                             `json:"workspaceSymbolProvider,omitempty"`
 	ImplementationProvider           bool                             `json:"implementationProvider,omitempty"`
-	CodeActionProvider               bool                             `json:"codeActionProvider,omitempty"`
+	CodeActionProvider               *BoolOrCodeActionOptions         `json:"codeActionProvider,omitempty"`
 	CodeLensProvider                 *CodeLensOptions                 `json:"codeLensProvider,omitempty"`
 	DocumentFormattingProvider       bool                             `json:"documentFormattingProvider,omitempty"`
 	DocumentRangeFormattingProvider  bool                             `json:"documentRangeFormattingProvider,omitempty"`
 	DocumentOnTypeFormattingProvider *DocumentOnTypeFormattingOptions `json:"documentOnTypeFormattingProvider,omitempty"`
-	RenameProvider                   bool                             `json:"renameProvider,omitempty"`
+	RenameProvider                   *BoolOrRenameOptions             `json:"renameProvider,omitempty"`
 	ExecuteCommandProvider           *ExecuteCommandOptions           `json:"executeCommandProvider,omitempty"`
 	SemanticHighlighting             *SemanticHighlightingOptions     `json:"semanticHighlighting,omitempty"`
 
@@ -352,6 +390,49 @@ type SignatureHelpOptions struct {
 	TriggerCharacters []string `json:"triggerCharacters,omitempty"`
 }
 
+type CodeActionOptions struct {
+	CodeActionKinds *[]CodeActionKind `json:"codeActionKinds,omitempty`
+	ResolveProvider *bool             `json:"resolveProvider,omitempty`
+}
+
+type BoolOrCodeActionOptions struct {
+	IsProvider *bool
+	Options    *CodeActionOptions
+}
+
+// MarshalJSON implements json.Marshaler.
+func (v *BoolOrCodeActionOptions) MarshalJSON() ([]byte, error) {
+	if v.IsProvider != nil {
+		return json.Marshal(v.IsProvider)
+	}
+	if v.Options != nil {
+		return json.Marshal(v.Options)
+	}
+	return []byte("null"), nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (v *BoolOrCodeActionOptions) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(data, []byte("null")) {
+		v.IsProvider = nil
+		v.Options = nil
+		return nil
+	}
+	var b bool
+	if err := json.Unmarshal(data, &b); err == nil {
+		v.IsProvider = &b
+		v.Options = nil
+		return nil
+	}
+	var opts CodeActionOptions
+	if err := json.Unmarshal(data, &opts); err != nil {
+		return err
+	}
+	v.IsProvider = nil
+	v.Options = &opts
+	return nil
+}
+
 type ExecuteCommandOptions struct {
 	Commands []string `json:"commands"`
 }
@@ -359,6 +440,48 @@ type ExecuteCommandOptions struct {
 type ExecuteCommandParams struct {
 	Command   string        `json:"command"`
 	Arguments []interface{} `json:"arguments,omitempty"`
+}
+
+type RenameOptions struct {
+	PrepareProvider *bool `json:"prepareProvider,omitempty`
+}
+
+type BoolOrRenameOptions struct {
+	IsProvider *bool
+	Options    *RenameOptions
+}
+
+// MarshalJSON implements json.Marshaler.
+func (v *BoolOrRenameOptions) MarshalJSON() ([]byte, error) {
+	if v.IsProvider != nil {
+		return json.Marshal(v.IsProvider)
+	}
+	if v.Options != nil {
+		return json.Marshal(v.Options)
+	}
+	return []byte("null"), nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (v *BoolOrRenameOptions) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(data, []byte("null")) {
+		v.IsProvider = nil
+		v.Options = nil
+		return nil
+	}
+	var b bool
+	if err := json.Unmarshal(data, &b); err == nil {
+		v.IsProvider = &b
+		v.Options = nil
+		return nil
+	}
+	var opts RenameOptions
+	if err := json.Unmarshal(data, &opts); err != nil {
+		return err
+	}
+	v.IsProvider = nil
+	v.Options = &opts
+	return nil
 }
 
 type SemanticHighlightingOptions struct {

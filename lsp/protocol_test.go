@@ -64,3 +64,49 @@ func TestDocumentSymbolParse(t *testing.T) {
 	require.Equal(t, "10:5-10:9", symbols[2].SelectionRange.String())
 	fmt.Printf("%+v\n", res)
 }
+
+func TestVariousMessages(t *testing.T) {
+	msg := `{
+		"capabilities":{
+			"codeActionProvider":{
+				"codeActionKinds":["quickfix","refactor","info"]},
+			"completionProvider":{
+				"allCommitCharacters":[" ","\t","(",")","[","]","{","}","<",">",":",";",",","+","-","/","*","%","^","&","#","?",".","=","\"","'","|"],
+				"resolveProvider":false,
+				"triggerCharacters":[".","<",">",":","\"","/"]},
+			"declarationProvider":true,
+			"definitionProvider":true,
+			"documentFormattingProvider":true,
+			"documentHighlightProvider":true,
+			"documentLinkProvider":{"resolveProvider":false},
+			"documentOnTypeFormattingProvider":{
+				"firstTriggerCharacter":"\n",
+				"moreTriggerCharacter":[]},
+			"documentRangeFormattingProvider":true,
+			"documentSymbolProvider":true,
+			"executeCommandProvider":{"commands":["clangd.applyFix","clangd.applyTweak"]},
+			"hoverProvider":true,
+			"referencesProvider":true,
+			"renameProvider":{"prepareProvider":true},
+			"selectionRangeProvider":true,
+			"semanticTokensProvider":{
+				"full":{"delta":true},
+				"legend":{
+					"tokenModifiers":[],
+					"tokenTypes":["variable","variable","parameter","function","member","function","member","variable","class","enum","enumConstant","type","dependent","dependent","namespace","typeParameter","concept","type","macro","comment"]
+				},
+				"range":false},
+			"signatureHelpProvider":{"triggerCharacters":["(",","]},
+			"textDocumentSync":{
+				"change":2,
+				"openClose":true,
+				"save":true
+			},
+			"typeHierarchyProvider":true,
+			"workspaceSymbolProvider":true
+		},
+		"serverInfo":{"name":"clangd","version":"clangd version 11.0.0 (https://github.com/llvm/llvm-project 176249bd6732a8044d457092ed932768724a6f06)"}}`
+	var init InitializeResult
+	err := json.Unmarshal([]byte(msg), &init)
+	require.NoError(t, err)
+}
