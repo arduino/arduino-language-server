@@ -540,16 +540,42 @@ var completionItemKindName = map[CompletionItemKind]string{
 }
 
 type CompletionItem struct {
-	Label            string             `json:"label"`
-	Kind             CompletionItemKind `json:"kind,omitempty"`
-	Detail           string             `json:"detail,omitempty"`
-	Documentation    string             `json:"documentation,omitempty"`
-	SortText         string             `json:"sortText,omitempty"`
-	FilterText       string             `json:"filterText,omitempty"`
-	InsertText       string             `json:"insertText,omitempty"`
-	InsertTextFormat InsertTextFormat   `json:"insertTextFormat,omitempty"`
-	TextEdit         *TextEdit          `json:"textEdit,omitempty"`
-	Data             interface{}        `json:"data,omitempty"`
+	Label            string                 `json:"label"`
+	Kind             CompletionItemKind     `json:"kind,omitempty"`
+	Detail           string                 `json:"detail,omitempty"`
+	Documentation    *StringOrMarkupContent `json:"documentation,omitempty"`
+	SortText         string                 `json:"sortText,omitempty"`
+	FilterText       string                 `json:"filterText,omitempty"`
+	InsertText       string                 `json:"insertText,omitempty"`
+	InsertTextFormat InsertTextFormat       `json:"insertTextFormat,omitempty"`
+	TextEdit         *TextEdit              `json:"textEdit,omitempty"`
+	Data             interface{}            `json:"data,omitempty"`
+}
+
+type StringOrMarkupContent struct {
+	String        *string
+	MarkupContent *MarkupContent
+}
+
+// MarshalJSON implements json.Marshaler.
+func (v *StringOrMarkupContent) MarshalJSON() ([]byte, error) {
+	if v.String != nil {
+		return json.Marshal(v.String)
+	}
+	return json.Marshal(v.MarkupContent)
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (v *StringOrMarkupContent) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		v.String = &s
+		v.MarkupContent = nil
+		return nil
+	}
+	v.String = nil
+	err := json.Unmarshal(data, &v.MarkupContent)
+	return err
 }
 
 type CompletionList struct {
