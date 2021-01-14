@@ -118,13 +118,14 @@ func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
 		}
 		data.Overrides[rel.String()] = trackedFile.Text
 	}
-	var overridesJSON string
+	var overridesJSON *paths.Path
 	if jsonBytes, err := json.MarshalIndent(data, "", "  "); err != nil {
 		return nil, errors.WithMessage(err, "dumping tracked files")
 	} else if tmpFile, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
 		return nil, errors.WithMessage(err, "dumping tracked files")
 	} else {
-		overridesJSON = tmpFile.String()
+		overridesJSON = tmpFile
+		defer tmpFile.Remove()
 	}
 
 	// XXX: do this from IDE or via gRPC
@@ -133,7 +134,7 @@ func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
 		"--fqbn", fqbn,
 		"--only-compilation-database",
 		"--clean",
-		"--source-override", overridesJSON,
+		"--source-override", overridesJSON.String(),
 		"--format", "json",
 		sketchDir.String(),
 	}
