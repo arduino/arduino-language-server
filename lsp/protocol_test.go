@@ -66,6 +66,16 @@ func TestDocumentSymbolParse(t *testing.T) {
 }
 
 func TestVariousMessages(t *testing.T) {
+	x := &ProgressParams{
+		Token: "token",
+		Value: WorkDoneProgressBegin{
+			Title: "some work",
+		},
+	}
+	data, err := json.Marshal(&x)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"token":"token", "value":{"kind":"begin","title":"some work"}}`, string(data))
+
 	msg := `{
 		"capabilities":{
 			"codeActionProvider":{
@@ -107,6 +117,6 @@ func TestVariousMessages(t *testing.T) {
 		},
 		"serverInfo":{"name":"clangd","version":"clangd version 11.0.0 (https://github.com/llvm/llvm-project 176249bd6732a8044d457092ed932768724a6f06)"}}`
 	var init InitializeResult
-	err := json.Unmarshal([]byte(msg), &init)
+	err = json.Unmarshal([]byte(msg), &init)
 	require.NoError(t, err)
 }

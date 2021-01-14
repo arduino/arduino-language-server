@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/arduino/arduino-cli/arduino/libraries"
 	"github.com/arduino/arduino-cli/executils"
 	"github.com/arduino/go-paths-helper"
+	"github.com/bcmi-labs/arduino-language-server/lsp"
 	"github.com/bcmi-labs/arduino-language-server/streams"
 	"github.com/pkg/errors"
 )
@@ -50,9 +52,53 @@ func (handler *InoHandler) rebuildEnvironmentLoop() {
 		}
 
 		// Regenerate preprocessed sketch!
+		done := make(chan bool)
+		go func() {
+			{
+				// Request a new progress token
+				req := &lsp.WorkDoneProgressCreateParams{Token: "arduinoLanguageServerRebuild"}
+				var resp lsp.WorkDoneProgressCreateResult
+				if err := handler.StdioConn.Call(context.Background(), "window/workDoneProgress/create", req, &resp, nil); err != nil {
+					log.Printf("    !!! could not create report progress: %s", err)
+					<-done
+					return
+				}
+			}
+
+			req := &lsp.ProgressParams{Token: "arduinoLanguageServerRebuild"}
+			req.Value = lsp.WorkDoneProgressBegin{
+				Title: "Building sketch",
+			}
+			if err := handler.StdioConn.Notify(context.Background(), "$/progress", req, nil); err != nil {
+				log.Printf("    !!! could not report progress: %s", err)
+			}
+			count := 0
+			dots := []string{".", "..", "..."}
+			for {
+				select {
+				case <-time.After(time.Millisecond * 400):
+					msg := "compiling" + dots[count%3]
+					count++
+					req.Value = lsp.WorkDoneProgressReport{Message: &msg}
+					if err := handler.StdioConn.Notify(context.Background(), "$/progress", req, nil); err != nil {
+						log.Printf("    !!! could not report progress: %s", err)
+					}
+				case <-done:
+					msg := "done"
+					req.Value = lsp.WorkDoneProgressEnd{Message: &msg}
+					if err := handler.StdioConn.Notify(context.Background(), "$/progress", req, nil); err != nil {
+						log.Printf("    !!! could not report progress: %s", err)
+					}
+					return
+				}
+			}
+		}()
+
 		handler.synchronizer.DataMux.Lock()
 		handler.initializeWorkbench(nil)
 		handler.synchronizer.DataMux.Unlock()
+		done <- true
+		close(done)
 	}
 }
 
