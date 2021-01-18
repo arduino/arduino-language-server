@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arduino/arduino-cli/arduino/builder"
@@ -42,6 +43,9 @@ type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io
 type InoHandler struct {
 	StdioConn  *jsonrpc2.Conn
 	ClangdConn *jsonrpc2.Conn
+
+	stdioNotificationCount  int64
+	clangdNotificationCount int64
 
 	clangdStarted              *sync.Cond
 	dataMux                    sync.RWMutex
@@ -105,12 +109,30 @@ func (handler *InoHandler) StopClangd() {
 func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
 	defer streams.CatchAndLogPanic()
 
+	prefix := "IDE --> "
+	if req.Notif {
+		n := atomic.AddInt64(&handler.stdioNotificationCount, 1)
+		prefix += fmt.Sprintf("%s notif%d ", req.Method, n)
+	} else {
+		prefix += fmt.Sprintf("%s %v ", req.Method, req.ID)
+	}
+	defer log.Printf(prefix + "(done)")
+
+	params, err := lsp.ReadParams(req.Method, req.Params)
+	if err != nil {
+		return nil, err
+	}
+	if params == nil {
+		params = req.Params
+	}
+
 	needsWriteLock := map[string]bool{
 		"initialize":             true,
 		"textDocument/didOpen":   true,
 		"textDocument/didChange": true,
 		"textDocument/didClose":  true,
 	}
+	log.Printf(prefix + "(queued)")
 	if needsWriteLock[req.Method] {
 		handler.dataMux.Lock()
 		defer handler.dataMux.Unlock()
@@ -125,22 +147,19 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		"initialized": true,
 	}
 	if handler.ClangdConn == nil && !doNotNeedClangd[req.Method] {
+		log.Printf(prefix + "(throttled: waiting for clangd)")
 		handler.clangdStarted.Wait()
 		if handler.ClangdConn == nil {
+			log.Printf("Clangd startup failed: aborting call")
 			return nil, errors.New("could not run clangd, aborted")
 		}
 	}
 
+	log.Printf(prefix + "(running)")
+
 	// Handle LSP methods: transform parameters and send to clangd
 	var inoURI, cppURI lsp.DocumentURI
 
-	params, err := lsp.ReadParams(req.Method, req.Params)
-	if err != nil {
-		return nil, err
-	}
-	if params == nil {
-		params = req.Params
-	}
 	switch p := params.(type) {
 	case *lsp.InitializeParams:
 		// method "initialize"
@@ -148,21 +167,22 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.InitializedParams:
 		// method "initialized"
-		log.Println("--> initialized")
+		log.Println(prefix + "notification is not propagated to clangd")
+		return nil, nil // Do not propagate to clangd
 
 	case *lsp.DidOpenTextDocumentParams:
 		// method "textDocument/didOpen"
 		inoURI = p.TextDocument.URI
-		log.Printf("--> didOpen(%s@%d as '%s')", p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.LanguageID)
+		log.Printf(prefix+"(%s@%d as '%s')", p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.LanguageID)
 
 		if res, e := handler.didOpen(p); e != nil {
 			params = nil
 			err = e
 		} else if res == nil {
-			log.Println("    --X notification is not propagated to clangd")
+			log.Println(prefix + "notification is not propagated to clangd")
 			return nil, nil // do not propagate to clangd
 		} else {
-			log.Printf("    --> didOpen(%s@%d as '%s')", res.TextDocument.URI, res.TextDocument.Version, p.TextDocument.LanguageID)
+			log.Printf(prefix+"to clang: didOpen(%s@%d as '%s')", res.TextDocument.URI, res.TextDocument.Version, p.TextDocument.LanguageID)
 			params = res
 		}
 
@@ -329,38 +349,39 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ino2cppExecuteCommand(p)
 	}
 	if err != nil {
-		log.Printf("    --E %s", err)
+		log.Printf(prefix+"Error: %s", err)
 		return nil, err
 	}
 
 	var result interface{}
 	if req.Notif {
+		log.Printf(prefix + "sent to Clang")
 		err = handler.ClangdConn.Notify(ctx, req.Method, params)
-		// log.Println("    sent", req.Method, "notification to clangd")
 	} else {
+		log.Printf(prefix + "sent to Clang")
 		ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
 		defer cancel()
 		result, err = lsp.SendRequest(ctx, handler.ClangdConn, req.Method, params)
-		// log.Println("    sent", req.Method, "request id", req.ID, " to clangd")
 	}
 	if err == nil && handler.buildSketchSymbolsLoad {
 		handler.buildSketchSymbolsLoad = false
-		log.Println("--! Resfreshing document symbols")
+		log.Println(prefix + "Queued resfreshing document symbols")
 		err = handler.refreshCppDocumentSymbols()
 	}
 	if err == nil && handler.buildSketchSymbolsCheck {
 		handler.buildSketchSymbolsCheck = false
-		log.Println("--! Resfreshing document symbols")
+		log.Println(prefix + "Queued check document symbols")
 		err = handler.checkCppDocumentSymbols()
 	}
 	if err != nil {
 		// Exit the process and trigger a restart by the client in case of a severe error
 		if err.Error() == "context deadline exceeded" {
-			log.Println("Timeout exceeded while waiting for a reply from clangd.")
+			log.Println(prefix + "Timeout exceeded while waiting for a reply from clangd.")
 			handler.exit()
 		}
 		if strings.Contains(err.Error(), "non-added document") || strings.Contains(err.Error(), "non-added file") {
-			log.Println("The clangd process has lost track of the open document.")
+			log.Printf(prefix + "The clangd process has lost track of the open document.")
+			log.Printf(prefix+"  %s", err)
 			handler.exit()
 		}
 	}
@@ -381,13 +402,13 @@ func (handler *InoHandler) exit() {
 func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) error {
 	currCppTextVersion := 0
 	if params != nil {
-		log.Printf("--> initialize(%s)\n", params.RootURI)
+		log.Printf("    --> initialize(%s)\n", params.RootURI)
 		handler.lspInitializeParams = params
 		handler.sketchRoot = params.RootURI.AsPath()
 		handler.sketchName = handler.sketchRoot.Base()
 	} else {
+		log.Printf("    --> RE-initialize()\n")
 		currCppTextVersion = handler.sketchMapper.CppText.Version
-		log.Printf("--> RE-initialize()\n")
 	}
 
 	if buildPath, err := handler.generateBuildEnvironment(); err == nil {
@@ -450,18 +471,27 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 }
 
 func (handler *InoHandler) refreshCppDocumentSymbols() error {
+	prefix := "LS  --- "
+	defer log.Printf(prefix + "(done)")
+	log.Printf(prefix + "(queued)")
+	handler.dataMux.Lock()
+	defer handler.dataMux.Unlock()
+	log.Printf(prefix + "(running)")
+
 	// Query source code symbols
 	cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
-	log.Printf("    --> documentSymbol(%s)", cppURI)
+	log.Printf(prefix+"sent to clangd: documentSymbol(%s)", cppURI)
 	result, err := lsp.SendRequest(context.Background(), handler.ClangdConn, "textDocument/documentSymbol", &lsp.DocumentSymbolParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
 	})
 	if err != nil {
+		log.Printf(prefix+"error: %s", err)
 		return errors.WithMessage(err, "quering source code symbols")
 	}
 	result = handler.transformClangdResult("textDocument/documentSymbol", cppURI, lsp.NilURI, result)
 	if symbols, ok := result.([]lsp.DocumentSymbol); !ok {
-		return errors.WithMessage(err, "quering source code symbols (2)")
+		log.Printf(prefix + "error: invalid response from clangd")
+		return errors.New("invalid response from clangd")
 	} else {
 		// Filter non-functions symbols
 		i := 0
@@ -474,7 +504,7 @@ func (handler *InoHandler) refreshCppDocumentSymbols() error {
 		}
 		symbols = symbols[:i]
 		for _, symbol := range symbols {
-			log.Printf("    symbol: %s %s", symbol.Kind, symbol.Name)
+			log.Printf(prefix+"   symbol: %s %s", symbol.Kind, symbol.Name)
 		}
 		handler.buildSketchSymbols = symbols
 	}
@@ -482,18 +512,19 @@ func (handler *InoHandler) refreshCppDocumentSymbols() error {
 }
 
 func (handler *InoHandler) checkCppDocumentSymbols() error {
+	prefix := "LS  --- "
 	oldSymbols := handler.buildSketchSymbols
 	if err := handler.refreshCppDocumentSymbols(); err != nil {
 		return err
 	}
 	if len(oldSymbols) != len(handler.buildSketchSymbols) {
-		log.Println("--! new symbols detected, triggering sketch rebuild!")
+		log.Println(prefix + "new symbols detected, triggering sketch rebuild!")
 		handler.scheduleRebuildEnvironment()
 		return nil
 	}
 	for i, old := range oldSymbols {
 		if newName := handler.buildSketchSymbols[i].Name; old.Name != newName {
-			log.Printf("--! symbols changed, triggering sketch rebuild: '%s' -> '%s'", old.Name, newName)
+			log.Printf(prefix+"symbols changed, triggering sketch rebuild: '%s' -> '%s'", old.Name, newName)
 			handler.scheduleRebuildEnvironment()
 			return nil
 		}
@@ -1332,23 +1363,32 @@ func (handler *InoHandler) cpp2inoDiagnostics(cppDiags *lsp.PublishDiagnosticsPa
 func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.Conn, req *jsonrpc2.Request) (interface{}, error) {
 	defer streams.CatchAndLogPanic()
 
+	prefix := "CLG <-- "
+	if req.Notif {
+		n := atomic.AddInt64(&handler.clangdNotificationCount, 1)
+		prefix += fmt.Sprintf("%s notif%d ", req.Method, n)
+	} else {
+		prefix += fmt.Sprintf("%s %v ", req.Method, req.ID)
+	}
+	defer log.Printf(prefix + "(done)")
+
+	log.Printf(prefix + "(queued)")
 	handler.synchronizer.DataMux.RLock()
 	defer handler.synchronizer.DataMux.RUnlock()
+	log.Printf(prefix + "(running)")
 
 	params, err := lsp.ReadParams(req.Method, req.Params)
 	if err != nil {
+		log.Println(prefix+"parsing clang message:", err)
 		return nil, errors.WithMessage(err, "parsing JSON message from clangd")
 	}
-	if params == nil {
-		// passthrough
-		params = req.Params
-	}
+
 	switch p := params.(type) {
 	case *lsp.PublishDiagnosticsParams:
 		// "textDocument/publishDiagnostics"
-		log.Printf("    <-- publishDiagnostics(%s):", p.URI)
+		log.Printf(prefix+"publishDiagnostics(%s):", p.URI)
 		for _, diag := range p.Diagnostics {
-			log.Printf("        > %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+			log.Printf(prefix+"> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
 		}
 
 		// the diagnostics on sketch.cpp.ino once mapped into their
@@ -1370,13 +1410,6 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 				continue
 			}
 
-			if enableLogging {
-				log.Printf("<-- publishDiagnostics(%s):", inoDiag.URI)
-				for _, diag := range inoDiag.Diagnostics {
-					log.Printf("    > %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
-				}
-			}
-
 			// If we have an "undefined reference" in the .ino code trigger a
 			// check for newly created symbols (that in turn may trigger a
 			// new arduino-preprocessing of the sketch).
@@ -1390,6 +1423,10 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 				}
 			}
 
+			log.Printf(prefix+"to IDE: publishDiagnostics(%s):", inoDiag.URI)
+			for _, diag := range inoDiag.Diagnostics {
+				log.Printf(prefix+"> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+			}
 			if err := handler.StdioConn.Notify(ctx, "textDocument/publishDiagnostics", inoDiag); err != nil {
 				return nil, err
 			}
@@ -1407,9 +1444,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 					URI:         lsp.NewDocumentURI(sourcePath),
 					Diagnostics: []lsp.Diagnostic{},
 				}
-				if enableLogging {
-					log.Printf("<-- publishDiagnostics(%s):", msg.URI)
-				}
+				log.Printf(prefix+"to IDE: publishDiagnostics(%s):", msg.URI)
 				if err := handler.StdioConn.Notify(ctx, "textDocument/publishDiagnostics", msg); err != nil {
 					return nil, err
 				}
@@ -1423,22 +1458,24 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 		// "workspace/applyEdit"
 		p.Edit = *handler.cpp2inoWorkspaceEdit(&p.Edit)
 	}
-
 	if err != nil {
 		log.Println("From clangd: Method:", req.Method, "Error:", err)
 		return nil, err
 	}
+
+	if params == nil {
+		// passthrough
+		log.Printf(prefix + "passing through message")
+		params = req.Params
+	}
+
 	var result interface{}
 	if req.Notif {
+		log.Println(prefix + "to IDE")
 		err = handler.StdioConn.Notify(ctx, req.Method, params)
-		if enableLogging {
-			log.Println("From clangd:", req.Method)
-		}
 	} else {
+		log.Println(prefix + "to IDE")
 		result, err = lsp.SendRequest(ctx, handler.StdioConn, req.Method, params)
-		if enableLogging {
-			log.Println("From clangd:", req.Method, "id", req.ID)
-		}
 	}
 	return result, err
 }
