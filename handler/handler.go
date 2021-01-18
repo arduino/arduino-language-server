@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -602,15 +603,26 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.
 		panic("could not find compile_commands.json")
 	}
 	compilers := map[string]bool{}
-	for _, cmd := range compileCommands.Contents {
+	for i, cmd := range compileCommands.Contents {
 		if len(cmd.Arguments) == 0 {
 			panic("invalid empty argument field in compile_commands.json")
 		}
-		compilers[cmd.Arguments[0]] = true
+
+		// clangd requires full path to compiler (including extension .exe on Windows!)
+		compilerPath := paths.New(cmd.Arguments[0]).Canonical()
+		compiler := compilerPath.String()
+		if runtime.GOOS == "windows" && strings.ToLower(compilerPath.Ext()) != ".exe" {
+			compiler += ".exe"
+		}
+		compileCommands.Contents[i].Arguments[0] = compiler
+
+		compilers[compiler] = true
 	}
 	if len(compilers) == 0 {
 		panic("main compiler not found")
 	}
+	// Save back compile_commands.json with OS native file separator and extension
+	compileCommands.SaveToFile()
 
 	// Start clangd
 	args := []string{
