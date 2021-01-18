@@ -48,6 +48,8 @@ type Range struct {
 	End Position `json:"end"`
 }
 
+var NilRange = Range{}
+
 func (r Range) String() string {
 	return fmt.Sprintf("%s-%s", r.Start, r.End)
 }

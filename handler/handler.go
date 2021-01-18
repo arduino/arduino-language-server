@@ -58,8 +58,8 @@ type InoHandler struct {
 	sketchName                 string
 	sketchMapper               *sourcemapper.InoMapper
 	sketchTrackedFilesCount    int
-	docs                       map[lsp.DocumentURI]*lsp.TextDocumentItem
-	inoDocsWithDiagnostics     map[lsp.DocumentURI]bool
+	docs                       map[string]*lsp.TextDocumentItem
+	inoDocsWithDiagnostics     map[string]bool
 
 	config       lsp.BoardConfig
 	synchronizer Synchronizer
@@ -68,8 +68,8 @@ type InoHandler struct {
 // NewInoHandler creates and configures an InoHandler.
 func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler := &InoHandler{
-		docs:                   map[lsp.DocumentURI]*lsp.TextDocumentItem{},
-		inoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
+		docs:                   map[string]*lsp.TextDocumentItem{},
+		inoDocsWithDiagnostics: map[string]bool{},
 		config: lsp.BoardConfig{
 			SelectedBoard: board,
 		},
@@ -542,7 +542,7 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.
 func (handler *InoHandler) didOpen(inoDidOpen *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
 	// Add the TextDocumentItem in the tracked files list
 	inoItem := inoDidOpen.TextDocument
-	handler.docs[inoItem.URI] = &inoItem
+	handler.docs[inoItem.URI.Canonical()] = &inoItem
 
 	// If we are tracking a .ino...
 	if inoItem.URI.Ext() == ".ino" {
@@ -566,8 +566,8 @@ func (handler *InoHandler) didOpen(inoDidOpen *lsp.DidOpenTextDocumentParams) (*
 
 func (handler *InoHandler) didClose(inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
 	inoIdentifier := inoDidClose.TextDocument
-	if _, exist := handler.docs[inoIdentifier.URI]; exist {
-		delete(handler.docs, inoIdentifier.URI)
+	if _, exist := handler.docs[inoIdentifier.URI.Canonical()]; exist {
+		delete(handler.docs, inoIdentifier.URI.Canonical())
 	} else {
 		log.Printf("    didClose of untracked document: %s", inoIdentifier.URI)
 		return nil, unknownURI(inoIdentifier.URI)
@@ -602,8 +602,8 @@ func (handler *InoHandler) ino2cppTextDocumentItem(inoItem lsp.TextDocumentItem)
 		cppItem.Text = handler.sketchMapper.CppText.Text
 		cppItem.Version = handler.sketchMapper.CppText.Version
 	} else {
-		cppItem.Text = handler.docs[inoItem.URI].Text
-		cppItem.Version = handler.docs[inoItem.URI].Version
+		cppItem.Text = handler.docs[inoItem.URI.Canonical()].Text
+		cppItem.Version = handler.docs[inoItem.URI.Canonical()].Version
 	}
 
 	return cppItem, nil
@@ -612,7 +612,7 @@ func (handler *InoHandler) ino2cppTextDocumentItem(inoItem lsp.TextDocumentItem)
 func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
 	doc := req.TextDocument
 
-	trackedDoc, ok := handler.docs[doc.URI]
+	trackedDoc, ok := handler.docs[doc.URI.Canonical()]
 	if !ok {
 		return nil, unknownURI(doc.URI)
 	}
@@ -766,6 +766,23 @@ func (handler *InoHandler) ino2cppDocumentURI(inoURI lsp.DocumentURI) (lsp.Docum
 	return lsp.NilURI, err
 }
 
+func (handler *InoHandler) inoDocumentURIFromInoPath(inoPath string) (lsp.DocumentURI, error) {
+	if inoPath == sourcemapper.NotIno.File {
+		return sourcemapper.NotInoURI, nil
+	}
+	doc, ok := handler.docs[inoPath]
+	if !ok {
+		log.Printf("    !!! Unresolved .ino path: %s", inoPath)
+		log.Printf("    !!! Known doc paths are:")
+		for p := range handler.docs {
+			log.Printf("    !!! > %s", p)
+		}
+		uri := lsp.NewDocumentURI(inoPath)
+		return uri, unknownURI(uri)
+	}
+	return doc.URI, nil
+}
+
 func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
 	// Sketchbook/Sketch/Sketch.ino      <- build-path/sketch/Sketch.ino.cpp
 	// Sketchbook/Sketch/AnotherTab.ino  <- build-path/sketch/Sketch.ino.cpp  (different section from above)
@@ -784,16 +801,19 @@ func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange l
 		} else {
 			log.Printf("    URI: ERROR: %s", err)
 			handler.sketchMapper.DebugLogAll()
+			return lsp.NilURI, lsp.NilRange, err
 		}
-		return lsp.NewDocumentURI(inoPath), inoRange, err
+		inoURI, err := handler.inoDocumentURIFromInoPath(inoPath)
+		return inoURI, inoRange, err
 	}
 
 	inside, err := cppPath.IsInsideDir(handler.buildSketchRoot)
 	if err != nil {
 		log.Printf("    could not determine if '%s' is inside '%s'", cppPath, handler.buildSketchRoot)
-		return lsp.NilURI, lsp.Range{}, err
+		return lsp.NilURI, lsp.NilRange, err
 	}
 	if !inside {
+		log.Printf("    '%s' is not inside '%s'", cppPath, handler.buildSketchRoot)
 		log.Printf("    keep doc identifier to '%s' as-is", cppPath)
 		return cppURI, cppRange, nil
 	}
@@ -806,7 +826,7 @@ func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange l
 	}
 
 	log.Printf("    could not determine rel-path of '%s' in '%s': %s", cppPath, handler.buildSketchRoot, err)
-	return lsp.NilURI, lsp.Range{}, err
+	return lsp.NilURI, lsp.NilRange, err
 }
 
 func (handler *InoHandler) ino2cppTextDocumentPositionParams(inoParams *lsp.TextDocumentPositionParams) (*lsp.TextDocumentPositionParams, error) {
@@ -1111,36 +1131,41 @@ func (handler *InoHandler) Cpp2InoCommand(command *lsp.Command) *lsp.Command {
 	return inoCommand
 }
 
-func (handler *InoHandler) cpp2inoWorkspaceEdit(origWorkspaceEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
-	if origWorkspaceEdit == nil {
+func (handler *InoHandler) cpp2inoWorkspaceEdit(cppWorkspaceEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
+	if cppWorkspaceEdit == nil {
 		return nil
 	}
-	resWorkspaceEdit := &lsp.WorkspaceEdit{
+	inoWorkspaceEdit := &lsp.WorkspaceEdit{
 		Changes: map[lsp.DocumentURI][]lsp.TextEdit{},
 	}
-	for editURI, edits := range origWorkspaceEdit.Changes {
+	for editURI, edits := range cppWorkspaceEdit.Changes {
 		// if the edits are not relative to sketch file...
 		if !editURI.AsPath().EquivalentTo(handler.buildSketchCpp) {
 			// ...pass them through...
-			resWorkspaceEdit.Changes[editURI] = edits
+			inoWorkspaceEdit.Changes[editURI] = edits
 			continue
 		}
 
 		// ...otherwise convert edits to the sketch.ino.cpp into multilpe .ino edits
 		for _, edit := range edits {
-			cppRange := edit.Range
-			inoFile, inoRange := handler.sketchMapper.CppToInoRange(cppRange)
-			inoURI := lsp.NewDocumentURI(inoFile)
-			if _, have := resWorkspaceEdit.Changes[inoURI]; !have {
-				resWorkspaceEdit.Changes[inoURI] = []lsp.TextEdit{}
+			inoURI, inoRange, err := handler.cpp2inoDocumentURI(editURI, edit.Range)
+			if err != nil {
+				log.Printf("    error converting edit %s:%s: %s", editURI, edit.Range, err)
+				continue
 			}
-			resWorkspaceEdit.Changes[inoURI] = append(resWorkspaceEdit.Changes[inoURI], lsp.TextEdit{
+			//inoFile, inoRange := handler.sketchMapper.CppToInoRange(edit.Range)
+			//inoURI := lsp.NewDocumentURI(inoFile)
+			if _, have := inoWorkspaceEdit.Changes[inoURI]; !have {
+				inoWorkspaceEdit.Changes[inoURI] = []lsp.TextEdit{}
+			}
+			inoWorkspaceEdit.Changes[inoURI] = append(inoWorkspaceEdit.Changes[inoURI], lsp.TextEdit{
 				NewText: edit.NewText,
 				Range:   inoRange,
 			})
 		}
 	}
-	return resWorkspaceEdit
+	log.Printf("    done converting workspaceEdit")
+	return inoWorkspaceEdit
 }
 
 func (handler *InoHandler) cpp2inoLocation(cppLocation lsp.Location) (lsp.Location, error) {
@@ -1260,7 +1285,7 @@ func (handler *InoHandler) cpp2inoDiagnostics(cppDiags *lsp.PublishDiagnosticsPa
 			return []*lsp.PublishDiagnosticsParams{}, nil
 		}
 
-		inoURI, _, err := handler.cpp2inoDocumentURI(cppDiags.URI, lsp.Range{})
+		inoURI, _, err := handler.cpp2inoDocumentURI(cppDiags.URI, lsp.NilRange)
 		return []*lsp.PublishDiagnosticsParams{
 			{
 				URI:         inoURI,
@@ -1332,9 +1357,9 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 		}
 
 		// Push back to IDE the converted diagnostics
-		inoDocsWithDiagnostics := map[lsp.DocumentURI]bool{}
+		inoDocsWithDiagnostics := map[string]bool{}
 		for _, inoDiag := range inoDiagnostics {
-			if inoDiag.URI == lsp.NewDocumentURI(sourcemapper.NotIno.File) {
+			if inoDiag.URI.String() == sourcemapper.NotInoURI.String() {
 				cleanUpInoDiagnostics = true
 				continue
 			}
@@ -1350,7 +1375,7 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 			// check for newly created symbols (that in turn may trigger a
 			// new arduino-preprocessing of the sketch).
 			if inoDiag.URI.Ext() == ".ino" {
-				inoDocsWithDiagnostics[inoDiag.URI] = true
+				inoDocsWithDiagnostics[inoDiag.URI.Canonical()] = true
 				cleanUpInoDiagnostics = true
 				for _, diag := range inoDiag.Diagnostics {
 					if diag.Code == "undeclared_var_use_suggest" || diag.Code == "undeclared_var_use" {
@@ -1366,14 +1391,14 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 
 		if cleanUpInoDiagnostics {
 			// Remove diagnostics from all .ino where there are no errors coming from clang
-			for sourceURI := range handler.inoDocsWithDiagnostics {
-				if inoDocsWithDiagnostics[sourceURI] {
+			for sourcePath := range handler.inoDocsWithDiagnostics {
+				if inoDocsWithDiagnostics[sourcePath] {
 					// skip if we already sent updated diagnostics
 					continue
 				}
 				// otherwise clear previous diagnostics
 				msg := lsp.PublishDiagnosticsParams{
-					URI:         sourceURI,
+					URI:         lsp.NewDocumentURI(sourcePath),
 					Diagnostics: []lsp.Diagnostic{},
 				}
 				if enableLogging {

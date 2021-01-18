@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/arduino/go-paths-helper"
 	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
 	"github.com/bcmi-labs/arduino-language-server/lsp"
 	"github.com/pkg/errors"
@@ -16,7 +17,6 @@ import (
 
 // InoMapper is a mapping between the .ino sketch and the preprocessed .cpp file
 type InoMapper struct {
-	InoText         map[lsp.DocumentURI]*SourceRevision
 	CppText         *SourceRevision
 	toCpp           map[InoLine]int // Converts File.ino:line -> line
 	toIno           map[int]InoLine // Convers line -> File.ino:line
@@ -25,7 +25,10 @@ type InoMapper struct {
 }
 
 // NotIno are lines that do not belongs to an .ino file
-var NotIno = InoLine{"not-ino", 0}
+var NotIno = InoLine{"/not-ino", 0}
+
+// NotInoURI is the DocumentURI that do not belongs to an .ino file
+var NotInoURI, _ = lsp.NewDocumentURIFromURL("file:///not-ino")
 
 type SourceRevision struct {
 	Version int
@@ -40,12 +43,12 @@ type InoLine struct {
 
 // InoToCppLine converts a source (.ino) line into a target (.cpp) line
 func (s *InoMapper) InoToCppLine(sourceURI lsp.DocumentURI, line int) int {
-	return s.toCpp[InoLine{sourceURI.Unbox(), line}]
+	return s.toCpp[InoLine{sourceURI.Canonical(), line}]
 }
 
 // InoToCppLineOk converts a source (.ino) line into a target (.cpp) line
 func (s *InoMapper) InoToCppLineOk(sourceURI lsp.DocumentURI, line int) (int, bool) {
-	res, ok := s.toCpp[InoLine{sourceURI.Unbox(), line}]
+	res, ok := s.toCpp[InoLine{sourceURI.Canonical(), line}]
 	return res, ok
 }
 
@@ -166,7 +169,7 @@ func CreateInoMapper(targetFile []byte) *InoMapper {
 			if err == nil && l > 0 {
 				sourceLine = l - 1
 			}
-			sourceFile = unquoteCppString(tokens[2])
+			sourceFile = paths.New(unquoteCppString(tokens[2])).Canonical().String()
 			mapper.toIno[targetLine] = NotIno
 		} else if sourceFile != "" {
 			mapper.mapLine(sourceFile, sourceLine, targetLine)
