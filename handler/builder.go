@@ -94,9 +94,9 @@ func (handler *InoHandler) rebuildEnvironmentLoop() {
 			}
 		}()
 
-		handler.synchronizer.DataMux.Lock()
+		handler.dataMux.Lock()
 		handler.initializeWorkbench(nil)
-		handler.synchronizer.DataMux.Unlock()
+		handler.dataMux.Unlock()
 		done <- true
 		close(done)
 	}

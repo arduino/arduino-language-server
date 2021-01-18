@@ -44,7 +44,7 @@ func main() {
 		log.SetOutput(os.Stderr)
 	}
 
-	handler.Setup(cliPath, clangdPath, enableLogging, true)
+	handler.Setup(cliPath, clangdPath, enableLogging)
 	initialBoard := lsp.Board{Fqbn: initialFqbn, Name: initialBoardName}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)

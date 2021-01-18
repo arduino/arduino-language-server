@@ -27,14 +27,12 @@ import (
 var globalCliPath string
 var globalClangdPath string
 var enableLogging bool
-var asyncProcessing bool
 
 // Setup initializes global variables.
-func Setup(cliPath string, clangdPath string, _enableLogging bool, _asyncProcessing bool) {
+func Setup(cliPath string, clangdPath string, _enableLogging bool) {
 	globalCliPath = cliPath
 	globalClangdPath = clangdPath
 	enableLogging = _enableLogging
-	asyncProcessing = _asyncProcessing
 }
 
 // CLangdStarter starts clangd and returns its stdin/out/err
@@ -42,8 +40,11 @@ type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io
 
 // InoHandler is a JSON-RPC handler that delegates messages to clangd.
 type InoHandler struct {
-	StdioConn                  *jsonrpc2.Conn
-	ClangdConn                 *jsonrpc2.Conn
+	StdioConn  *jsonrpc2.Conn
+	ClangdConn *jsonrpc2.Conn
+
+	clangdStarted              *sync.Cond
+	dataMux                    sync.RWMutex
 	lspInitializeParams        *lsp.InitializeParams
 	buildPath                  *paths.Path
 	buildSketchRoot            *paths.Path
@@ -61,8 +62,7 @@ type InoHandler struct {
 	docs                       map[string]*lsp.TextDocumentItem
 	inoDocsWithDiagnostics     map[string]bool
 
-	config       lsp.BoardConfig
-	synchronizer Synchronizer
+	config lsp.BoardConfig
 }
 
 // NewInoHandler creates and configures an InoHandler.
@@ -74,15 +74,9 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 			SelectedBoard: board,
 		},
 	}
-
+	handler.clangdStarted = sync.NewCond(&handler.dataMux)
 	stdStream := jsonrpc2.NewBufferedStream(stdio, jsonrpc2.VSCodeObjectCodec{})
 	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.HandleMessageFromIDE)
-	if asyncProcessing {
-		stdHandler = AsyncHandler{
-			handler:      stdHandler,
-			synchronizer: &handler.synchronizer,
-		}
-	}
 	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler)
 	if enableLogging {
 		log.Println("Initial board configuration:", board)
@@ -118,11 +112,23 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		"textDocument/didClose":  true,
 	}
 	if needsWriteLock[req.Method] {
-		handler.synchronizer.DataMux.Lock()
-		defer handler.synchronizer.DataMux.Unlock()
+		handler.dataMux.Lock()
+		defer handler.dataMux.Unlock()
 	} else {
-		handler.synchronizer.DataMux.RLock()
-		defer handler.synchronizer.DataMux.RUnlock()
+		handler.dataMux.RLock()
+		defer handler.dataMux.RUnlock()
+	}
+
+	// Wait for clangd start-up
+	doNotNeedClangd := map[string]bool{
+		"initialize":  true,
+		"initialized": true,
+	}
+	if handler.ClangdConn == nil && !doNotNeedClangd[req.Method] {
+		handler.clangdStarted.Wait()
+		if handler.ClangdConn == nil {
+			return nil, errors.New("could not run clangd, aborted")
+		}
 	}
 
 	// Handle LSP methods: transform parameters and send to clangd
