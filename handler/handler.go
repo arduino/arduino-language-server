@@ -126,32 +126,38 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		params = req.Params
 	}
 
-	needsWriteLock := map[string]bool{
-		"initialize":             true,
-		"textDocument/didOpen":   true,
-		"textDocument/didChange": true,
-		"textDocument/didClose":  true,
-	}
 	log.Printf(prefix + "(queued)")
-	if needsWriteLock[req.Method] {
+	switch req.Method {
+	case // Write lock
+		"initialize",
+		"textDocument/didOpen",
+		"textDocument/didChange",
+		"textDocument/didClose":
 		handler.dataMux.Lock()
 		defer handler.dataMux.Unlock()
-	} else {
+	case // Read lock
+		"textDocument/publishDiagnostics",
+		"workspace/applyEdit":
+		handler.dataMux.RLock()
+		defer handler.dataMux.RUnlock()
+	default: // Default to read lock
 		handler.dataMux.RLock()
 		defer handler.dataMux.RUnlock()
 	}
 
-	// Wait for clangd start-up
-	doNotNeedClangd := map[string]bool{
-		"initialize":  true,
-		"initialized": true,
-	}
-	if handler.ClangdConn == nil && !doNotNeedClangd[req.Method] {
-		log.Printf(prefix + "(throttled: waiting for clangd)")
-		handler.clangdStarted.Wait()
+	switch req.Method {
+	case // Do not need clangd
+		"initialize",
+		"initialized":
+	default: // Default to clangd required
+		// Wait for clangd start-up
 		if handler.ClangdConn == nil {
-			log.Printf("Clangd startup failed: aborting call")
-			return nil, errors.New("could not run clangd, aborted")
+			log.Printf(prefix + "(throttled: waiting for clangd)")
+			handler.clangdStarted.Wait()
+			if handler.ClangdConn == nil {
+				log.Printf(prefix + "clangd startup failed: aborting call")
+				return nil, errors.New("could not start clangd, aborted")
+			}
 		}
 	}
 
@@ -163,7 +169,51 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	switch p := params.(type) {
 	case *lsp.InitializeParams:
 		// method "initialize"
-		err = handler.initializeWorkbench(p)
+
+		go func() {
+			// Start clangd asynchronously
+			log.Printf("LS  --- initializing workbench (queued)")
+			handler.dataMux.Lock()
+			defer handler.dataMux.Unlock()
+
+			log.Printf("LS  --- initializing workbench (running)")
+			handler.initializeWorkbench(p)
+
+			// clangd should be running now...
+			handler.clangdStarted.Broadcast()
+
+			log.Printf("LS  --- initializing workbench (done)")
+		}()
+
+		T := true
+		F := false
+		return &lsp.InitializeResult{
+			Capabilities: lsp.ServerCapabilities{
+				TextDocumentSync: &lsp.TextDocumentSyncOptionsOrKind{Kind: &lsp.TDSKIncremental},
+				HoverProvider:    true,
+				CompletionProvider: &lsp.CompletionOptions{
+					TriggerCharacters: []string{".", "\u003e", ":"},
+				},
+				SignatureHelpProvider: &lsp.SignatureHelpOptions{
+					TriggerCharacters: []string{"(", ","},
+				},
+				DefinitionProvider:              true,
+				ReferencesProvider:              false, // TODO: true
+				DocumentHighlightProvider:       true,
+				DocumentSymbolProvider:          true,
+				WorkspaceSymbolProvider:         true,
+				CodeActionProvider:              &lsp.BoolOrCodeActionOptions{IsProvider: &T},
+				DocumentFormattingProvider:      true,
+				DocumentRangeFormattingProvider: true,
+				DocumentOnTypeFormattingProvider: &lsp.DocumentOnTypeFormattingOptions{
+					FirstTriggerCharacter: "\n",
+				},
+				RenameProvider: &lsp.BoolOrRenameOptions{IsProvider: &F}, // TODO: &T
+				ExecuteCommandProvider: &lsp.ExecuteCommandOptions{
+					Commands: []string{"clangd.applyFix", "clangd.applyTweak"},
+				},
+			},
+		}, nil
 
 	case *lsp.InitializedParams:
 		// method "initialized"
@@ -366,12 +416,12 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	if err == nil && handler.buildSketchSymbolsLoad {
 		handler.buildSketchSymbolsLoad = false
 		log.Println(prefix + "Queued resfreshing document symbols")
-		err = handler.refreshCppDocumentSymbols()
+		go handler.refreshCppDocumentSymbols()
 	}
 	if err == nil && handler.buildSketchSymbolsCheck {
 		handler.buildSketchSymbolsCheck = false
 		log.Println(prefix + "Queued check document symbols")
-		err = handler.checkCppDocumentSymbols()
+		go handler.checkCppDocumentSymbols()
 	}
 	if err != nil {
 		// Exit the process and trigger a restart by the client in case of a severe error
@@ -431,9 +481,6 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 
 	if params == nil {
 		// If we are restarting re-synchronize clangd
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-
 		cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
 		cppTextDocumentIdentifier := lsp.TextDocumentIdentifier{URI: cppURI}
 
@@ -447,6 +494,8 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 			},
 		}
 
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
 		if err := handler.ClangdConn.Notify(ctx, "textDocument/didChange", syncEvent); err != nil {
 			log.Println("    error reinitilizing clangd:", err)
 			return err
@@ -465,6 +514,20 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 		clangdStream := jsonrpc2.NewBufferedStream(clangdStdio, jsonrpc2.VSCodeObjectCodec{})
 		clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
 		handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
+
+		// Send initialization command to clangd
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		var resp lsp.InitializeResult
+		if err := handler.ClangdConn.Call(ctx, "initialize", handler.lspInitializeParams, &resp); err != nil {
+			log.Println("    error initilizing clangd:", err)
+			return err
+		}
+
+		if err := handler.ClangdConn.Notify(ctx, "initialized", lsp.InitializedParams{}); err != nil {
+			log.Println("    error sending initialize to clangd:", err)
+			return err
+		}
 	}
 
 	return nil
@@ -1373,8 +1436,19 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 	defer log.Printf(prefix + "(done)")
 
 	log.Printf(prefix + "(queued)")
-	handler.synchronizer.DataMux.RLock()
-	defer handler.synchronizer.DataMux.RUnlock()
+	switch req.Method {
+	case // No locking required
+		"$/progress",
+		"window/workDoneProgress/create":
+	case // Read lock
+		"textDocument/publishDiagnostics",
+		"workspace/applyEdit":
+		handler.dataMux.RLock()
+		defer handler.dataMux.RUnlock()
+	default: // Default to read lock
+		handler.dataMux.RLock()
+		defer handler.dataMux.RUnlock()
+	}
 	log.Printf(prefix + "(running)")
 
 	params, err := lsp.ReadParams(req.Method, req.Params)
