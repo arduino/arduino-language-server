@@ -41,6 +41,7 @@ func OpenLogFileAs(filename string) *os.File {
 		abs, _ := path.Abs()
 		log.Printf("logging to %s", abs)
 	}
+	res.WriteString("\n\n\n\n\n\n\nStarted logging.\n")
 	return res
 }
 
