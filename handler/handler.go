@@ -178,7 +178,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			defer handler.dataMux.Unlock()
 
 			log.Printf("LS  --- initializing workbench (running)")
-			handler.initializeWorkbench(p)
+			handler.initializeWorkbench(ctx, p)
 
 			// clangd should be running now...
 			handler.clangdStarted.Broadcast()
@@ -410,8 +410,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ClangdConn.Notify(ctx, req.Method, params)
 	} else {
 		log.Printf(prefix + "sent to Clang")
-		ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
-		defer cancel()
 		result, err = lsp.SendRequest(ctx, handler.ClangdConn, req.Method, params)
 	}
 	if err == nil && handler.buildSketchSymbolsLoad {
@@ -450,7 +448,7 @@ func (handler *InoHandler) exit() {
 	os.Exit(1)
 }
 
-func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) error {
+func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.InitializeParams) error {
 	currCppTextVersion := 0
 	if params != nil {
 		log.Printf("    --> initialize(%s)\n", params.RootURI)
@@ -495,8 +493,6 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 			},
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
 		if err := handler.ClangdConn.Notify(ctx, "textDocument/didChange", syncEvent); err != nil {
 			log.Println("    error reinitilizing clangd:", err)
 			return err
@@ -513,7 +509,7 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 		}
 
 		clangdStream := jsonrpc2.NewBufferedStream(clangdStdio, jsonrpc2.VSCodeObjectCodec{})
-		clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
+		clangdHandler := AsyncHandler{jsonrpc2.HandlerWithError(handler.FromClangd)}
 		handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
 
 		// Send initialization command to clangd

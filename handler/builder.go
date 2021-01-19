@@ -95,7 +95,7 @@ func (handler *InoHandler) rebuildEnvironmentLoop() {
 		}()
 
 		handler.dataMux.Lock()
-		handler.initializeWorkbench(nil)
+		handler.initializeWorkbench(context.Background(), nil)
 		handler.dataMux.Unlock()
 		done <- true
 		close(done)
