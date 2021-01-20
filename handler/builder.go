@@ -54,6 +54,7 @@ func (handler *InoHandler) rebuildEnvironmentLoop() {
 		// Regenerate preprocessed sketch!
 		done := make(chan bool)
 		go func() {
+			defer streams.CatchAndLogPanic()
 
 			handler.progressHandler.Create("arduinoLanguageServerRebuild")
 			handler.progressHandler.Begin("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressBegin{

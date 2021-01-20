@@ -179,6 +179,8 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		// method "initialize"
 
 		go func() {
+			defer streams.CatchAndLogPanic()
+
 			// Start clangd asynchronously
 			log.Printf("LS  --- initializing workbench (queued)")
 			handler.dataMux.Lock()
