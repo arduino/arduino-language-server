@@ -1058,8 +1058,8 @@ type SemanticHighlightingToken struct {
 }
 
 type ProgressParams struct {
-	Token string      `json:"token"`
-	Value interface{} `json:"value"`
+	Token string           `json:"token"`
+	Value *json.RawMessage `json:"value"`
 }
 
 type WorkDoneProgressCreateParams struct {
@@ -1088,6 +1088,15 @@ type WorkDoneProgressBegin struct {
 	Percentage  *int    `json:"percentage,omitempty"`
 }
 
+func Raw(v json.Marshaler) *json.RawMessage {
+	data, err := v.MarshalJSON()
+	if err != nil {
+		panic("error marshaling: " + err.Error())
+	}
+	dataRaw := json.RawMessage(data)
+	return &dataRaw
+}
+
 // MarshalJSON implements json.Marshaler.
 func (v WorkDoneProgressBegin) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -1102,8 +1111,11 @@ func (v WorkDoneProgressBegin) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler.
 func (v *WorkDoneProgressBegin) UnmarshalJSON(data []byte) error {
 	type ProgressBegin struct {
-		WorkDoneProgressBegin
-		Kind string `json:"kind"`
+		Title       string  `json:"title"`
+		Cancellable *bool   `json:"cancellable,omitempty"`
+		Message     *string `json:"message,omitempty"`
+		Percentage  *int    `json:"percentage,omitempty"`
+		Kind        string  `json:"kind"`
 	}
 	var x ProgressBegin
 	if err := json.Unmarshal(data, &x); err != nil {
@@ -1112,31 +1124,36 @@ func (v *WorkDoneProgressBegin) UnmarshalJSON(data []byte) error {
 	if x.Kind != "begin" {
 		return errors.New(`expected kind == "begin"`)
 	}
-	*v = x.WorkDoneProgressBegin
+	(*v).Title = x.Title
+	(*v).Cancellable = x.Cancellable
+	(*v).Message = x.Message
+	(*v).Percentage = x.Percentage
 	return nil
 }
 
 type WorkDoneProgressReport struct {
-	Cancellable *bool   `json:"cancellable,omitempty"`
-	Message     *string `json:"message,omitempty"`
-	Percentage  *int    `json:"percentage,omitempty"`
+	Cancellable *bool    `json:"cancellable,omitempty"`
+	Message     *string  `json:"message,omitempty"`
+	Percentage  *float64 `json:"percentage,omitempty"`
 }
 
 // MarshalJSON implements json.Marshaler.
 func (v WorkDoneProgressReport) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Cancellable *bool   `json:"cancellable,omitempty"`
-		Message     *string `json:"message,omitempty"`
-		Percentage  *int    `json:"percentage,omitempty"`
-		Kind        string  `json:"kind"`
+		Cancellable *bool    `json:"cancellable,omitempty"`
+		Message     *string  `json:"message,omitempty"`
+		Percentage  *float64 `json:"percentage,omitempty"`
+		Kind        string   `json:"kind"`
 	}{v.Cancellable, v.Message, v.Percentage, "report"})
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (v *WorkDoneProgressReport) UnmarshalJSON(data []byte) error {
 	type ProgressReport struct {
-		WorkDoneProgressReport
-		Kind string `json:"kind"`
+		Cancellable *bool    `json:"cancellable,omitempty"`
+		Message     *string  `json:"message,omitempty"`
+		Percentage  *float64 `json:"percentage,omitempty"`
+		Kind        string   `json:"kind"`
 	}
 	var x ProgressReport
 	if err := json.Unmarshal(data, &x); err != nil {
@@ -1145,7 +1162,9 @@ func (v *WorkDoneProgressReport) UnmarshalJSON(data []byte) error {
 	if x.Kind != "report" {
 		return errors.New(`expected kind == "report"`)
 	}
-	*v = x.WorkDoneProgressReport
+	(*v).Cancellable = x.Cancellable
+	(*v).Message = x.Message
+	(*v).Percentage = x.Percentage
 	return nil
 }
 
@@ -1164,8 +1183,8 @@ func (v WorkDoneProgressEnd) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler.
 func (v *WorkDoneProgressEnd) UnmarshalJSON(data []byte) error {
 	type ProgressEnd struct {
-		WorkDoneProgressEnd
-		Kind string `json:"kind"`
+		Message *string `json:"message,omitempty"`
+		Kind    string  `json:"kind"`
 	}
 	var x ProgressEnd
 	if err := json.Unmarshal(data, &x); err != nil {
@@ -1174,6 +1193,6 @@ func (v *WorkDoneProgressEnd) UnmarshalJSON(data []byte) error {
 	if x.Kind != "end" {
 		return errors.New(`expected kind == "end"`)
 	}
-	*v = x.WorkDoneProgressEnd
+	(*v).Message = x.Message
 	return nil
 }
