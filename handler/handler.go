@@ -1499,7 +1499,6 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 
 	if req.Method == "$/progress" {
 		// data may be of many different types...
-		log.Printf(prefix + "decoding progress...")
 		params := lsp.ProgressParams{}
 		if err := json.Unmarshal(*req.Params, &params); err != nil {
 			log.Printf(prefix+"error decoding progress: %v", err)
@@ -1509,21 +1508,21 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 
 		var begin lsp.WorkDoneProgressBegin
 		if err := json.Unmarshal(*params.Value, &begin); err == nil {
-			log.Printf(prefix+"begin %s %v", id, begin)
+			// log.Printf(prefix+"begin %s %v", id, begin)
 			handler.progressHandler.Begin(id, &begin)
 			return nil, nil
 		}
 
 		var report lsp.WorkDoneProgressReport
 		if err := json.Unmarshal(*params.Value, &report); err == nil {
-			log.Printf(prefix+"report %s %v", id, report)
+			// log.Printf(prefix+"report %s %v", id, report)
 			handler.progressHandler.Report(id, &report)
 			return nil, nil
 		}
 
 		var end lsp.WorkDoneProgressEnd
 		if err := json.Unmarshal(*params.Value, &end); err == nil {
-			log.Printf(prefix+"end %s %v", id, end)
+			// log.Printf(prefix+"end %s %v", id, end)
 			handler.progressHandler.End(id, &end)
 			return nil, nil
 		}
