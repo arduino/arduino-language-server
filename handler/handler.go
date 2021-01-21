@@ -1094,12 +1094,15 @@ func (handler *InoHandler) transformClangdResult(method string, inoURI, cppURI l
 
 		if r.DocumentSymbolArray != nil {
 			// Treat the input as []DocumentSymbol
+			log.Printf("    <-- documentSymbol(%d document symbols)", len(*r.DocumentSymbolArray))
 			return handler.cpp2inoDocumentSymbols(*r.DocumentSymbolArray, inoURI)
 		} else if r.SymbolInformationArray != nil {
 			// Treat the input as []SymbolInformation
+			log.Printf("    <-- documentSymbol(%d symbol information)", len(*r.SymbolInformationArray))
 			return handler.cpp2inoSymbolInformation(*r.SymbolInformationArray)
 		} else {
 			// Treat the input as null
+			log.Printf("    <-- null documentSymbol")
 		}
 
 	case *[]lsp.CommandOrCodeAction:
