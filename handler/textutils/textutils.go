@@ -23,11 +23,11 @@ func ApplyLSPTextDocumentContentChangeEvent(textDoc *lsp.TextDocumentItem, chang
 
 // ApplyTextChange replaces startingText substring specified by replaceRange with insertText
 func ApplyTextChange(startingText string, replaceRange lsp.Range, insertText string) (res string, err error) {
-	start, err := getOffset(startingText, replaceRange.Start)
+	start, err := GetOffset(startingText, replaceRange.Start)
 	if err != nil {
 		return "", err
 	}
-	end, err := getOffset(startingText, replaceRange.End)
+	end, err := GetOffset(startingText, replaceRange.End)
 	if err != nil {
 		return "", err
 	}
@@ -35,11 +35,11 @@ func ApplyTextChange(startingText string, replaceRange lsp.Range, insertText str
 	return startingText[:start] + insertText + startingText[end:], nil
 }
 
-// getOffset computes the offset in the text expressed by the lsp.Position.
+// GetOffset computes the offset in the text expressed by the lsp.Position.
 // Returns OutOfRangeError if the position is out of range.
-func getOffset(text string, pos lsp.Position) (int, error) {
+func GetOffset(text string, pos lsp.Position) (int, error) {
 	// Find line
-	lineOffset, err := getLineOffset(text, pos.Line)
+	lineOffset, err := GetLineOffset(text, pos.Line)
 	if err != nil {
 		return -1, err
 	}
@@ -74,13 +74,13 @@ func getOffset(text string, pos lsp.Position) (int, error) {
 	return -1, OutOfRangeError{"Character", count, character}
 }
 
-// getLineOffset finds the offset/position of the beginning of a line within the text.
+// GetLineOffset finds the offset/position of the beginning of a line within the text.
 // For example:
 //    text := "foo\nfoobar\nbaz"
-//    getLineOffset(text, 0) == 0
-//    getLineOffset(text, 1) == 4
-//    getLineOffset(text, 2) == 11
-func getLineOffset(text string, line int) (int, error) {
+//    GetLineOffset(text, 0) == 0
+//    GetLineOffset(text, 1) == 4
+//    GetLineOffset(text, 2) == 11
+func GetLineOffset(text string, line int) (int, error) {
 	if line == 0 {
 		return 0, nil
 	}
@@ -98,6 +98,19 @@ func getLineOffset(text string, line int) (int, error) {
 
 	// We haven't found the line in the text
 	return -1, OutOfRangeError{"Line", count, line}
+}
+
+// ExtractRange extract a piece of text from a text document given the range
+func ExtractRange(text string, textRange lsp.Range) (string, error) {
+	start, err := GetOffset(text, textRange.Start)
+	if err != nil {
+		return "", err
+	}
+	end, err := GetOffset(text, textRange.End)
+	if err != nil {
+		return "", err
+	}
+	return text[start:end], nil
 }
 
 // OutOfRangeError returned if one attempts to access text out of its range

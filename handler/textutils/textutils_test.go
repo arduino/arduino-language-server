@@ -128,7 +128,7 @@ func TestGetOffset(t *testing.T) {
 		st := strings.Replace(test.Text, "\n", "\\n", -1)
 
 		t.Logf("getOffset(\"%s\", {Line: %d, Character: %d}) == %d", st, test.Line, test.Char, test.Exp)
-		act, err := getOffset(test.Text, lsp.Position{Line: test.Line, Character: test.Char})
+		act, err := GetOffset(test.Text, lsp.Position{Line: test.Line, Character: test.Char})
 		if act != test.Exp {
 			t.Errorf("getOffset(\"%s\", {Line: %d, Character: %d}) != %d, got %d instead", st, test.Line, test.Char, test.Exp, act)
 		}
@@ -158,7 +158,7 @@ func TestGetLineOffset(t *testing.T) {
 		st := strings.Replace(test.Text, "\n", "\\n", -1)
 
 		t.Logf("getLineOffset(\"%s\", %d) == %d", st, test.Line, test.Exp)
-		act, err := getLineOffset(test.Text, test.Line)
+		act, err := GetLineOffset(test.Text, test.Line)
 		if act != test.Exp {
 			t.Errorf("getLineOffset(\"%s\", %d) != %d, got %d instead", st, test.Line, test.Exp, act)
 		}
