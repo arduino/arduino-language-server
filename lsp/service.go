@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"strings"
 )
 
@@ -26,19 +27,6 @@ type InitializeParams struct {
 }
 
 type InitializedParams struct{}
-
-// Root returns the RootURI if set, or otherwise the RootPath with 'file://' prepended.
-func (p *InitializeParams) Root() DocumentURI {
-	if p.RootURI != "" {
-		return p.RootURI
-	}
-	if strings.HasPrefix(p.RootPath, "file://") {
-		return DocumentURI(p.RootPath)
-	}
-	return DocumentURI("file://" + p.RootPath)
-}
-
-type DocumentURI string
 
 type ClientInfo struct {
 	Name    string `json:"name,omitempty"`
@@ -552,16 +540,42 @@ var completionItemKindName = map[CompletionItemKind]string{
 }
 
 type CompletionItem struct {
-	Label            string             `json:"label"`
-	Kind             CompletionItemKind `json:"kind,omitempty"`
-	Detail           string             `json:"detail,omitempty"`
-	Documentation    string             `json:"documentation,omitempty"`
-	SortText         string             `json:"sortText,omitempty"`
-	FilterText       string             `json:"filterText,omitempty"`
-	InsertText       string             `json:"insertText,omitempty"`
-	InsertTextFormat InsertTextFormat   `json:"insertTextFormat,omitempty"`
-	TextEdit         *TextEdit          `json:"textEdit,omitempty"`
-	Data             interface{}        `json:"data,omitempty"`
+	Label            string                 `json:"label"`
+	Kind             CompletionItemKind     `json:"kind,omitempty"`
+	Detail           string                 `json:"detail,omitempty"`
+	Documentation    *StringOrMarkupContent `json:"documentation,omitempty"`
+	SortText         string                 `json:"sortText,omitempty"`
+	FilterText       string                 `json:"filterText,omitempty"`
+	InsertText       string                 `json:"insertText,omitempty"`
+	InsertTextFormat InsertTextFormat       `json:"insertTextFormat,omitempty"`
+	TextEdit         *TextEdit              `json:"textEdit,omitempty"`
+	Data             interface{}            `json:"data,omitempty"`
+}
+
+type StringOrMarkupContent struct {
+	String        *string
+	MarkupContent *MarkupContent
+}
+
+// MarshalJSON implements json.Marshaler.
+func (v *StringOrMarkupContent) MarshalJSON() ([]byte, error) {
+	if v.String != nil {
+		return json.Marshal(v.String)
+	}
+	return json.Marshal(v.MarkupContent)
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (v *StringOrMarkupContent) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		v.String = &s
+		v.MarkupContent = nil
+		return nil
+	}
+	v.String = nil
+	err := json.Unmarshal(data, &v.MarkupContent)
+	return err
 }
 
 type CompletionList struct {
@@ -1041,4 +1055,125 @@ type SemanticHighlightingToken struct {
 	Character uint32
 	Length    uint16
 	Scope     uint16
+}
+
+type ProgressParams struct {
+	Token string      `json:"token"`
+	Value interface{} `json:"value"`
+}
+
+type WorkDoneProgressCreateParams struct {
+	Token string `json:"token"`
+}
+
+type WorkDoneProgressCreateResult struct{}
+
+// MarshalJSON implements json.Marshaler.
+func (v *WorkDoneProgressCreateResult) MarshalJSON() ([]byte, error) {
+	return []byte("null"), nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (v *WorkDoneProgressCreateResult) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(data, []byte("null")) {
+		return nil
+	}
+	return errors.New("expected null")
+}
+
+type WorkDoneProgressBegin struct {
+	Title       string  `json:"title"`
+	Cancellable *bool   `json:"cancellable,omitempty"`
+	Message     *string `json:"message,omitempty"`
+	Percentage  *int    `json:"percentage,omitempty"`
+}
+
+// MarshalJSON implements json.Marshaler.
+func (v WorkDoneProgressBegin) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Title       string  `json:"title"`
+		Cancellable *bool   `json:"cancellable,omitempty"`
+		Message     *string `json:"message,omitempty"`
+		Percentage  *int    `json:"percentage,omitempty"`
+		Kind        string  `json:"kind"`
+	}{v.Title, v.Cancellable, v.Message, v.Percentage, "begin"})
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (v *WorkDoneProgressBegin) UnmarshalJSON(data []byte) error {
+	type ProgressBegin struct {
+		WorkDoneProgressBegin
+		Kind string `json:"kind"`
+	}
+	var x ProgressBegin
+	if err := json.Unmarshal(data, &x); err != nil {
+		return err
+	}
+	if x.Kind != "begin" {
+		return errors.New(`expected kind == "begin"`)
+	}
+	*v = x.WorkDoneProgressBegin
+	return nil
+}
+
+type WorkDoneProgressReport struct {
+	Cancellable *bool   `json:"cancellable,omitempty"`
+	Message     *string `json:"message,omitempty"`
+	Percentage  *int    `json:"percentage,omitempty"`
+}
+
+// MarshalJSON implements json.Marshaler.
+func (v WorkDoneProgressReport) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Cancellable *bool   `json:"cancellable,omitempty"`
+		Message     *string `json:"message,omitempty"`
+		Percentage  *int    `json:"percentage,omitempty"`
+		Kind        string  `json:"kind"`
+	}{v.Cancellable, v.Message, v.Percentage, "report"})
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (v *WorkDoneProgressReport) UnmarshalJSON(data []byte) error {
+	type ProgressReport struct {
+		WorkDoneProgressReport
+		Kind string `json:"kind"`
+	}
+	var x ProgressReport
+	if err := json.Unmarshal(data, &x); err != nil {
+		return err
+	}
+	if x.Kind != "report" {
+		return errors.New(`expected kind == "report"`)
+	}
+	*v = x.WorkDoneProgressReport
+	return nil
+}
+
+type WorkDoneProgressEnd struct {
+	Message *string `json:"message,omitempty"`
+}
+
+// MarshalJSON implements json.Marshaler.
+func (v WorkDoneProgressEnd) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Message *string `json:"message,omitempty"`
+		Kind    string  `json:"kind"`
+	}{v.Message, "end"})
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (v *WorkDoneProgressEnd) UnmarshalJSON(data []byte) error {
+	type ProgressEnd struct {
+		WorkDoneProgressEnd
+		Kind string `json:"kind"`
+	}
+	var x ProgressEnd
+	if err := json.Unmarshal(data, &x); err != nil {
+		return err
+	}
+	if x.Kind != "end" {
+		return errors.New(`expected kind == "end"`)
+	}
+	*v = x.WorkDoneProgressEnd
+	return nil
 }

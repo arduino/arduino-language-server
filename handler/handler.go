@@ -279,9 +279,9 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		log.Printf("--> %s(%s:%s)", req.Method, p.TextDocument.URI, p.Position)
 		inoURI = p.TextDocument.URI
 		if res, e := handler.ino2cppTextDocumentPositionParams(p); e == nil {
-			cppURI = p.TextDocument.URI
+			cppURI = res.TextDocument.URI
 			params = res
-			log.Printf("    --> %s(%s:%s)", req.Method, p.TextDocument.URI, p.Position)
+			log.Printf("    --> %s(%s:%s)", req.Method, res.TextDocument.URI, res.Position)
 		} else {
 			err = e
 		}
@@ -453,7 +453,7 @@ func (handler *InoHandler) refreshCppDocumentSymbols() error {
 	if err != nil {
 		return errors.WithMessage(err, "quering source code symbols")
 	}
-	result = handler.transformClangdResult("textDocument/documentSymbol", cppURI, "", result)
+	result = handler.transformClangdResult("textDocument/documentSymbol", cppURI, lsp.NilURI, result)
 	if symbols, ok := result.([]lsp.DocumentSymbol); !ok {
 		return errors.WithMessage(err, "quering source code symbols (2)")
 	} else {
@@ -748,7 +748,7 @@ func (handler *InoHandler) ino2cppDocumentURI(inoURI lsp.DocumentURI) (lsp.Docum
 	inside, err := inoPath.IsInsideDir(handler.sketchRoot)
 	if err != nil {
 		log.Printf("    could not determine if '%s' is inside '%s'", inoPath, handler.sketchRoot)
-		return "", unknownURI(inoURI)
+		return lsp.NilURI, unknownURI(inoURI)
 	}
 	if !inside {
 		log.Printf("    passing doc identifier to '%s' as-is", inoPath)
@@ -763,7 +763,7 @@ func (handler *InoHandler) ino2cppDocumentURI(inoURI lsp.DocumentURI) (lsp.Docum
 	}
 
 	log.Printf("    could not determine rel-path of '%s' in '%s': %s", inoPath, handler.sketchRoot, err)
-	return "", err
+	return lsp.NilURI, err
 }
 
 func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
@@ -791,7 +791,7 @@ func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange l
 	inside, err := cppPath.IsInsideDir(handler.buildSketchRoot)
 	if err != nil {
 		log.Printf("    could not determine if '%s' is inside '%s'", cppPath, handler.buildSketchRoot)
-		return "", lsp.Range{}, err
+		return lsp.NilURI, lsp.Range{}, err
 	}
 	if !inside {
 		log.Printf("    keep doc identifier to '%s' as-is", cppPath)
@@ -806,7 +806,7 @@ func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange l
 	}
 
 	log.Printf("    could not determine rel-path of '%s' in '%s': %s", cppPath, handler.buildSketchRoot, err)
-	return "", lsp.Range{}, err
+	return lsp.NilURI, lsp.Range{}, err
 }
 
 func (handler *InoHandler) ino2cppTextDocumentPositionParams(inoParams *lsp.TextDocumentPositionParams) (*lsp.TextDocumentPositionParams, error) {
@@ -833,7 +833,7 @@ func (handler *InoHandler) ino2cppTextDocumentPositionParams(inoParams *lsp.Text
 func (handler *InoHandler) ino2cppRange(inoURI lsp.DocumentURI, inoRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
 	cppURI, err := handler.ino2cppDocumentURI(inoURI)
 	if err != nil {
-		return "", lsp.Range{}, err
+		return lsp.NilURI, lsp.Range{}, err
 	}
 	if cppURI.AsPath().EquivalentTo(handler.buildSketchCpp) {
 		cppRange := handler.sketchMapper.InoToCppLSPRange(inoURI, inoRange)
@@ -919,7 +919,7 @@ func (handler *InoHandler) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *ls
 }
 
 func (handler *InoHandler) transformClangdResult(method string, inoURI, cppURI lsp.DocumentURI, result interface{}) interface{} {
-	cppToIno := inoURI != "" && inoURI.AsPath().EquivalentTo(handler.buildSketchCpp)
+	cppToIno := inoURI != lsp.NilURI && inoURI.AsPath().EquivalentTo(handler.buildSketchCpp)
 
 	switch r := result.(type) {
 	case *lsp.Hover:
@@ -1423,5 +1423,5 @@ func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageT
 }
 
 func unknownURI(uri lsp.DocumentURI) error {
-	return errors.New("Document is not available: " + string(uri))
+	return errors.New("Document is not available: " + uri.String())
 }
