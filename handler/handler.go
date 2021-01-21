@@ -22,6 +22,7 @@ import (
 	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
 	"github.com/bcmi-labs/arduino-language-server/lsp"
 	"github.com/bcmi-labs/arduino-language-server/streams"
+	"github.com/fatih/color"
 	"github.com/pkg/errors"
 	"github.com/sourcegraph/jsonrpc2"
 )
@@ -57,6 +58,7 @@ type InoHandler struct {
 	buildSketchCpp             *paths.Path
 	buildSketchCppVersion      int
 	buildSketchSymbols         []lsp.DocumentSymbol
+	buildSketchSymbolsCanary   string
 	buildSketchSymbolsLoad     bool
 	buildSketchSymbolsCheck    bool
 	rebuildSketchDeadline      *time.Time
@@ -69,6 +71,34 @@ type InoHandler struct {
 	inoDocsWithDiagnostics     map[string]bool
 
 	config lsp.BoardConfig
+}
+
+var yellow = color.New(color.FgHiYellow)
+
+func (handler *InoHandler) dataLock(msg string) {
+	handler.dataMux.Lock()
+	log.Println(msg + yellow.Sprintf(" locked"))
+}
+
+func (handler *InoHandler) dataUnlock(msg string) {
+	log.Println(msg + yellow.Sprintf(" unlocked"))
+	handler.dataMux.Unlock()
+}
+
+func (handler *InoHandler) dataRLock(msg string) {
+	handler.dataMux.RLock()
+	log.Println(msg + yellow.Sprintf(" read-locked"))
+}
+
+func (handler *InoHandler) dataRUnlock(msg string) {
+	log.Println(msg + yellow.Sprintf(" read-unlocked"))
+	handler.dataMux.RUnlock()
+}
+
+func (handler *InoHandler) waitClangdStart(msg string) {
+	log.Println(msg + yellow.Sprintf(" unlocked (waiting clangd)"))
+	handler.clangdStarted.Wait()
+	log.Println(msg + yellow.Sprintf(" locked (waiting clangd)"))
 }
 
 // NewInoHandler creates and configures an InoHandler.
@@ -124,7 +154,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	} else {
 		prefix += fmt.Sprintf("%s %v ", req.Method, req.ID)
 	}
-	defer log.Printf(prefix + "(done)")
 
 	params, err := lsp.ReadParams(req.Method, req.Params)
 	if err != nil {
@@ -134,23 +163,22 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		params = req.Params
 	}
 
-	log.Printf(prefix + "(queued)")
 	switch req.Method {
 	case // Write lock
 		"initialize",
 		"textDocument/didOpen",
 		"textDocument/didChange",
 		"textDocument/didClose":
-		handler.dataMux.Lock()
-		defer handler.dataMux.Unlock()
+		handler.dataLock(prefix)
+		defer handler.dataUnlock(prefix)
 	case // Read lock
 		"textDocument/publishDiagnostics",
 		"workspace/applyEdit":
-		handler.dataMux.RLock()
-		defer handler.dataMux.RUnlock()
+		handler.dataRLock(prefix)
+		defer handler.dataRUnlock(prefix)
 	default: // Default to read lock
-		handler.dataMux.RLock()
-		defer handler.dataMux.RUnlock()
+		handler.dataRLock(prefix)
+		defer handler.dataRUnlock(prefix)
 	}
 
 	switch req.Method {
@@ -161,15 +189,13 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		// Wait for clangd start-up
 		if handler.ClangdConn == nil {
 			log.Printf(prefix + "(throttled: waiting for clangd)")
-			handler.clangdStarted.Wait()
+			handler.waitClangdStart(prefix)
 			if handler.ClangdConn == nil {
 				log.Printf(prefix + "clangd startup failed: aborting call")
 				return nil, errors.New("could not start clangd, aborted")
 			}
 		}
 	}
-
-	log.Printf(prefix + "(running)")
 
 	// Handle LSP methods: transform parameters and send to clangd
 	var inoURI, cppURI lsp.DocumentURI
@@ -180,19 +206,19 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 		go func() {
 			defer streams.CatchAndLogPanic()
+			prefix := "INIT--- "
+			log.Printf(prefix + "initializing workbench")
 
 			// Start clangd asynchronously
-			log.Printf("LS  --- initializing workbench (queued)")
-			handler.dataMux.Lock()
-			defer handler.dataMux.Unlock()
+			handler.dataLock(prefix)
+			defer handler.dataUnlock(prefix)
 
-			log.Printf("LS  --- initializing workbench (running)")
 			handler.initializeWorkbench(ctx, p)
 
 			// clangd should be running now...
 			handler.clangdStarted.Broadcast()
 
-			log.Printf("LS  --- initializing workbench (done)")
+			log.Printf(prefix + "initializing workbench (done)")
 		}()
 
 		T := true
@@ -423,13 +449,14 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	}
 	if err == nil && handler.buildSketchSymbolsLoad {
 		handler.buildSketchSymbolsLoad = false
+		handler.buildSketchSymbolsCheck = false
 		log.Println(prefix + "Queued resfreshing document symbols")
-		go handler.refreshCppDocumentSymbols()
+		go handler.LoadCppDocumentSymbols()
 	}
 	if err == nil && handler.buildSketchSymbolsCheck {
 		handler.buildSketchSymbolsCheck = false
 		log.Println(prefix + "Queued check document symbols")
-		go handler.checkCppDocumentSymbols()
+		go handler.CheckCppDocumentSymbols()
 	}
 	if err != nil {
 		// Exit the process and trigger a restart by the client in case of a severe error
@@ -538,67 +565,85 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 		}
 	}
 
+	handler.buildSketchSymbolsLoad = true
 	return nil
 }
 
-func (handler *InoHandler) refreshCppDocumentSymbols() error {
-	prefix := "LS  --- "
-	defer log.Printf(prefix + "(done)")
-	log.Printf(prefix + "(queued)")
-	handler.dataMux.Lock()
-	defer handler.dataMux.Unlock()
-	log.Printf(prefix + "(running)")
-
+func (handler *InoHandler) refreshCppDocumentSymbols(prefix string) error {
 	// Query source code symbols
 	cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
-	log.Printf(prefix+"sent to clangd: documentSymbol(%s)", cppURI)
+	log.Printf(prefix+"requesting documentSymbol for %s", cppURI)
+
+	handler.dataRUnlock(prefix)
 	result, err := lsp.SendRequest(context.Background(), handler.ClangdConn, "textDocument/documentSymbol", &lsp.DocumentSymbolParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
 	})
+	handler.dataRLock(prefix)
+
 	if err != nil {
 		log.Printf(prefix+"error: %s", err)
 		return errors.WithMessage(err, "quering source code symbols")
 	}
-	result = handler.transformClangdResult("textDocument/documentSymbol", cppURI, lsp.NilURI, result)
-	if symbols, ok := result.([]lsp.DocumentSymbol); !ok {
-		log.Printf(prefix + "error: invalid response from clangd")
-		return errors.New("invalid response from clangd")
-	} else {
-		// Filter non-functions symbols
-		i := 0
-		for _, symbol := range symbols {
-			if symbol.Kind != lsp.SKFunction {
-				continue
-			}
-			symbols[i] = symbol
-			i++
-		}
-		symbols = symbols[:i]
-		for _, symbol := range symbols {
-			log.Printf(prefix+"   symbol: %s %s", symbol.Kind, symbol.Name)
-		}
-		handler.buildSketchSymbols = symbols
+
+	symbolResult, ok := result.(*lsp.DocumentSymbolArrayOrSymbolInformationArray)
+	if !ok || symbolResult.DocumentSymbolArray == nil {
+		log.Printf(prefix + "error: expected DocumenSymbol array from clangd")
+		return errors.New("expected array from clangd")
 	}
+	symbols := *symbolResult.DocumentSymbolArray
+
+	// Filter non-functions symbols
+	i := 0
+	for _, symbol := range symbols {
+		if symbol.Kind != lsp.SKFunction {
+			continue
+		}
+		symbols[i] = symbol
+		i++
+	}
+	symbols = symbols[:i]
+
+	canary := ""
+	for _, symbol := range symbols {
+		log.Printf(prefix+"   symbol: %s %s %s", symbol.Kind, symbol.Name, symbol.Range)
+		if symbolText, err := textutils.ExtractRange(handler.sketchMapper.CppText.Text, symbol.Range); err != nil {
+			log.Printf(prefix+"     > invalid range: %s", err)
+			canary += "/"
+		} else if end := strings.Index(symbolText, "{"); end != -1 {
+			log.Printf(prefix+"     TRIMMED> %s", symbolText[:end])
+			canary += symbolText[:end]
+		} else {
+			log.Printf(prefix+"            > %s", symbolText)
+			canary += symbolText
+		}
+	}
+	handler.buildSketchSymbols = symbols
+	handler.buildSketchSymbolsCanary = canary
 	return nil
 }
 
-func (handler *InoHandler) checkCppDocumentSymbols() error {
-	prefix := "LS  --- "
+func (handler *InoHandler) LoadCppDocumentSymbols() error {
+	prefix := "SYLD--- "
+	defer log.Printf(prefix + "(done)")
+	handler.dataRLock(prefix)
+	defer handler.dataRUnlock(prefix)
+	return handler.refreshCppDocumentSymbols(prefix)
+}
+
+func (handler *InoHandler) CheckCppDocumentSymbols() error {
+	prefix := "SYCK--- "
+	defer log.Printf(prefix + "(done)")
+	handler.dataRLock(prefix)
+	defer handler.dataRUnlock(prefix)
+
 	oldSymbols := handler.buildSketchSymbols
-	if err := handler.refreshCppDocumentSymbols(); err != nil {
+	canary := handler.buildSketchSymbolsCanary
+	if err := handler.refreshCppDocumentSymbols(prefix); err != nil {
 		return err
 	}
-	if len(oldSymbols) != len(handler.buildSketchSymbols) {
-		log.Println(prefix + "new symbols detected, triggering sketch rebuild!")
+	if len(oldSymbols) != len(handler.buildSketchSymbols) || canary != handler.buildSketchSymbolsCanary {
+		log.Println(prefix + "function symbols change detected, triggering sketch rebuild!")
 		handler.scheduleRebuildEnvironment()
-		return nil
-	}
-	for i, old := range oldSymbols {
-		if newName := handler.buildSketchSymbols[i].Name; old.Name != newName {
-			log.Printf(prefix+"symbols changed, triggering sketch rebuild: '%s' -> '%s'", old.Name, newName)
-			handler.scheduleRebuildEnvironment()
-			return nil
-		}
 	}
 	return nil
 }
@@ -672,9 +717,6 @@ func (handler *InoHandler) didOpen(inoDidOpen *lsp.DidOpenTextDocumentParams) (*
 		if handler.sketchTrackedFilesCount != 1 {
 			return nil, nil
 		}
-
-		// trigger a documentSymbol load
-		handler.buildSketchSymbolsLoad = true
 	}
 
 	cppItem, err := handler.ino2cppTextDocumentItem(inoItem)
@@ -753,7 +795,7 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 			// and trigger arduino-preprocessing + clangd restart.
 			dirty := false
 			for _, sym := range handler.buildSketchSymbols {
-				if sym.Range.Overlaps(cppRange) {
+				if sym.SelectionRange.Overlaps(cppRange) {
 					dirty = true
 					log.Println("--! DIRTY CHANGE detected using symbol tables, force sketch rebuild!")
 					break
@@ -1334,14 +1376,18 @@ func (handler *InoHandler) cpp2inoTextEdit(cppURI lsp.DocumentURI, cppEdit lsp.T
 	return inoURI, inoEdit, err
 }
 
-func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymbol, origURI lsp.DocumentURI) []lsp.DocumentSymbol {
-	if origURI.Ext() != ".ino" || len(origSymbols) == 0 {
-		return origSymbols
+func (handler *InoHandler) cpp2inoDocumentSymbols(cppSymbols []lsp.DocumentSymbol, inoRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
+	inoRequested := inoRequestedURI.Canonical()
+	log.Printf("    filtering for requested ino file: %s", inoRequested)
+	if inoRequestedURI.Ext() != ".ino" || len(cppSymbols) == 0 {
+		return cppSymbols
 	}
 
 	inoSymbols := []lsp.DocumentSymbol{}
-	for _, symbol := range origSymbols {
+	for _, symbol := range cppSymbols {
+		log.Printf("    > convert %s %s", symbol.Kind, symbol.Range)
 		if handler.sketchMapper.IsPreprocessedCppLine(symbol.Range.Start.Line) {
+			log.Printf("      symbol is in the preprocessed section of the sketch.ino.cpp")
 			continue
 		}
 
@@ -1349,14 +1395,14 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymb
 		inoSelectionURI, inoSelectionRange := handler.sketchMapper.CppToInoRange(symbol.SelectionRange)
 
 		if inoFile != inoSelectionURI {
-			log.Printf("    ERROR: symbol range and selection belongs to different URI!")
-			log.Printf("           > %s != %s", symbol.Range, symbol.SelectionRange)
-			log.Printf("           > %s:%s != %s:%s", inoFile, inoRange, inoSelectionURI, inoSelectionRange)
+			log.Printf("      ERROR: symbol range and selection belongs to different URI!")
+			log.Printf("        symbol %s != selection %s", symbol.Range, symbol.SelectionRange)
+			log.Printf("        %s:%s != %s:%s", inoFile, inoRange, inoSelectionURI, inoSelectionRange)
 			continue
 		}
 
-		if inoFile != origURI.Unbox() {
-			//log.Printf("    skipping symbol related to %s", inoFile)
+		if inoFile != inoRequested {
+			log.Printf("    skipping symbol related to %s", inoFile)
 			continue
 		}
 
@@ -1367,7 +1413,7 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymb
 			Kind:           symbol.Kind,
 			Range:          inoRange,
 			SelectionRange: inoSelectionRange,
-			Children:       handler.cpp2inoDocumentSymbols(symbol.Children, origURI),
+			Children:       handler.cpp2inoDocumentSymbols(symbol.Children, inoRequestedURI),
 		})
 	}
 
@@ -1470,7 +1516,6 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 
 	if req.Method == "$/progress" {
 		// data may be of many different types...
-		log.Printf(prefix + "decoding progress...")
 		params := lsp.ProgressParams{}
 		if err := json.Unmarshal(*req.Params, &params); err != nil {
 			log.Printf(prefix+"error decoding progress: %v", err)
@@ -1480,21 +1525,21 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 
 		var begin lsp.WorkDoneProgressBegin
 		if err := json.Unmarshal(*params.Value, &begin); err == nil {
-			log.Printf(prefix+"begin %s %v", id, begin)
+			// log.Printf(prefix+"begin %s %v", id, begin)
 			handler.progressHandler.Begin(id, &begin)
 			return nil, nil
 		}
 
 		var report lsp.WorkDoneProgressReport
 		if err := json.Unmarshal(*params.Value, &report); err == nil {
-			log.Printf(prefix+"report %s %v", id, report)
+			// log.Printf(prefix+"report %s %v", id, report)
 			handler.progressHandler.Report(id, &report)
 			return nil, nil
 		}
 
 		var end lsp.WorkDoneProgressEnd
 		if err := json.Unmarshal(*params.Value, &end); err == nil {
-			log.Printf(prefix+"end %s %v", id, end)
+			// log.Printf(prefix+"end %s %v", id, end)
 			handler.progressHandler.End(id, &end)
 			return nil, nil
 		}
@@ -1505,8 +1550,8 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 
 	// Default to read lock
 	log.Printf(prefix + "(queued)")
-	handler.dataMux.RLock()
-	defer handler.dataMux.RUnlock()
+	handler.dataRLock(prefix)
+	defer handler.dataRUnlock(prefix)
 	log.Printf(prefix + "(running)")
 
 	params, err := lsp.ReadParams(req.Method, req.Params)
@@ -1549,7 +1594,9 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 				inoDocsWithDiagnostics[inoDiag.URI.Canonical()] = true
 				cleanUpInoDiagnostics = true
 				for _, diag := range inoDiag.Diagnostics {
-					if diag.Code == "undeclared_var_use_suggest" || diag.Code == "undeclared_var_use" {
+					if diag.Code == "undeclared_var_use_suggest" ||
+						diag.Code == "undeclared_var_use" ||
+						diag.Code == "ovl_no_viable_function_in_call" {
 						handler.buildSketchSymbolsCheck = true
 					}
 				}
