@@ -22,6 +22,7 @@ import (
 	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
 	"github.com/bcmi-labs/arduino-language-server/lsp"
 	"github.com/bcmi-labs/arduino-language-server/streams"
+	"github.com/fatih/color"
 	"github.com/pkg/errors"
 	"github.com/sourcegraph/jsonrpc2"
 )
@@ -69,6 +70,34 @@ type InoHandler struct {
 	inoDocsWithDiagnostics     map[string]bool
 
 	config lsp.BoardConfig
+}
+
+var yellow = color.New(color.FgHiYellow)
+
+func (handler *InoHandler) dataLock(msg string) {
+	handler.dataMux.Lock()
+	log.Println(msg + yellow.Sprintf(" locked"))
+}
+
+func (handler *InoHandler) dataUnlock(msg string) {
+	log.Println(msg + yellow.Sprintf(" unlocked"))
+	handler.dataMux.Unlock()
+}
+
+func (handler *InoHandler) dataRLock(msg string) {
+	handler.dataMux.RLock()
+	log.Println(msg + yellow.Sprintf(" read-locked"))
+}
+
+func (handler *InoHandler) dataRUnlock(msg string) {
+	log.Println(msg + yellow.Sprintf(" read-unlocked"))
+	handler.dataMux.RUnlock()
+}
+
+func (handler *InoHandler) waitClangdStart(msg string) {
+	log.Println(msg + yellow.Sprintf(" unlocked (waiting clangd)"))
+	handler.clangdStarted.Wait()
+	log.Println(msg + yellow.Sprintf(" locked (waiting clangd)"))
 }
 
 // NewInoHandler creates and configures an InoHandler.
@@ -124,7 +153,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 	} else {
 		prefix += fmt.Sprintf("%s %v ", req.Method, req.ID)
 	}
-	defer log.Printf(prefix + "(done)")
 
 	params, err := lsp.ReadParams(req.Method, req.Params)
 	if err != nil {
@@ -134,23 +162,22 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		params = req.Params
 	}
 
-	log.Printf(prefix + "(queued)")
 	switch req.Method {
 	case // Write lock
 		"initialize",
 		"textDocument/didOpen",
 		"textDocument/didChange",
 		"textDocument/didClose":
-		handler.dataMux.Lock()
-		defer handler.dataMux.Unlock()
+		handler.dataLock(prefix)
+		defer handler.dataUnlock(prefix)
 	case // Read lock
 		"textDocument/publishDiagnostics",
 		"workspace/applyEdit":
-		handler.dataMux.RLock()
-		defer handler.dataMux.RUnlock()
+		handler.dataRLock(prefix)
+		defer handler.dataRUnlock(prefix)
 	default: // Default to read lock
-		handler.dataMux.RLock()
-		defer handler.dataMux.RUnlock()
+		handler.dataRLock(prefix)
+		defer handler.dataRUnlock(prefix)
 	}
 
 	switch req.Method {
@@ -161,15 +188,13 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		// Wait for clangd start-up
 		if handler.ClangdConn == nil {
 			log.Printf(prefix + "(throttled: waiting for clangd)")
-			handler.clangdStarted.Wait()
+			handler.waitClangdStart(prefix)
 			if handler.ClangdConn == nil {
 				log.Printf(prefix + "clangd startup failed: aborting call")
 				return nil, errors.New("could not start clangd, aborted")
 			}
 		}
 	}
-
-	log.Printf(prefix + "(running)")
 
 	// Handle LSP methods: transform parameters and send to clangd
 	var inoURI, cppURI lsp.DocumentURI
@@ -180,19 +205,19 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 		go func() {
 			defer streams.CatchAndLogPanic()
+			prefix := "INIT--- "
+			log.Printf(prefix + "initializing workbench")
 
 			// Start clangd asynchronously
-			log.Printf("LS  --- initializing workbench (queued)")
-			handler.dataMux.Lock()
-			defer handler.dataMux.Unlock()
+			handler.dataLock(prefix)
+			defer handler.dataUnlock(prefix)
 
-			log.Printf("LS  --- initializing workbench (running)")
 			handler.initializeWorkbench(ctx, p)
 
 			// clangd should be running now...
 			handler.clangdStarted.Broadcast()
 
-			log.Printf("LS  --- initializing workbench (done)")
+			log.Printf(prefix + "initializing workbench (done)")
 		}()
 
 		T := true
@@ -542,19 +567,15 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 }
 
 func (handler *InoHandler) refreshCppDocumentSymbols() error {
-	prefix := "RFSH--- "
-	defer log.Printf(prefix + "(done)")
-
 	// Query source code symbols
 	cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
-	log.Printf(prefix+"sent to clangd: documentSymbol(%s)", cppURI)
+	log.Printf(prefix+"requesting documentSymbol for %s", cppURI)
+
 	result, err := lsp.SendRequest(context.Background(), handler.ClangdConn, "textDocument/documentSymbol", &lsp.DocumentSymbolParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
 	})
-
-	log.Printf(prefix + "(queued answer)")
-	handler.dataMux.Lock()
-	defer handler.dataMux.Unlock()
+	handler.dataLock(prefix)
+	defer handler.dataUnlock(prefix)
 
 	if err != nil {
 		log.Printf(prefix+"error: %s", err)
@@ -1513,8 +1534,8 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 
 	// Default to read lock
 	log.Printf(prefix + "(queued)")
-	handler.dataMux.RLock()
-	defer handler.dataMux.RUnlock()
+	handler.dataRLock(prefix)
+	defer handler.dataRUnlock(prefix)
 	log.Printf(prefix + "(running)")
 
 	params, err := lsp.ReadParams(req.Method, req.Params)
