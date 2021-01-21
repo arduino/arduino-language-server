@@ -237,7 +237,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			log.Println(prefix + "notification is not propagated to clangd")
 			return nil, nil // do not propagate to clangd
 		} else {
-			log.Printf(prefix+"to clang: didOpen(%s@%d as '%s')", res.TextDocument.URI, res.TextDocument.Version, p.TextDocument.LanguageID)
+			log.Printf(prefix+"to clang: didOpen(%s@%d as '%s')", res.TextDocument.URI, res.TextDocument.Version, res.TextDocument.LanguageID)
 			params = res
 		}
 
@@ -714,6 +714,7 @@ func (handler *InoHandler) ino2cppTextDocumentItem(inoItem lsp.TextDocumentItem)
 		cppItem.Text = handler.sketchMapper.CppText.Text
 		cppItem.Version = handler.sketchMapper.CppText.Version
 	} else {
+		cppItem.LanguageID = inoItem.LanguageID
 		cppItem.Text = handler.docs[inoItem.URI.Canonical()].Text
 		cppItem.Version = handler.docs[inoItem.URI.Canonical()].Version
 	}
