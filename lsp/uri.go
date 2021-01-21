@@ -33,6 +33,11 @@ func (uri DocumentURI) Unbox() string {
 	return path
 }
 
+// Canonical returns the canonical path to the file pointed by the URI
+func (uri DocumentURI) Canonical() string {
+	return uri.AsPath().Canonical().String()
+}
+
 func (uri DocumentURI) String() string {
 	return uri.url.String()
 }

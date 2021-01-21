@@ -4,19 +4,20 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/arduino/go-paths-helper"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCreateSourceMaps(t *testing.T) {
 	input := `#include <Arduino.h>
-#line 1 "sketch_july2a.ino"
-#line 1 "sketch_july2a.ino"
+#line 1 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
+#line 1 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
 
-#line 2 "sketch_july2a.ino"
+#line 2 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
 void setup();
-#line 7 "sketch_july2a.ino"
+#line 7 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
 void loop();
-#line 2 "sketch_july2a.ino"
+#line 2 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
 void setup() {
 	// put your setup code here, to run once:
 	
@@ -28,43 +29,44 @@ void loop() {
 }
 `
 	sourceMap := CreateInoMapper([]byte(input))
+	sketchJuly2a := paths.New("/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino").Canonical().String()
 	require.EqualValues(t, map[InoLine]int{
-		{"sketch_july2a.ino", 0}:  3,
-		{"sketch_july2a.ino", 1}:  9,
-		{"sketch_july2a.ino", 2}:  10,
-		{"sketch_july2a.ino", 3}:  11,
-		{"sketch_july2a.ino", 4}:  12,
-		{"sketch_july2a.ino", 5}:  13,
-		{"sketch_july2a.ino", 6}:  14,
-		{"sketch_july2a.ino", 7}:  15,
-		{"sketch_july2a.ino", 8}:  16,
-		{"sketch_july2a.ino", 9}:  17,
-		{"sketch_july2a.ino", 10}: 18,
+		{sketchJuly2a, 0}:  3,
+		{sketchJuly2a, 1}:  9,
+		{sketchJuly2a, 2}:  10,
+		{sketchJuly2a, 3}:  11,
+		{sketchJuly2a, 4}:  12,
+		{sketchJuly2a, 5}:  13,
+		{sketchJuly2a, 6}:  14,
+		{sketchJuly2a, 7}:  15,
+		{sketchJuly2a, 8}:  16,
+		{sketchJuly2a, 9}:  17,
+		{sketchJuly2a, 10}: 18,
 	}, sourceMap.toCpp)
 	require.EqualValues(t, map[int]InoLine{
 		0:  NotIno,
 		1:  NotIno,
 		2:  NotIno,
-		3:  {"sketch_july2a.ino", 0},
+		3:  {sketchJuly2a, 0},
 		4:  NotIno,
-		5:  {"sketch_july2a.ino", 1}, // setup
+		5:  {sketchJuly2a, 1}, // setup
 		6:  NotIno,
-		7:  {"sketch_july2a.ino", 6}, // loop
+		7:  {sketchJuly2a, 6}, // loop
 		8:  NotIno,
-		9:  {"sketch_july2a.ino", 1},
-		10: {"sketch_july2a.ino", 2},
-		11: {"sketch_july2a.ino", 3},
-		12: {"sketch_july2a.ino", 4},
-		13: {"sketch_july2a.ino", 5},
-		14: {"sketch_july2a.ino", 6},
-		15: {"sketch_july2a.ino", 7},
-		16: {"sketch_july2a.ino", 8},
-		17: {"sketch_july2a.ino", 9},
-		18: {"sketch_july2a.ino", 10},
+		9:  {sketchJuly2a, 1},
+		10: {sketchJuly2a, 2},
+		11: {sketchJuly2a, 3},
+		12: {sketchJuly2a, 4},
+		13: {sketchJuly2a, 5},
+		14: {sketchJuly2a, 6},
+		15: {sketchJuly2a, 7},
+		16: {sketchJuly2a, 8},
+		17: {sketchJuly2a, 9},
+		18: {sketchJuly2a, 10},
 	}, sourceMap.toIno)
 	require.EqualValues(t, map[int]InoLine{
-		5: {"sketch_july2a.ino", 1}, // setup
-		7: {"sketch_july2a.ino", 6}, // loop
+		5: {sketchJuly2a, 1}, // setup
+		7: {sketchJuly2a, 6}, // loop
 	}, sourceMap.cppPreprocessed)
 
 	dumpCppToInoMap(sourceMap.toIno)
@@ -122,88 +124,90 @@ void vino() {
 void secondFunction() {
 
 }`
+	ProvaSpazio := paths.New("/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino").Canonical().String()
+	SecondTab := paths.New("/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino").Canonical().String()
 	sourceMap := CreateInoMapper([]byte(input))
 	require.EqualValues(t, sourceMap.toCpp, map[InoLine]int{
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 0}:  2,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 1}:  3,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 2}:  4,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3}:  14,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 4}:  15,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 5}:  16,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 6}:  17,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 7}:  18,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8}:  19,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 9}:  20,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 10}: 21,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 11}: 22,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 12}: 23,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 13}: 24,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 14}: 25,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 15}: 26,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 16}: 27,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 17}: 28,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 18}: 29,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 19}: 30,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 20}: 31,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 21}: 32,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22}: 33,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 23}: 34,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 24}: 35,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 0}:     37,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1}:     38,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 2}:     39,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 3}:     40,
-		{"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 4}:     41,
+		{ProvaSpazio, 0}:  2,
+		{ProvaSpazio, 1}:  3,
+		{ProvaSpazio, 2}:  4,
+		{ProvaSpazio, 3}:  14,
+		{ProvaSpazio, 4}:  15,
+		{ProvaSpazio, 5}:  16,
+		{ProvaSpazio, 6}:  17,
+		{ProvaSpazio, 7}:  18,
+		{ProvaSpazio, 8}:  19,
+		{ProvaSpazio, 9}:  20,
+		{ProvaSpazio, 10}: 21,
+		{ProvaSpazio, 11}: 22,
+		{ProvaSpazio, 12}: 23,
+		{ProvaSpazio, 13}: 24,
+		{ProvaSpazio, 14}: 25,
+		{ProvaSpazio, 15}: 26,
+		{ProvaSpazio, 16}: 27,
+		{ProvaSpazio, 17}: 28,
+		{ProvaSpazio, 18}: 29,
+		{ProvaSpazio, 19}: 30,
+		{ProvaSpazio, 20}: 31,
+		{ProvaSpazio, 21}: 32,
+		{ProvaSpazio, 22}: 33,
+		{ProvaSpazio, 23}: 34,
+		{ProvaSpazio, 24}: 35,
+		{SecondTab, 0}:    37,
+		{SecondTab, 1}:    38,
+		{SecondTab, 2}:    39,
+		{SecondTab, 3}:    40,
+		{SecondTab, 4}:    41,
 	})
 	require.EqualValues(t, sourceMap.toIno, map[int]InoLine{
 		0:  NotIno,
 		1:  NotIno,
-		2:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 0},
-		3:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 1},
-		4:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 2},
+		2:  {ProvaSpazio, 0},
+		3:  {ProvaSpazio, 1},
+		4:  {ProvaSpazio, 2},
 		5:  NotIno,
-		6:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3}, // setup
+		6:  {ProvaSpazio, 3}, // setup
 		7:  NotIno,
-		8:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8}, // loop
+		8:  {ProvaSpazio, 8}, // loop
 		9:  NotIno,
-		10: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22}, // vino
+		10: {ProvaSpazio, 22}, // vino
 		11: NotIno,
-		12: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1}, // secondFunction
+		12: {SecondTab, 1}, // secondFunction
 		13: NotIno,
-		14: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3},
-		15: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 4},
-		16: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 5},
-		17: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 6},
-		18: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 7},
-		19: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8},
-		20: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 9},
-		21: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 10},
-		22: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 11},
-		23: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 12},
-		24: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 13},
-		25: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 14},
-		26: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 15},
-		27: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 16},
-		28: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 17},
-		29: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 18},
-		30: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 19},
-		31: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 20},
-		32: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 21},
-		33: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22},
-		34: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 23},
-		35: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 24},
-		36: {"not-ino", 0},
-		37: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 0},
-		38: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1},
-		39: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 2},
-		40: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 3},
-		41: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 4},
+		14: {ProvaSpazio, 3},
+		15: {ProvaSpazio, 4},
+		16: {ProvaSpazio, 5},
+		17: {ProvaSpazio, 6},
+		18: {ProvaSpazio, 7},
+		19: {ProvaSpazio, 8},
+		20: {ProvaSpazio, 9},
+		21: {ProvaSpazio, 10},
+		22: {ProvaSpazio, 11},
+		23: {ProvaSpazio, 12},
+		24: {ProvaSpazio, 13},
+		25: {ProvaSpazio, 14},
+		26: {ProvaSpazio, 15},
+		27: {ProvaSpazio, 16},
+		28: {ProvaSpazio, 17},
+		29: {ProvaSpazio, 18},
+		30: {ProvaSpazio, 19},
+		31: {ProvaSpazio, 20},
+		32: {ProvaSpazio, 21},
+		33: {ProvaSpazio, 22},
+		34: {ProvaSpazio, 23},
+		35: {ProvaSpazio, 24},
+		36: {"/not-ino", 0},
+		37: {SecondTab, 0},
+		38: {SecondTab, 1},
+		39: {SecondTab, 2},
+		40: {SecondTab, 3},
+		41: {SecondTab, 4},
 	})
 	require.EqualValues(t, map[int]InoLine{
-		6:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 3},  // setup
-		8:  {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 8},  // loop
-		10: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino", 22}, // vino
-		12: {"/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino", 1},     // secondFunction
+		6:  {ProvaSpazio, 3},  // setup
+		8:  {ProvaSpazio, 8},  // loop
+		10: {ProvaSpazio, 22}, // vino
+		12: {SecondTab, 1},    // secondFunction
 	}, sourceMap.cppPreprocessed)
 	dumpCppToInoMap(sourceMap.toIno)
 	dumpInoToCppMap(sourceMap.toCpp)

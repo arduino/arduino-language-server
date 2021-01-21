@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -72,6 +73,13 @@ func TestJSONMarshalUnmarshal(t *testing.T) {
 	data, err = json.Marshal(d)
 	require.NoError(t, err)
 	require.Equal(t, `"file:///%F0%9F%98%9B"`, string(data))
+}
+
+func TestNotInoFromSourceMapper(t *testing.T) {
+	d, err := NewDocumentURIFromURL("file:///not-ino")
+	require.NoError(t, err)
+	fmt.Println(d.String())
+	fmt.Println(d.Unbox())
 }
 
 func windowsToSlash(path string) string {

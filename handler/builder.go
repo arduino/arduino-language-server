@@ -94,9 +94,9 @@ func (handler *InoHandler) rebuildEnvironmentLoop() {
 			}
 		}()
 
-		handler.synchronizer.DataMux.Lock()
+		handler.dataMux.Lock()
 		handler.initializeWorkbench(nil)
-		handler.synchronizer.DataMux.Unlock()
+		handler.dataMux.Unlock()
 		done <- true
 		close(done)
 	}
@@ -112,7 +112,7 @@ func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
 	}
 	data := overridesFile{Overrides: map[string]string{}}
 	for uri, trackedFile := range handler.docs {
-		rel, err := uri.AsPath().RelFrom(handler.sketchRoot)
+		rel, err := paths.New(uri).RelFrom(handler.sketchRoot)
 		if err != nil {
 			return nil, errors.WithMessage(err, "dumping tracked files")
 		}

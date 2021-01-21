@@ -221,7 +221,7 @@ const (
 // support JSON-(un)marshaling both).
 type TextDocumentSyncKind int
 
-const (
+var (
 	TDSKNone        TextDocumentSyncKind = 0
 	TDSKFull        TextDocumentSyncKind = 1
 	TDSKIncremental TextDocumentSyncKind = 2
