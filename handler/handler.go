@@ -542,12 +542,8 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 }
 
 func (handler *InoHandler) refreshCppDocumentSymbols() error {
-	prefix := "LS  --- "
+	prefix := "RFSH--- "
 	defer log.Printf(prefix + "(done)")
-	log.Printf(prefix + "(queued)")
-	handler.dataMux.Lock()
-	defer handler.dataMux.Unlock()
-	log.Printf(prefix + "(running)")
 
 	// Query source code symbols
 	cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
@@ -555,30 +551,38 @@ func (handler *InoHandler) refreshCppDocumentSymbols() error {
 	result, err := lsp.SendRequest(context.Background(), handler.ClangdConn, "textDocument/documentSymbol", &lsp.DocumentSymbolParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
 	})
+
+	log.Printf(prefix + "(queued answer)")
+	handler.dataMux.Lock()
+	defer handler.dataMux.Unlock()
+
 	if err != nil {
 		log.Printf(prefix+"error: %s", err)
 		return errors.WithMessage(err, "quering source code symbols")
 	}
 	result = handler.transformClangdResult("textDocument/documentSymbol", cppURI, lsp.NilURI, result)
-	if symbols, ok := result.([]lsp.DocumentSymbol); !ok {
+
+	symbols, ok := result.([]lsp.DocumentSymbol)
+	if !ok {
 		log.Printf(prefix + "error: invalid response from clangd")
 		return errors.New("invalid response from clangd")
-	} else {
-		// Filter non-functions symbols
-		i := 0
-		for _, symbol := range symbols {
-			if symbol.Kind != lsp.SKFunction {
-				continue
-			}
-			symbols[i] = symbol
-			i++
-		}
-		symbols = symbols[:i]
-		for _, symbol := range symbols {
-			log.Printf(prefix+"   symbol: %s %s", symbol.Kind, symbol.Name)
-		}
-		handler.buildSketchSymbols = symbols
 	}
+
+	// Filter non-functions symbols
+	i := 0
+	for _, symbol := range symbols {
+		if symbol.Kind != lsp.SKFunction {
+			continue
+		}
+		symbols[i] = symbol
+		i++
+	}
+	symbols = symbols[:i]
+
+	for _, symbol := range symbols {
+		log.Printf(prefix+"   symbol: %s %s %s", symbol.Kind, symbol.Name, symbol.Range)
+	}
+	handler.buildSketchSymbols = symbols
 	return nil
 }
 
