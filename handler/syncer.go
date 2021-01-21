@@ -13,5 +13,11 @@ type AsyncHandler struct {
 
 // Handle handles a request or notification
 func (ah AsyncHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
-	go ah.handler.Handle(ctx, conn, req)
+	switch req.Method {
+	case // Request that should not be parallelized
+		"window/workDoneProgress/create", "$/progress":
+		ah.handler.Handle(ctx, conn, req)
+	default: // By default process all requests in parallel
+		go ah.handler.Handle(ctx, conn, req)
+	}
 }

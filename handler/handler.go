@@ -47,6 +47,7 @@ type InoHandler struct {
 
 	stdioNotificationCount  int64
 	clangdNotificationCount int64
+	progressHandler         *ProgressProxyHandler
 
 	clangdStarted              *sync.Cond
 	dataMux                    sync.RWMutex
@@ -83,6 +84,9 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	stdStream := jsonrpc2.NewBufferedStream(stdio, jsonrpc2.VSCodeObjectCodec{})
 	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.HandleMessageFromIDE)
 	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler)
+
+	handler.progressHandler = NewProgressProxy(handler.StdioConn)
+
 	if enableLogging {
 		log.Println("Initial board configuration:", board)
 	}
@@ -178,7 +182,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			defer handler.dataMux.Unlock()
 
 			log.Printf("LS  --- initializing workbench (running)")
-			handler.initializeWorkbench(p)
+			handler.initializeWorkbench(ctx, p)
 
 			// clangd should be running now...
 			handler.clangdStarted.Broadcast()
@@ -410,8 +414,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		err = handler.ClangdConn.Notify(ctx, req.Method, params)
 	} else {
 		log.Printf(prefix + "sent to Clang")
-		ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
-		defer cancel()
 		result, err = lsp.SendRequest(ctx, handler.ClangdConn, req.Method, params)
 	}
 	if err == nil && handler.buildSketchSymbolsLoad {
@@ -450,7 +452,7 @@ func (handler *InoHandler) exit() {
 	os.Exit(1)
 }
 
-func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) error {
+func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.InitializeParams) error {
 	currCppTextVersion := 0
 	if params != nil {
 		log.Printf("    --> initialize(%s)\n", params.RootURI)
@@ -495,8 +497,6 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 			},
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
 		if err := handler.ClangdConn.Notify(ctx, "textDocument/didChange", syncEvent); err != nil {
 			log.Println("    error reinitilizing clangd:", err)
 			return err
@@ -513,7 +513,7 @@ func (handler *InoHandler) initializeWorkbench(params *lsp.InitializeParams) err
 		}
 
 		clangdStream := jsonrpc2.NewBufferedStream(clangdStdio, jsonrpc2.VSCodeObjectCodec{})
-		clangdHandler := jsonrpc2.AsyncHandler(jsonrpc2.HandlerWithError(handler.FromClangd))
+		clangdHandler := AsyncHandler{jsonrpc2.HandlerWithError(handler.FromClangd)}
 		handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
 
 		// Send initialization command to clangd
@@ -1447,20 +1447,55 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 	}
 	defer log.Printf(prefix + "(done)")
 
-	log.Printf(prefix + "(queued)")
-	switch req.Method {
-	case // No locking required
-		"$/progress",
-		"window/workDoneProgress/create":
-	case // Read lock
-		"textDocument/publishDiagnostics",
-		"workspace/applyEdit":
-		handler.dataMux.RLock()
-		defer handler.dataMux.RUnlock()
-	default: // Default to read lock
-		handler.dataMux.RLock()
-		defer handler.dataMux.RUnlock()
+	if req.Method == "window/workDoneProgress/create" {
+		params := lsp.WorkDoneProgressCreateParams{}
+		if err := json.Unmarshal(*req.Params, &params); err != nil {
+			log.Printf(prefix+"error decoding window/workDoneProgress/create: %v", err)
+			return nil, err
+		}
+		handler.progressHandler.Create(params.Token)
+		return &lsp.WorkDoneProgressCreateResult{}, nil
 	}
+
+	if req.Method == "$/progress" {
+		// data may be of many different types...
+		log.Printf(prefix + "decoding progress...")
+		params := lsp.ProgressParams{}
+		if err := json.Unmarshal(*req.Params, &params); err != nil {
+			log.Printf(prefix+"error decoding progress: %v", err)
+			return nil, err
+		}
+		id := params.Token
+
+		var begin lsp.WorkDoneProgressBegin
+		if err := json.Unmarshal(*params.Value, &begin); err == nil {
+			log.Printf(prefix+"begin %s %v", id, begin)
+			handler.progressHandler.Begin(id, &begin)
+			return nil, nil
+		}
+
+		var report lsp.WorkDoneProgressReport
+		if err := json.Unmarshal(*params.Value, &report); err == nil {
+			log.Printf(prefix+"report %s %v", id, report)
+			handler.progressHandler.Report(id, &report)
+			return nil, nil
+		}
+
+		var end lsp.WorkDoneProgressEnd
+		if err := json.Unmarshal(*params.Value, &end); err == nil {
+			log.Printf(prefix+"end %s %v", id, end)
+			handler.progressHandler.End(id, &end)
+			return nil, nil
+		}
+
+		log.Printf(prefix + "error unsupported $/progress: " + string(*params.Value))
+		return nil, errors.New("unsupported $/progress: " + string(*params.Value))
+	}
+
+	// Default to read lock
+	log.Printf(prefix + "(queued)")
+	handler.dataMux.RLock()
+	defer handler.dataMux.RUnlock()
 	log.Printf(prefix + "(running)")
 
 	params, err := lsp.ReadParams(req.Method, req.Params)

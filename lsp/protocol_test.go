@@ -68,13 +68,21 @@ func TestDocumentSymbolParse(t *testing.T) {
 func TestVariousMessages(t *testing.T) {
 	x := &ProgressParams{
 		Token: "token",
-		Value: WorkDoneProgressBegin{
+		Value: Raw(WorkDoneProgressBegin{
 			Title: "some work",
-		},
+		}),
 	}
 	data, err := json.Marshal(&x)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"token":"token", "value":{"kind":"begin","title":"some work"}}`, string(data))
+
+	var begin WorkDoneProgressBegin
+	err = json.Unmarshal([]byte(`{"kind":"begin","title":"some work"}`), &begin)
+	require.NoError(t, err)
+
+	var report WorkDoneProgressReport
+	err = json.Unmarshal([]byte(`{"kind":"report","message":"28/29","percentage":96.551724137931032}`), &report)
+	require.NoError(t, err)
 
 	msg := `{
 		"capabilities":{
