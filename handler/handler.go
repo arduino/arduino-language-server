@@ -83,7 +83,10 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler.clangdStarted = sync.NewCond(&handler.dataMux)
 	stdStream := jsonrpc2.NewBufferedStream(stdio, jsonrpc2.VSCodeObjectCodec{})
 	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.HandleMessageFromIDE)
-	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler)
+	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler,
+		jsonrpc2.OnRecv(streams.JSONRPCConnLogOnRecv("IDE --> LS     CL:")),
+		jsonrpc2.OnSend(streams.JSONRPCConnLogOnSend("IDE <-- LS     CL:")),
+	)
 
 	handler.progressHandler = NewProgressProxy(handler.StdioConn)
 
@@ -176,6 +179,8 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		// method "initialize"
 
 		go func() {
+			defer streams.CatchAndLogPanic()
+
 			// Start clangd asynchronously
 			log.Printf("LS  --- initializing workbench (queued)")
 			handler.dataMux.Lock()
@@ -514,7 +519,9 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 
 		clangdStream := jsonrpc2.NewBufferedStream(clangdStdio, jsonrpc2.VSCodeObjectCodec{})
 		clangdHandler := AsyncHandler{jsonrpc2.HandlerWithError(handler.FromClangd)}
-		handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler)
+		handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler,
+			jsonrpc2.OnRecv(streams.JSONRPCConnLogOnRecv("IDE     LS <-- CL:")),
+			jsonrpc2.OnSend(streams.JSONRPCConnLogOnSend("IDE     LS --> CL:")))
 
 		// Send initialization command to clangd
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -1087,12 +1094,15 @@ func (handler *InoHandler) transformClangdResult(method string, inoURI, cppURI l
 
 		if r.DocumentSymbolArray != nil {
 			// Treat the input as []DocumentSymbol
+			log.Printf("    <-- documentSymbol(%d document symbols)", len(*r.DocumentSymbolArray))
 			return handler.cpp2inoDocumentSymbols(*r.DocumentSymbolArray, inoURI)
 		} else if r.SymbolInformationArray != nil {
 			// Treat the input as []SymbolInformation
+			log.Printf("    <-- documentSymbol(%d symbol information)", len(*r.SymbolInformationArray))
 			return handler.cpp2inoSymbolInformation(*r.SymbolInformationArray)
 		} else {
 			// Treat the input as null
+			log.Printf("    <-- null documentSymbol")
 		}
 
 	case *[]lsp.CommandOrCodeAction:
