@@ -1338,14 +1338,18 @@ func (handler *InoHandler) cpp2inoTextEdit(cppURI lsp.DocumentURI, cppEdit lsp.T
 	return inoURI, inoEdit, err
 }
 
-func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymbol, origURI lsp.DocumentURI) []lsp.DocumentSymbol {
-	if origURI.Ext() != ".ino" || len(origSymbols) == 0 {
-		return origSymbols
+func (handler *InoHandler) cpp2inoDocumentSymbols(cppSymbols []lsp.DocumentSymbol, inoRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
+	inoRequested := inoRequestedURI.Canonical()
+	log.Printf("    filtering for requested ino file: %s", inoRequested)
+	if inoRequestedURI.Ext() != ".ino" || len(cppSymbols) == 0 {
+		return cppSymbols
 	}
 
 	inoSymbols := []lsp.DocumentSymbol{}
-	for _, symbol := range origSymbols {
+	for _, symbol := range cppSymbols {
+		log.Printf("    > convert %s %s", symbol.Kind, symbol.Range)
 		if handler.sketchMapper.IsPreprocessedCppLine(symbol.Range.Start.Line) {
+			log.Printf("      symbol is in the preprocessed section of the sketch.ino.cpp")
 			continue
 		}
 
@@ -1353,14 +1357,14 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymb
 		inoSelectionURI, inoSelectionRange := handler.sketchMapper.CppToInoRange(symbol.SelectionRange)
 
 		if inoFile != inoSelectionURI {
-			log.Printf("    ERROR: symbol range and selection belongs to different URI!")
-			log.Printf("           > %s != %s", symbol.Range, symbol.SelectionRange)
-			log.Printf("           > %s:%s != %s:%s", inoFile, inoRange, inoSelectionURI, inoSelectionRange)
+			log.Printf("      ERROR: symbol range and selection belongs to different URI!")
+			log.Printf("        symbol %s != selection %s", symbol.Range, symbol.SelectionRange)
+			log.Printf("        %s:%s != %s:%s", inoFile, inoRange, inoSelectionURI, inoSelectionRange)
 			continue
 		}
 
-		if inoFile != origURI.Unbox() {
-			//log.Printf("    skipping symbol related to %s", inoFile)
+		if inoFile != inoRequested {
+			log.Printf("    skipping symbol related to %s", inoFile)
 			continue
 		}
 
@@ -1371,7 +1375,7 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(origSymbols []lsp.DocumentSymb
 			Kind:           symbol.Kind,
 			Range:          inoRange,
 			SelectionRange: inoSelectionRange,
-			Children:       handler.cpp2inoDocumentSymbols(symbol.Children, origURI),
+			Children:       handler.cpp2inoDocumentSymbols(symbol.Children, inoRequestedURI),
 		})
 	}
 
