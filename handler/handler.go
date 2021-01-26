@@ -606,6 +606,11 @@ func (handler *InoHandler) refreshCppDocumentSymbols(prefix string) error {
 	symbols = symbols[:i]
 
 	canary := ""
+	for _, line := range strings.Split(handler.sketchMapper.CppText.Text, "\n") {
+		if strings.Contains(line, "#include <") {
+			canary += line
+		}
+	}
 	for _, symbol := range symbols {
 		log.Printf(prefix+"   symbol: %s %s %s", symbol.Kind, symbol.Name, symbol.Range)
 		if symbolText, err := textutils.ExtractRange(handler.sketchMapper.CppText.Text, symbol.Range); err != nil {
@@ -1603,7 +1608,8 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 				for _, diag := range inoDiag.Diagnostics {
 					if diag.Code == "undeclared_var_use_suggest" ||
 						diag.Code == "undeclared_var_use" ||
-						diag.Code == "ovl_no_viable_function_in_call" {
+						diag.Code == "ovl_no_viable_function_in_call" ||
+						diag.Code == "pp_file_not_found" {
 						handler.buildSketchSymbolsCheck = true
 					}
 				}
