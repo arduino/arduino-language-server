@@ -514,6 +514,8 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 		return errors.WithMessage(err, "reading generated cpp file from sketch")
 	}
 
+	compilers := examineCompileCommandsJSON(handler.buildPath)
+
 	if params == nil {
 		// If we are restarting re-synchronize clangd
 		cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
@@ -535,7 +537,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 		}
 	} else {
 		// Otherwise start clangd!
-		clangdStdout, clangdStdin, clangdStderr := startClangd(handler.buildPath, handler.buildSketchCpp)
+		clangdStdout, clangdStdin, clangdStderr := startClangd(handler.buildPath, handler.buildSketchCpp, compilers)
 		clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
 		if enableLogging {
 			clangdStdio = streams.LogReadWriteCloserAs(clangdStdio, "inols-clangd.log")
@@ -648,9 +650,10 @@ func (handler *InoHandler) CheckCppDocumentSymbols() error {
 	return nil
 }
 
-func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.ReadCloser, io.ReadCloser) {
+func examineCompileCommandsJSON(compileCommandsDir *paths.Path) map[string]bool {
 	// Open compile_commands.json and find the main cross-compiler executable
-	compileCommands, err := builder.LoadCompilationDatabase(compileCommandsDir.Join("compile_commands.json"))
+	compileCommandsJSONPath := compileCommandsDir.Join("compile_commands.json")
+	compileCommands, err := builder.LoadCompilationDatabase(compileCommandsJSONPath)
 	if err != nil {
 		panic("could not find compile_commands.json")
 	}
@@ -676,6 +679,10 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path) (io.WriteCloser, io.
 	// Save back compile_commands.json with OS native file separator and extension
 	compileCommands.SaveToFile()
 
+	return compilers
+}
+
+func startClangd(compileCommandsDir, sketchCpp *paths.Path, compilers map[string]bool) (io.WriteCloser, io.ReadCloser, io.ReadCloser) {
 	// Start clangd
 	args := []string{
 		globalClangdPath,
