@@ -58,6 +58,7 @@ type InoHandler struct {
 	buildSketchCpp             *paths.Path
 	buildSketchCppVersion      int
 	buildSketchSymbols         []lsp.DocumentSymbol
+	buildSketchIncludesCanary  string
 	buildSketchSymbolsCanary   string
 	buildSketchSymbolsLoad     bool
 	buildSketchSymbolsCheck    bool
@@ -604,28 +605,23 @@ func (handler *InoHandler) refreshCppDocumentSymbols(prefix string) error {
 		i++
 	}
 	symbols = symbols[:i]
+	handler.buildSketchSymbols = symbols
 
-	canary := ""
-	for _, line := range strings.Split(handler.sketchMapper.CppText.Text, "\n") {
-		if strings.Contains(line, "#include <") {
-			canary += line
-		}
-	}
+	symbolsCanary := ""
 	for _, symbol := range symbols {
 		log.Printf(prefix+"   symbol: %s %s %s", symbol.Kind, symbol.Name, symbol.Range)
 		if symbolText, err := textutils.ExtractRange(handler.sketchMapper.CppText.Text, symbol.Range); err != nil {
 			log.Printf(prefix+"     > invalid range: %s", err)
-			canary += "/"
+			symbolsCanary += "/"
 		} else if end := strings.Index(symbolText, "{"); end != -1 {
 			log.Printf(prefix+"     TRIMMED> %s", symbolText[:end])
-			canary += symbolText[:end]
+			symbolsCanary += symbolText[:end]
 		} else {
 			log.Printf(prefix+"            > %s", symbolText)
-			canary += symbolText
+			symbolsCanary += symbolText
 		}
 	}
-	handler.buildSketchSymbols = symbols
-	handler.buildSketchSymbolsCanary = canary
+	handler.buildSketchSymbolsCanary = symbolsCanary
 	return nil
 }
 
@@ -653,6 +649,23 @@ func (handler *InoHandler) CheckCppDocumentSymbols() error {
 		handler.scheduleRebuildEnvironment()
 	}
 	return nil
+}
+
+func (handler *InoHandler) CheckCppIncludesChanges() {
+	prefix := "INCK--- "
+
+	includesCanary := ""
+	for _, line := range strings.Split(handler.sketchMapper.CppText.Text, "\n") {
+		if strings.Contains(line, "#include <") {
+			includesCanary += line
+		}
+	}
+
+	if includesCanary != handler.buildSketchIncludesCanary {
+		handler.buildSketchIncludesCanary = includesCanary
+		log.Println(prefix + "#include change detected, triggering sketch rebuild!")
+		handler.scheduleRebuildEnvironment()
+	}
 }
 
 func examineCompileCommandsJSON(compileCommandsDir *paths.Path) map[string]bool {
@@ -833,6 +846,8 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 			cppChanges = append(cppChanges, cppChange)
 		}
 
+		handler.CheckCppIncludesChanges()
+
 		// build a cpp equivalent didChange request
 		cppReq := &lsp.DidChangeTextDocumentParams{
 			ContentChanges: cppChanges,
@@ -843,6 +858,7 @@ func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeText
 				Version: handler.sketchMapper.CppText.Version,
 			},
 		}
+
 		return cppReq, nil
 	}
 
