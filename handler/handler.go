@@ -731,7 +731,7 @@ func startClangd(compileCommandsDir, sketchCpp *paths.Path, compilers map[string
 func (handler *InoHandler) didOpen(inoDidOpen *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
 	// Add the TextDocumentItem in the tracked files list
 	inoItem := inoDidOpen.TextDocument
-	handler.docs[inoItem.URI.Canonical()] = &inoItem
+	handler.docs[inoItem.URI.AsPath().String()] = &inoItem
 
 	// If we are tracking a .ino...
 	if inoItem.URI.Ext() == ".ino" {
@@ -752,8 +752,8 @@ func (handler *InoHandler) didOpen(inoDidOpen *lsp.DidOpenTextDocumentParams) (*
 
 func (handler *InoHandler) didClose(inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
 	inoIdentifier := inoDidClose.TextDocument
-	if _, exist := handler.docs[inoIdentifier.URI.Canonical()]; exist {
-		delete(handler.docs, inoIdentifier.URI.Canonical())
+	if _, exist := handler.docs[inoIdentifier.URI.AsPath().String()]; exist {
+		delete(handler.docs, inoIdentifier.URI.AsPath().String())
 	} else {
 		log.Printf("    didClose of untracked document: %s", inoIdentifier.URI)
 		return nil, unknownURI(inoIdentifier.URI)
@@ -789,8 +789,9 @@ func (handler *InoHandler) ino2cppTextDocumentItem(inoItem lsp.TextDocumentItem)
 		cppItem.Version = handler.sketchMapper.CppText.Version
 	} else {
 		cppItem.LanguageID = inoItem.LanguageID
-		cppItem.Text = handler.docs[inoItem.URI.Canonical()].Text
-		cppItem.Version = handler.docs[inoItem.URI.Canonical()].Version
+		inoPath := inoItem.URI.AsPath().String()
+		cppItem.Text = handler.docs[inoPath].Text
+		cppItem.Version = handler.docs[inoPath].Version
 	}
 
 	return cppItem, nil
@@ -799,7 +800,7 @@ func (handler *InoHandler) ino2cppTextDocumentItem(inoItem lsp.TextDocumentItem)
 func (handler *InoHandler) didChange(ctx context.Context, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
 	doc := req.TextDocument
 
-	trackedDoc, ok := handler.docs[doc.URI.Canonical()]
+	trackedDoc, ok := handler.docs[doc.URI.AsPath().String()]
 	if !ok {
 		return nil, unknownURI(doc.URI)
 	}
@@ -1405,7 +1406,7 @@ func (handler *InoHandler) cpp2inoTextEdit(cppURI lsp.DocumentURI, cppEdit lsp.T
 }
 
 func (handler *InoHandler) cpp2inoDocumentSymbols(cppSymbols []lsp.DocumentSymbol, inoRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
-	inoRequested := inoRequestedURI.Canonical()
+	inoRequested := inoRequestedURI.AsPath().String()
 	log.Printf("    filtering for requested ino file: %s", inoRequested)
 	if inoRequestedURI.Ext() != ".ino" || len(cppSymbols) == 0 {
 		return cppSymbols

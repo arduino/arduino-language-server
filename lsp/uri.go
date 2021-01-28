@@ -21,21 +21,16 @@ var expDriveID = regexp.MustCompile("^/[a-zA-Z]:")
 
 // AsPath convert the DocumentURI to a paths.Path
 func (uri DocumentURI) AsPath() *paths.Path {
-	return paths.New(uri.Unbox())
+	return paths.New(uri.unbox()).Canonical()
 }
 
-// Unbox convert the DocumentURI to a file path string
-func (uri DocumentURI) Unbox() string {
+// unbox convert the DocumentURI to a file path string
+func (uri DocumentURI) unbox() string {
 	path := uri.url.Path
 	if expDriveID.MatchString(path) {
 		return path[1:]
 	}
 	return path
-}
-
-// Canonical returns the canonical path to the file pointed by the URI
-func (uri DocumentURI) Canonical() string {
-	return uri.AsPath().Canonical().String()
 }
 
 func (uri DocumentURI) String() string {
@@ -44,7 +39,7 @@ func (uri DocumentURI) String() string {
 
 // Ext returns the extension of the file pointed by the URI
 func (uri DocumentURI) Ext() string {
-	return filepath.Ext(uri.Unbox())
+	return filepath.Ext(uri.unbox())
 }
 
 // NewDocumentURIFromPath create a DocumentURI from the given Path object

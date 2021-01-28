@@ -12,23 +12,23 @@ import (
 func TestUriToPath(t *testing.T) {
 	d, err := NewDocumentURIFromURL("file:///C:/Users/test/Sketch.ino")
 	require.NoError(t, err)
-	require.Equal(t, "C:/Users/test/Sketch.ino", d.Unbox())
+	require.Equal(t, "C:/Users/test/Sketch.ino", d.unbox())
 
 	d, err = NewDocumentURIFromURL("file:///c%3A/Users/test/Sketch.ino")
 	require.NoError(t, err)
-	require.Equal(t, "c:/Users/test/Sketch.ino", d.Unbox())
+	require.Equal(t, "c:/Users/test/Sketch.ino", d.unbox())
 
 	d, err = NewDocumentURIFromURL("file:///Users/test/Sketch.ino")
 	require.NoError(t, err)
-	require.Equal(t, "/Users/test/Sketch.ino", d.Unbox())
+	require.Equal(t, "/Users/test/Sketch.ino", d.unbox())
 
 	d, err = NewDocumentURIFromURL("file:///c%3A/Users/USERNA~1/AppData/Local/Temp/.arduinoProIDE-unsaved202108-10416-j28c17.lru6k/sketch_jan8a/sketch_jan8a.ino")
 	require.NoError(t, err)
-	require.Equal(t, "c:/Users/USERNA~1/AppData/Local/Temp/.arduinoProIDE-unsaved202108-10416-j28c17.lru6k/sketch_jan8a/sketch_jan8a.ino", d.Unbox())
+	require.Equal(t, "c:/Users/USERNA~1/AppData/Local/Temp/.arduinoProIDE-unsaved202108-10416-j28c17.lru6k/sketch_jan8a/sketch_jan8a.ino", d.unbox())
 
 	d, err = NewDocumentURIFromURL("file:///%F0%9F%98%9B")
 	require.NoError(t, err)
-	require.Equal(t, "/\U0001F61B", d.Unbox())
+	require.Equal(t, "/\U0001F61B", d.unbox())
 }
 
 func TestPathToUri(t *testing.T) {
@@ -48,11 +48,11 @@ func TestJSONMarshalUnmarshal(t *testing.T) {
 	var d DocumentURI
 	err := json.Unmarshal([]byte(`"file:///Users/test/Sketch.ino"`), &d)
 	require.NoError(t, err)
-	require.Equal(t, "/Users/test/Sketch.ino", d.Unbox())
+	require.Equal(t, "/Users/test/Sketch.ino", d.unbox())
 
 	err = json.Unmarshal([]byte(`"file:///%F0%9F%98%9B"`), &d)
 	require.NoError(t, err)
-	require.Equal(t, "/\U0001F61B", d.Unbox())
+	require.Equal(t, "/\U0001F61B", d.unbox())
 
 	d = NewDocumentURI("C:\\Users\\test\\Sketch.ino")
 	data, err := json.Marshal(d)
@@ -79,7 +79,7 @@ func TestNotInoFromSourceMapper(t *testing.T) {
 	d, err := NewDocumentURIFromURL("file:///not-ino")
 	require.NoError(t, err)
 	fmt.Println(d.String())
-	fmt.Println(d.Unbox())
+	fmt.Println(d.unbox())
 }
 
 func windowsToSlash(path string) string {
