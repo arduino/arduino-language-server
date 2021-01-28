@@ -69,7 +69,7 @@ type InoHandler struct {
 	sketchMapper               *sourcemapper.InoMapper
 	sketchTrackedFilesCount    int
 	docs                       map[string]*lsp.TextDocumentItem
-	inoDocsWithDiagnostics     map[string]bool
+	inoDocsWithDiagnostics     map[lsp.DocumentURI]bool
 
 	config lsp.BoardConfig
 }
@@ -106,7 +106,7 @@ func (handler *InoHandler) waitClangdStart(msg string) {
 func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler := &InoHandler{
 		docs:                   map[string]*lsp.TextDocumentItem{},
-		inoDocsWithDiagnostics: map[string]bool{},
+		inoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
 		config: lsp.BoardConfig{
 			SelectedBoard: board,
 		},
@@ -975,6 +975,10 @@ func (handler *InoHandler) inoDocumentURIFromInoPath(inoPath string) (lsp.Docume
 }
 
 func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
+	// TODO: Split this function into 2
+	//       - Cpp2inoSketchDocumentURI: converts sketch     (cppURI, cppRange) -> (inoURI, inoRange)
+	//       - Cpp2inoDocumentURI      : converts non-sketch (cppURI)           -> (inoURI)              [range is the same]
+
 	// Sketchbook/Sketch/Sketch.ino      <- build-path/sketch/Sketch.ino.cpp
 	// Sketchbook/Sketch/AnotherTab.ino  <- build-path/sketch/Sketch.ino.cpp  (different section from above)
 	// Sketchbook/Sketch/AnotherFile.cpp <- build-path/sketch/AnotherFile.cpp (1:1)
@@ -1011,9 +1015,11 @@ func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange l
 
 	rel, err := handler.buildSketchRoot.RelTo(cppPath)
 	if err == nil {
-		inoPath := handler.sketchRoot.JoinPath(rel)
+		inoPath := handler.sketchRoot.JoinPath(rel).String()
 		log.Printf("    URI: '%s' -> '%s'", cppPath, inoPath)
-		return lsp.NewDocumentURIFromPath(inoPath), cppRange, nil
+		inoURI, err := handler.inoDocumentURIFromInoPath(inoPath)
+		log.Printf("              as URI: '%s'", inoURI)
+		return inoURI, cppRange, err
 	}
 
 	log.Printf("    could not determine rel-path of '%s' in '%s': %s", cppPath, handler.buildSketchRoot, err)
@@ -1475,46 +1481,68 @@ func (handler *InoHandler) cpp2inoSymbolInformation(syms []lsp.SymbolInformation
 }
 
 func (handler *InoHandler) cpp2inoDiagnostics(cppDiags *lsp.PublishDiagnosticsParams) ([]*lsp.PublishDiagnosticsParams, error) {
+	inoDiagsParam := map[lsp.DocumentURI]*lsp.PublishDiagnosticsParams{}
 
-	if len(cppDiags.Diagnostics) == 0 {
-		// If we receive the empty diagnostic on the preprocessed sketch,
-		// just return an empty diagnostic array.
-		if cppDiags.URI.AsPath().EquivalentTo(handler.buildSketchCpp) {
-			return []*lsp.PublishDiagnosticsParams{}, nil
-		}
-
-		inoURI, _, err := handler.cpp2inoDocumentURI(cppDiags.URI, lsp.NilRange)
-		return []*lsp.PublishDiagnosticsParams{
-			{
+	cppURI := cppDiags.URI
+	isSketch := cppURI.AsPath().EquivalentTo(handler.buildSketchCpp)
+	if isSketch {
+		for inoURI := range handler.inoDocsWithDiagnostics {
+			inoDiagsParam[inoURI] = &lsp.PublishDiagnosticsParams{
 				URI:         inoURI,
 				Diagnostics: []lsp.Diagnostic{},
-			},
-		}, err
-	}
-
-	convertedDiagnostics := map[lsp.DocumentURI]*lsp.PublishDiagnosticsParams{}
-	for _, cppDiag := range cppDiags.Diagnostics {
-		inoURI, inoRange, err := handler.cpp2inoDocumentURI(cppDiags.URI, cppDiag.Range)
+			}
+		}
+		handler.inoDocsWithDiagnostics = map[lsp.DocumentURI]bool{}
+	} else {
+		inoURI, _, err := handler.cpp2inoDocumentURI(cppURI, lsp.NilRange)
 		if err != nil {
 			return nil, err
 		}
+		inoDiagsParam[inoURI] = &lsp.PublishDiagnosticsParams{
+			URI:         inoURI,
+			Diagnostics: []lsp.Diagnostic{},
+		}
+	}
 
-		inoDiagParam, created := convertedDiagnostics[inoURI]
+	for _, cppDiag := range cppDiags.Diagnostics {
+		inoURI, inoRange, err := handler.cpp2inoDocumentURI(cppURI, cppDiag.Range)
+		if err != nil {
+			return nil, err
+		}
+		if inoURI.String() == sourcemapper.NotInoURI.String() {
+			continue
+		}
+
+		inoDiagParam, created := inoDiagsParam[inoURI]
 		if !created {
 			inoDiagParam = &lsp.PublishDiagnosticsParams{
 				URI:         inoURI,
 				Diagnostics: []lsp.Diagnostic{},
 			}
-			convertedDiagnostics[inoURI] = inoDiagParam
+			inoDiagsParam[inoURI] = inoDiagParam
 		}
 
 		inoDiag := cppDiag
 		inoDiag.Range = inoRange
 		inoDiagParam.Diagnostics = append(inoDiagParam.Diagnostics, inoDiag)
+
+		if isSketch {
+			handler.inoDocsWithDiagnostics[inoURI] = true
+
+			// If we have an "undefined reference" in the .ino code trigger a
+			// check for newly created symbols (that in turn may trigger a
+			// new arduino-preprocessing of the sketch).
+			if inoDiag.Code == "undeclared_var_use_suggest" ||
+				inoDiag.Code == "undeclared_var_use" ||
+				inoDiag.Code == "ovl_no_viable_function_in_call" ||
+				inoDiag.Code == "pp_file_not_found" {
+				handler.buildSketchSymbolsCheck = true
+			}
+		}
 	}
 
 	inoDiagParams := []*lsp.PublishDiagnosticsParams{}
-	for _, v := range convertedDiagnostics {
+	for _, v := range inoDiagsParam {
 		inoDiagParams = append(inoDiagParams, v)
 	}
 	return inoDiagParams, nil
@@ -1603,34 +1631,9 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 		if err != nil {
 			return nil, err
 		}
-		cleanUpInoDiagnostics := false
-		if len(inoDiagnostics) == 0 {
-			cleanUpInoDiagnostics = true
-		}
 
 		// Push back to IDE the converted diagnostics
-		inoDocsWithDiagnostics := map[string]bool{}
 		for _, inoDiag := range inoDiagnostics {
-			if inoDiag.URI.String() == sourcemapper.NotInoURI.String() {
-				cleanUpInoDiagnostics = true
-				continue
-			}
-
-			// If we have an "undefined reference" in the .ino code trigger a
-			// check for newly created symbols (that in turn may trigger a
-			// new arduino-preprocessing of the sketch).
-			if inoDiag.URI.Ext() == ".ino" {
-				inoDocsWithDiagnostics[inoDiag.URI.Canonical()] = true
-				cleanUpInoDiagnostics = true
-				for _, diag := range inoDiag.Diagnostics {
-					if diag.Code == "undeclared_var_use_suggest" ||
-						diag.Code == "undeclared_var_use" ||
-						diag.Code == "ovl_no_viable_function_in_call" ||
-						diag.Code == "pp_file_not_found" {
-						handler.buildSketchSymbolsCheck = true
-					}
-				}
-			}
 
 			log.Printf(prefix+"to IDE: publishDiagnostics(%s):", inoDiag.URI)
 			for _, diag := range inoDiag.Diagnostics {
@@ -1639,27 +1642,6 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 			if err := handler.StdioConn.Notify(ctx, "textDocument/publishDiagnostics", inoDiag); err != nil {
 				return nil, err
 			}
-		}
-
-		if cleanUpInoDiagnostics {
-			// Remove diagnostics from all .ino where there are no errors coming from clang
-			for sourcePath := range handler.inoDocsWithDiagnostics {
-				if inoDocsWithDiagnostics[sourcePath] {
-					// skip if we already sent updated diagnostics
-					continue
-				}
-				// otherwise clear previous diagnostics
-				msg := lsp.PublishDiagnosticsParams{
-					URI:         lsp.NewDocumentURI(sourcePath),
-					Diagnostics: []lsp.Diagnostic{},
-				}
-				log.Printf(prefix+"to IDE: publishDiagnostics(%s):", msg.URI)
-				if err := handler.StdioConn.Notify(ctx, "textDocument/publishDiagnostics", msg); err != nil {
-					return nil, err
-				}
-			}
-
-			handler.inoDocsWithDiagnostics = inoDocsWithDiagnostics
 		}
 		return nil, err
 
