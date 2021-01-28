@@ -691,9 +691,7 @@ func examineCompileCommandsJSON(compileCommandsDir *paths.Path) map[string]bool 
 
 		compilers[compiler] = true
 	}
-	if len(compilers) == 0 {
-		panic("main compiler not found")
-	}
+
 	// Save back compile_commands.json with OS native file separator and extension
 	compileCommands.SaveToFile()
 
