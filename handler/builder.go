@@ -141,12 +141,12 @@ func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
 		CompilerOut   string        `json:"compiler_out"`
 		CompilerErr   string        `json:"compiler_err"`
 		BuilderResult cmdBuilderRes `json:"builder_result"`
+		Success       bool          `json:"success"`
 	}
 	var res cmdRes
 	if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
 		return nil, errors.Errorf("parsing arduino-cli output: %s", err)
 	}
-
 	// Return only the build path
 	log.Println("arduino-cli output:", cmdOutput)
 	return res.BuilderResult.BuildPath, nil
