@@ -43,12 +43,12 @@ type InoLine struct {
 
 // InoToCppLine converts a source (.ino) line into a target (.cpp) line
 func (s *InoMapper) InoToCppLine(sourceURI lsp.DocumentURI, line int) int {
-	return s.toCpp[InoLine{sourceURI.Canonical(), line}]
+	return s.toCpp[InoLine{sourceURI.AsPath().String(), line}]
 }
 
 // InoToCppLineOk converts a source (.ino) line into a target (.cpp) line
 func (s *InoMapper) InoToCppLineOk(sourceURI lsp.DocumentURI, line int) (int, bool) {
-	res, ok := s.toCpp[InoLine{sourceURI.Canonical(), line}]
+	res, ok := s.toCpp[InoLine{sourceURI.AsPath().String(), line}]
 	return res, ok
 }
 
