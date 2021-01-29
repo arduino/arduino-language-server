@@ -656,7 +656,7 @@ func (handler *InoHandler) CheckCppIncludesChanges() {
 
 	includesCanary := ""
 	for _, line := range strings.Split(handler.sketchMapper.CppText.Text, "\n") {
-		if strings.Contains(line, "#include <") {
+		if strings.Contains(line, "#include ") {
 			includesCanary += line
 		}
 	}
