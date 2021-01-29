@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -515,7 +516,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 		return errors.WithMessage(err, "reading generated cpp file from sketch")
 	}
 
-	compilers := examineCompileCommandsJSON(handler.buildPath)
+	canonicalizeCompileCommandsJSON(handler.buildPath)
 
 	if params == nil {
 		// If we are restarting re-synchronize clangd
@@ -538,7 +539,11 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 		}
 	} else {
 		// Otherwise start clangd!
-		clangdStdout, clangdStdin, clangdStderr := startClangd(handler.buildPath, handler.buildSketchCpp, compilers)
+		dataFolder, err := extractDataFolderFromArduinoCLI()
+		if err != nil {
+			log.Printf("    error: %s", err)
+		}
+		clangdStdout, clangdStdin, clangdStderr := startClangd(handler.buildPath, handler.buildSketchCpp, dataFolder)
 		clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
 		if enableLogging {
 			clangdStdio = streams.LogReadWriteCloserAs(clangdStdio, "inols-clangd.log")
@@ -570,6 +575,38 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 
 	handler.buildSketchSymbolsLoad = true
 	return nil
+}
+
+func extractDataFolderFromArduinoCLI() (*paths.Path, error) {
+	// XXX: do this from IDE or via gRPC
+	args := []string{globalCliPath,
+		"config",
+		"dump",
+		"--format", "json",
+	}
+	cmd, err := executils.NewProcess(args...)
+	if err != nil {
+		return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+	}
+	cmdOutput := &bytes.Buffer{}
+	cmd.RedirectStdoutTo(cmdOutput)
+	log.Println("running: ", strings.Join(args, " "))
+	if err := cmd.Run(); err != nil {
+		return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+	}
+
+	type cmdRes struct {
+		Directories struct {
+			Data string `json:"data"`
+		} `json:"directories"`
+	}
+	var res cmdRes
+	if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
+		return nil, errors.Errorf("parsing arduino-cli output: %s", err)
+	}
+	// Return only the build path
+	log.Println("Arduino Data Dir -> ", res.Directories.Data)
+	return paths.New(res.Directories.Data), nil
 }
 
 func (handler *InoHandler) refreshCppDocumentSymbols(prefix string) error {
@@ -656,7 +693,7 @@ func (handler *InoHandler) CheckCppIncludesChanges() {
 
 	includesCanary := ""
 	for _, line := range strings.Split(handler.sketchMapper.CppText.Text, "\n") {
-		if strings.Contains(line, "#include <") {
+		if strings.Contains(line, "#include ") {
 			includesCanary += line
 		}
 	}
@@ -668,7 +705,7 @@ func (handler *InoHandler) CheckCppIncludesChanges() {
 	}
 }
 
-func examineCompileCommandsJSON(compileCommandsDir *paths.Path) map[string]bool {
+func canonicalizeCompileCommandsJSON(compileCommandsDir *paths.Path) map[string]bool {
 	// Open compile_commands.json and find the main cross-compiler executable
 	compileCommandsJSONPath := compileCommandsDir.Join("compile_commands.json")
 	compileCommands, err := builder.LoadCompilationDatabase(compileCommandsJSONPath)
@@ -698,15 +735,15 @@ func examineCompileCommandsJSON(compileCommandsDir *paths.Path) map[string]bool 
 	return compilers
 }
 
-func startClangd(compileCommandsDir, sketchCpp *paths.Path, compilers map[string]bool) (io.WriteCloser, io.ReadCloser, io.ReadCloser) {
+func startClangd(compileCommandsDir, sketchCpp *paths.Path, dataFolder *paths.Path) (io.WriteCloser, io.ReadCloser, io.ReadCloser) {
 	// Start clangd
 	args := []string{
 		globalClangdPath,
 		"-log=verbose",
 		fmt.Sprintf(`--compile-commands-dir=%s`, compileCommandsDir),
 	}
-	for compiler := range compilers {
-		args = append(args, fmt.Sprintf("-query-driver=%s", compiler))
+	if dataFolder != nil {
+		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**")))
 	}
 	if enableLogging {
 		log.Println("    Starting clangd:", strings.Join(args, " "))
