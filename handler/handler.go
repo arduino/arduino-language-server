@@ -977,7 +977,7 @@ func (handler *InoHandler) ino2cppDocumentURI(inoURI lsp.DocumentURI) (lsp.Docum
 		return lsp.NilURI, unknownURI(inoURI)
 	}
 	if !inside {
-		log.Printf("    passing doc identifier to '%s' as-is", inoPath)
+		log.Printf("    '%s' not inside sketchroot '%s', passing doc identifier to as-is", handler.sketchRoot, inoPath)
 		return inoURI, nil
 	}
 
