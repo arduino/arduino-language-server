@@ -159,4 +159,14 @@ func TestVariousMessages(t *testing.T) {
 		err := json.Unmarshal([]byte(msg), &symbol)
 		require.NoError(t, err)
 	})
+
+	t.Run("EmptyDocumentSymbolMarshalUnmarshal", func(t *testing.T) {
+		var symbol DocumentSymbolArrayOrSymbolInformationArray
+		err := json.Unmarshal([]byte(`[]`), &symbol)
+		require.NoError(t, err)
+		data, err := json.Marshal(symbol)
+		require.Equal(t, "[]", string(data))
+		data, err = json.Marshal(&symbol)
+		require.Equal(t, "[]", string(data))
+	})
 }
