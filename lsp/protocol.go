@@ -264,6 +264,9 @@ func (entry *DocumentSymbolArrayOrSymbolInformationArray) UnmarshalJSON(raw []by
 	if err := json.Unmarshal(raw, &intermediate); err != nil {
 		return err
 	}
+	if len(intermediate) == 0 {
+		return nil
+	}
 	discriminator := struct {
 		Range    *Range    `json:"range,omitempty"`
 		Location *Location `json:"location,omitempty"`
@@ -290,6 +293,16 @@ func (entry *DocumentSymbolArrayOrSymbolInformationArray) UnmarshalJSON(raw []by
 		entry.SymbolInformationArray = &res
 	}
 	return nil
+}
+
+func (entry DocumentSymbolArrayOrSymbolInformationArray) MarshalJSON() ([]byte, error) {
+	if entry.DocumentSymbolArray != nil {
+		return json.Marshal(entry.DocumentSymbolArray)
+	}
+	if entry.SymbolInformationArray != nil {
+		return json.Marshal(entry.SymbolInformationArray)
+	}
+	return []byte("[]"), nil
 }
 
 // ApplyWorkspaceEditParams structure according to LSP

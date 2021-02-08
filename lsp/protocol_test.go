@@ -66,25 +66,32 @@ func TestDocumentSymbolParse(t *testing.T) {
 }
 
 func TestVariousMessages(t *testing.T) {
-	x := &ProgressParams{
-		Token: "token",
-		Value: Raw(WorkDoneProgressBegin{
-			Title: "some work",
-		}),
-	}
-	data, err := json.Marshal(&x)
-	require.NoError(t, err)
-	require.JSONEq(t, `{"token":"token", "value":{"kind":"begin","title":"some work"}}`, string(data))
+	t.Run("ProgressParamsMarshalUnmarshal", func(t *testing.T) {
+		x := &ProgressParams{
+			Token: "token",
+			Value: Raw(WorkDoneProgressBegin{
+				Title: "some work",
+			}),
+		}
+		data, err := json.Marshal(&x)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"token":"token", "value":{"kind":"begin","title":"some work"}}`, string(data))
+	})
 
-	var begin WorkDoneProgressBegin
-	err = json.Unmarshal([]byte(`{"kind":"begin","title":"some work"}`), &begin)
-	require.NoError(t, err)
+	t.Run("WorkDoneProgressBegin", func(t *testing.T) {
+		var begin WorkDoneProgressBegin
+		err := json.Unmarshal([]byte(`{"kind":"begin","title":"some work"}`), &begin)
+		require.NoError(t, err)
+	})
 
-	var report WorkDoneProgressReport
-	err = json.Unmarshal([]byte(`{"kind":"report","message":"28/29","percentage":96.551724137931032}`), &report)
-	require.NoError(t, err)
+	t.Run("WorkDoneProgressReport", func(t *testing.T) {
+		var report WorkDoneProgressReport
+		err := json.Unmarshal([]byte(`{"kind":"report","message":"28/29","percentage":96.551724137931032}`), &report)
+		require.NoError(t, err)
+	})
 
-	msg := `{
+	t.Run("InitializeResult", func(t *testing.T) {
+		msg := `{
 		"capabilities":{
 			"codeActionProvider":{
 				"codeActionKinds":["quickfix","refactor","info"]},
@@ -124,29 +131,42 @@ func TestVariousMessages(t *testing.T) {
 			"workspaceSymbolProvider":true
 		},
 		"serverInfo":{"name":"clangd","version":"clangd version 11.0.0 (https://github.com/llvm/llvm-project 176249bd6732a8044d457092ed932768724a6f06)"}}`
-	var init InitializeResult
-	err = json.Unmarshal([]byte(msg), &init)
-	require.NoError(t, err)
+		var init InitializeResult
+		err := json.Unmarshal([]byte(msg), &init)
+		require.NoError(t, err)
+	})
 
-	msg = `[{"kind":12,"name":"setup","range":{"end":{"character":12,"line":5},"start":{"character":0,"line":5}},"selectionRange":
-	{"end":{"character":10,"line":5},"start":{"character":5,"line":5}}},{"kind":12,"name":"newfunc","range":{"end":{"character":14,"line":7},
-	"start":{"character":0,"line":7}},"selectionRange":{"end":{"character":12,"line":7},"start":{"character":5,"line":7}}},{"kind":12,"name":
-	"altro","range":{"end":{"character":12,"line":9},"start":{"character":0,"line":9}},"selectionRange":{"end":{"character":10,"line":9},"start":
-	{"character":5,"line":9}}},{"kind":12,"name":"ancora","range":{"end":{"character":18,"line":11},"start":{"character":0,"line":11}},
-	"selectionRange":{"end":{"character":11,"line":11},"start":{"character":5,"line":11}}},{"kind":12,"name":"loop","range":{"end":{
-	"character":11,"line":13},"start":{"character":0,"line":13}},"selectionRange":{"end":{"character":9,"line":13},"start":{"character":5,
-	"line":13}}},{"kind":12,"name":"secondFunction","range":{"end":{"character":21,"line":15},"start":{"character":0,"line":15}},
-	"selectionRange":{"end":{"character":19,"line":15},"start":{"character":5,"line":15}}},{"kind":12,"name":"setup","range":{"end":{
-	"character":1,"line":34},"start":{"character":0,"line":17}},"selectionRange":{"end":{"character":10,"line":17},"start":{"character":5,
-	"line":17}}},{"kind":12,"name":"newfunc","range":{"end":{"character":1,"line":40},"start":{"character":0,"line":36}},"selectionRange":
-	{"end":{"character":12,"line":36},"start":{"character":5,"line":36}}},{"kind":12,"name":"altro","range":{"end":{"character":38,"line":42},
-	"start":{"character":0,"line":42}},"selectionRange":{"end":{"character":10,"line":42},"start":{"character":5,"line":42}}},{"kind":12,
-	"name":"ancora","range":{"end":{"character":21,"line":47},"start":{"character":0,"line":47}},"selectionRange":{"end":{"character":11,
-	"line":47},"start":{"character":5,"line":47}}},{"kind":12,"name":"loop","range":{"end":{"character":24,"line":49},"start":{"character":0,
-	"line":49}},"selectionRange":{"end":{"character":9,"line":49},"start":{"character":5,"line":49}}},{"kind":12,"name":"secondFunction",
-	"range":{"end":{"character":38,"line":53},"start":{"character":0,"line":53}},"selectionRange":{"end":{"character":19,"line":53},"start":
-	{"character":5,"line":53}}}]`
-	var symbol DocumentSymbolArrayOrSymbolInformationArray
-	err = json.Unmarshal([]byte(msg), &symbol)
-	require.NoError(t, err)
+	t.Run("DocumentSymbol", func(t *testing.T) {
+		msg := `[{"kind":12,"name":"setup","range":{"end":{"character":12,"line":5},"start":{"character":0,"line":5}},"selectionRange":
+			{"end":{"character":10,"line":5},"start":{"character":5,"line":5}}},{"kind":12,"name":"newfunc","range":{"end":{"character":14,"line":7},
+			"start":{"character":0,"line":7}},"selectionRange":{"end":{"character":12,"line":7},"start":{"character":5,"line":7}}},{"kind":12,"name":
+			"altro","range":{"end":{"character":12,"line":9},"start":{"character":0,"line":9}},"selectionRange":{"end":{"character":10,"line":9},"start":
+			{"character":5,"line":9}}},{"kind":12,"name":"ancora","range":{"end":{"character":18,"line":11},"start":{"character":0,"line":11}},
+			"selectionRange":{"end":{"character":11,"line":11},"start":{"character":5,"line":11}}},{"kind":12,"name":"loop","range":{"end":{
+			"character":11,"line":13},"start":{"character":0,"line":13}},"selectionRange":{"end":{"character":9,"line":13},"start":{"character":5,
+			"line":13}}},{"kind":12,"name":"secondFunction","range":{"end":{"character":21,"line":15},"start":{"character":0,"line":15}},
+			"selectionRange":{"end":{"character":19,"line":15},"start":{"character":5,"line":15}}},{"kind":12,"name":"setup","range":{"end":{
+			"character":1,"line":34},"start":{"character":0,"line":17}},"selectionRange":{"end":{"character":10,"line":17},"start":{"character":5,
+			"line":17}}},{"kind":12,"name":"newfunc","range":{"end":{"character":1,"line":40},"start":{"character":0,"line":36}},"selectionRange":
+			{"end":{"character":12,"line":36},"start":{"character":5,"line":36}}},{"kind":12,"name":"altro","range":{"end":{"character":38,"line":42},
+			"start":{"character":0,"line":42}},"selectionRange":{"end":{"character":10,"line":42},"start":{"character":5,"line":42}}},{"kind":12,
+			"name":"ancora","range":{"end":{"character":21,"line":47},"start":{"character":0,"line":47}},"selectionRange":{"end":{"character":11,
+			"line":47},"start":{"character":5,"line":47}}},{"kind":12,"name":"loop","range":{"end":{"character":24,"line":49},"start":{"character":0,
+			"line":49}},"selectionRange":{"end":{"character":9,"line":49},"start":{"character":5,"line":49}}},{"kind":12,"name":"secondFunction",
+			"range":{"end":{"character":38,"line":53},"start":{"character":0,"line":53}},"selectionRange":{"end":{"character":19,"line":53},"start":
+			{"character":5,"line":53}}}]`
+		var symbol DocumentSymbolArrayOrSymbolInformationArray
+		err := json.Unmarshal([]byte(msg), &symbol)
+		require.NoError(t, err)
+	})
+
+	t.Run("EmptyDocumentSymbolMarshalUnmarshal", func(t *testing.T) {
+		var symbol DocumentSymbolArrayOrSymbolInformationArray
+		err := json.Unmarshal([]byte(`[]`), &symbol)
+		require.NoError(t, err)
+		data, err := json.Marshal(symbol)
+		require.Equal(t, "[]", string(data))
+		data, err = json.Marshal(&symbol)
+		require.Equal(t, "[]", string(data))
+	})
 }
