@@ -500,7 +500,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 
 	if buildPath, err := handler.generateBuildEnvironment(); err == nil {
 		handler.buildPath = buildPath
-		handler.buildSketchRoot = buildPath.Join("sketch")
+		handler.buildSketchRoot = buildPath.Join("sketch").Canonical()
 	} else {
 		return err
 	}
@@ -977,7 +977,7 @@ func (handler *InoHandler) ino2cppDocumentURI(inoURI lsp.DocumentURI) (lsp.Docum
 		return lsp.NilURI, unknownURI(inoURI)
 	}
 	if !inside {
-		log.Printf("    passing doc identifier to '%s' as-is", inoPath)
+		log.Printf("    '%s' not inside sketchroot '%s', passing doc identifier to as-is", handler.sketchRoot, inoPath)
 		return inoURI, nil
 	}
 
