@@ -500,7 +500,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 
 	if buildPath, err := handler.generateBuildEnvironment(); err == nil {
 		handler.buildPath = buildPath
-		handler.buildSketchRoot = buildPath.Join("sketch")
+		handler.buildSketchRoot = buildPath.Join("sketch").Canonical()
 	} else {
 		return err
 	}
