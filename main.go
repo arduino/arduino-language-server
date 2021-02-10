@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 
 	"github.com/arduino/go-paths-helper"
 	"github.com/bcmi-labs/arduino-language-server/handler"
@@ -53,6 +54,16 @@ func main() {
 	}
 
 	inoHandler := handler.NewInoHandler(stdio, initialBoard)
-	defer inoHandler.StopClangd()
-	<-inoHandler.StdioConn.DisconnectNotify()
+
+	// Intercept kill signal
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, os.Kill)
+
+	select {
+	case <-inoHandler.CloseNotify():
+	case <-c:
+		log.Println("INTERRUPTED")
+	}
+	inoHandler.CleanUp()
+	inoHandler.Close()
 }

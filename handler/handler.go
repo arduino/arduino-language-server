@@ -51,6 +51,7 @@ type InoHandler struct {
 	clangdNotificationCount int64
 	progressHandler         *ProgressProxyHandler
 
+	closing                    chan bool
 	clangdStarted              *sync.Cond
 	dataMux                    sync.RWMutex
 	lspInitializeParams        *lsp.InitializeParams
@@ -119,6 +120,7 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	handler := &InoHandler{
 		docs:                   map[string]*lsp.TextDocumentItem{},
 		inoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
+		closing:                make(chan bool),
 		config: lsp.BoardConfig{
 			SelectedBoard: board,
 		},
@@ -131,10 +133,18 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 		jsonrpc2.OnSend(streams.JSONRPCConnLogOnSend("IDE <-- LS     CL:")),
 	)
 
+	if buildPath, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
+		log.Fatalf("Could not create temp folder: %s", err)
+	} else {
+		handler.buildPath = buildPath.Canonical()
+		handler.buildSketchRoot = buildPath.Join("sketch").Canonical()
+	}
+
 	handler.progressHandler = NewProgressProxy(handler.StdioConn)
 
 	if enableLogging {
 		log.Println("Initial board configuration:", board)
+		log.Println("Language server build path:", handler.buildPath)
 	}
 
 	go handler.rebuildEnvironmentLoop()
@@ -150,10 +160,30 @@ type FileData struct {
 	version    int
 }
 
-// StopClangd closes the connection to the clangd process.
-func (handler *InoHandler) StopClangd() {
-	handler.ClangdConn.Close()
-	handler.ClangdConn = nil
+// Close closes all the json-rpc connections.
+func (handler *InoHandler) Close() {
+	if handler.ClangdConn != nil {
+		handler.ClangdConn.Close()
+		handler.ClangdConn = nil
+	}
+	if handler.closing != nil {
+		close(handler.closing)
+		handler.closing = nil
+	}
+}
+
+// CloseNotify returns a channel that is closed when the InoHandler is closed
+func (handler *InoHandler) CloseNotify() <-chan bool {
+	return handler.closing
+}
+
+// CleanUp performs cleanup of the workspace and temp files create by the language server
+func (handler *InoHandler) CleanUp() {
+	if handler.buildPath != nil {
+		log.Printf("removing buildpath")
+		handler.buildPath.RemoveAll()
+		handler.buildPath = nil
+	}
 }
 
 // HandleMessageFromIDE handles a message received from the IDE client (via stdio).
@@ -473,12 +503,14 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		// Exit the process and trigger a restart by the client in case of a severe error
 		if err.Error() == "context deadline exceeded" {
 			log.Println(prefix + "Timeout exceeded while waiting for a reply from clangd.")
-			handler.exit()
+			log.Println(prefix + "Please restart the language server.")
+			handler.Close()
 		}
 		if strings.Contains(err.Error(), "non-added document") || strings.Contains(err.Error(), "non-added file") {
 			log.Printf(prefix + "The clangd process has lost track of the open document.")
 			log.Printf(prefix+"  %s", err)
-			handler.exit()
+			log.Println(prefix + "Please restart the language server.")
+			handler.Close()
 		}
 	}
 
@@ -487,12 +519,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		result = handler.transformClangdResult(req.Method, inoURI, cppURI, result)
 	}
 	return result, err
-}
-
-func (handler *InoHandler) exit() {
-	log.Println("Please restart the language server.")
-	handler.StopClangd()
-	os.Exit(1)
 }
 
 func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.InitializeParams) error {
@@ -507,10 +533,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 		currCppTextVersion = handler.sketchMapper.CppText.Version
 	}
 
-	if buildPath, err := handler.generateBuildEnvironment(); err == nil {
-		handler.buildPath = buildPath
-		handler.buildSketchRoot = buildPath.Join("sketch").Canonical()
-	} else {
+	if err := handler.generateBuildEnvironment(handler.buildPath); err != nil {
 		return err
 	}
 	handler.buildSketchCpp = handler.buildSketchRoot.Join(handler.sketchName + ".ino.cpp")
@@ -566,6 +589,11 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 		handler.ClangdConn = jsonrpc2.NewConn(context.Background(), clangdStream, clangdHandler,
 			jsonrpc2.OnRecv(streams.JSONRPCConnLogOnRecv("IDE     LS <-- CL:")),
 			jsonrpc2.OnSend(streams.JSONRPCConnLogOnSend("IDE     LS --> CL:")))
+		go func() {
+			<-handler.ClangdConn.DisconnectNotify()
+			log.Printf("Lost connection with clangd!")
+			handler.Close()
+		}()
 
 		// Send initialization command to clangd
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
