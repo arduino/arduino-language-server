@@ -97,10 +97,21 @@ func (handler *InoHandler) dataRUnlock(msg string) {
 	handler.dataMux.RUnlock()
 }
 
-func (handler *InoHandler) waitClangdStart(msg string) {
-	log.Println(msg + yellow.Sprintf(" unlocked (waiting clangd)"))
+func (handler *InoHandler) waitClangdStart(prefix string) error {
+	if handler.ClangdConn != nil {
+		return nil
+	}
+
+	log.Printf(prefix + "(throttled: waiting for clangd)")
+	log.Println(prefix + yellow.Sprintf(" unlocked (waiting clangd)"))
 	handler.clangdStarted.Wait()
-	log.Println(msg + yellow.Sprintf(" locked (waiting clangd)"))
+	log.Println(prefix + yellow.Sprintf(" locked (waiting clangd)"))
+
+	if handler.ClangdConn == nil {
+		log.Printf(prefix + "clangd startup failed: aborting call")
+		return errors.New("could not start clangd, aborted")
+	}
+	return nil
 }
 
 // NewInoHandler creates and configures an InoHandler.
@@ -165,37 +176,35 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		params = req.Params
 	}
 
+	// Set up RWLocks and wait for clangd startup
 	switch req.Method {
-	case // Write lock
-		"initialize",
+	case // Write lock - NO clangd required
+		"initialize":
+		handler.dataLock(prefix)
+		defer handler.dataUnlock(prefix)
+	case // Write lock - clangd required
 		"textDocument/didOpen",
 		"textDocument/didChange",
 		"textDocument/didClose":
 		handler.dataLock(prefix)
 		defer handler.dataUnlock(prefix)
-	case // Read lock
-		"textDocument/publishDiagnostics",
-		"workspace/applyEdit":
-		handler.dataRLock(prefix)
-		defer handler.dataRUnlock(prefix)
-	default: // Default to read lock
-		handler.dataRLock(prefix)
-		defer handler.dataRUnlock(prefix)
-	}
-
-	switch req.Method {
-	case // Do not need clangd
-		"initialize",
+		handler.waitClangdStart(prefix)
+	case // Read lock - NO clangd required
 		"initialized":
-	default: // Default to clangd required
-		// Wait for clangd start-up
+		handler.dataRLock(prefix)
+		defer handler.dataRUnlock(prefix)
+	default: // Read lock - clangd required
+		handler.dataRLock(prefix)
+		// if clangd is not started...
 		if handler.ClangdConn == nil {
-			log.Printf(prefix + "(throttled: waiting for clangd)")
+			// Release the read lock and acquire a write lock
+			// (this is required to wait on condition variable).
+			handler.dataRUnlock(prefix)
+			handler.dataLock(prefix)
+			defer handler.dataUnlock(prefix)
 			handler.waitClangdStart(prefix)
-			if handler.ClangdConn == nil {
-				log.Printf(prefix + "clangd startup failed: aborting call")
-				return nil, errors.New("could not start clangd, aborted")
-			}
+		} else {
+			defer handler.dataRUnlock(prefix)
 		}
 	}
 
