@@ -54,5 +54,6 @@ func main() {
 
 	inoHandler := handler.NewInoHandler(stdio, initialBoard)
 	defer inoHandler.StopClangd()
+	defer inoHandler.CleanUp()
 	<-inoHandler.StdioConn.DisconnectNotify()
 }

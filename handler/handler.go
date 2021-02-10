@@ -131,10 +131,18 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 		jsonrpc2.OnSend(streams.JSONRPCConnLogOnSend("IDE <-- LS     CL:")),
 	)
 
+	if buildPath, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
+		log.Fatalf("Could not create temp folder: %s", err)
+	} else {
+		handler.buildPath = buildPath.Canonical()
+		handler.buildSketchRoot = buildPath.Join("sketch").Canonical()
+	}
+
 	handler.progressHandler = NewProgressProxy(handler.StdioConn)
 
 	if enableLogging {
 		log.Println("Initial board configuration:", board)
+		log.Println("Language server build path:", handler.buildPath)
 	}
 
 	go handler.rebuildEnvironmentLoop()
@@ -154,6 +162,14 @@ type FileData struct {
 func (handler *InoHandler) StopClangd() {
 	handler.ClangdConn.Close()
 	handler.ClangdConn = nil
+}
+
+// CleanUp performs cleanup of the workspace and temp files create by the language server
+func (handler *InoHandler) CleanUp() {
+	if handler.buildPath != nil {
+		handler.buildPath.RemoveAll()
+		handler.buildPath = nil
+	}
 }
 
 // HandleMessageFromIDE handles a message received from the IDE client (via stdio).
@@ -507,10 +523,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 		currCppTextVersion = handler.sketchMapper.CppText.Version
 	}
 
-	if buildPath, err := handler.generateBuildEnvironment(); err == nil {
-		handler.buildPath = buildPath
-		handler.buildSketchRoot = buildPath.Join("sketch").Canonical()
-	} else {
+	if err := handler.generateBuildEnvironment(handler.buildPath); err != nil {
 		return err
 	}
 	handler.buildSketchCpp = handler.buildSketchRoot.Join(handler.sketchName + ".ino.cpp")

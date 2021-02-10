@@ -85,7 +85,7 @@ func (handler *InoHandler) rebuildEnvironmentLoop() {
 	}
 }
 
-func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
+func (handler *InoHandler) generateBuildEnvironment(buildPath *paths.Path) error {
 	sketchDir := handler.sketchRoot
 	fqbn := handler.config.SelectedBoard.Fqbn
 
@@ -97,15 +97,15 @@ func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
 	for uri, trackedFile := range handler.docs {
 		rel, err := paths.New(uri).RelFrom(handler.sketchRoot)
 		if err != nil {
-			return nil, errors.WithMessage(err, "dumping tracked files")
+			return errors.WithMessage(err, "dumping tracked files")
 		}
 		data.Overrides[rel.String()] = trackedFile.Text
 	}
 	var overridesJSON *paths.Path
 	if jsonBytes, err := json.MarshalIndent(data, "", "  "); err != nil {
-		return nil, errors.WithMessage(err, "dumping tracked files")
+		return errors.WithMessage(err, "dumping tracked files")
 	} else if tmpFile, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
-		return nil, errors.WithMessage(err, "dumping tracked files")
+		return errors.WithMessage(err, "dumping tracked files")
 	} else {
 		overridesJSON = tmpFile
 		defer tmpFile.Remove()
@@ -118,21 +118,23 @@ func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
 		"--only-compilation-database",
 		"--clean",
 		"--source-override", overridesJSON.String(),
+		"--build-path", buildPath.String(),
 		"--format", "json",
 		sketchDir.String(),
 	}
 	cmd, err := executils.NewProcess(args...)
 	if err != nil {
-		return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+		return errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 	}
 	cmdOutput := &bytes.Buffer{}
 	cmd.RedirectStdoutTo(cmdOutput)
 	cmd.SetDirFromPath(sketchDir)
 	log.Println("running: ", strings.Join(args, " "))
 	if err := cmd.Run(); err != nil {
-		return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+		return errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 	}
 
+	// Currently those values are not used, keeping here for future improvements
 	type cmdBuilderRes struct {
 		BuildPath     *paths.Path `json:"build_path"`
 		UsedLibraries []*libraries.Library
@@ -145,9 +147,9 @@ func (handler *InoHandler) generateBuildEnvironment() (*paths.Path, error) {
 	}
 	var res cmdRes
 	if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
-		return nil, errors.Errorf("parsing arduino-cli output: %s", err)
+		return errors.Errorf("parsing arduino-cli output: %s", err)
 	}
-	// Return only the build path
 	log.Println("arduino-cli output:", cmdOutput)
-	return res.BuilderResult.BuildPath, nil
+
+	return nil
 }
