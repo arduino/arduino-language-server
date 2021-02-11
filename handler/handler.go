@@ -137,7 +137,7 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 		log.Fatalf("Could not create temp folder: %s", err)
 	} else {
 		handler.buildPath = buildPath.Canonical()
-		handler.buildSketchRoot = buildPath.Join("sketch").Canonical()
+		handler.buildSketchRoot = handler.buildPath.Join("sketch")
 	}
 
 	handler.progressHandler = NewProgressProxy(handler.StdioConn)
@@ -145,6 +145,7 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 	if enableLogging {
 		log.Println("Initial board configuration:", board)
 		log.Println("Language server build path:", handler.buildPath)
+		log.Println("Language server build sketch root:", handler.buildSketchRoot)
 	}
 
 	go handler.rebuildEnvironmentLoop()
