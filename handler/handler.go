@@ -126,12 +126,6 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 		},
 	}
 	handler.clangdStarted = sync.NewCond(&handler.dataMux)
-	stdStream := jsonrpc2.NewBufferedStream(stdio, jsonrpc2.VSCodeObjectCodec{})
-	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.HandleMessageFromIDE)
-	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler,
-		jsonrpc2.OnRecv(streams.JSONRPCConnLogOnRecv("IDE --> LS     CL:")),
-		jsonrpc2.OnSend(streams.JSONRPCConnLogOnSend("IDE <-- LS     CL:")),
-	)
 
 	if buildPath, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
 		log.Fatalf("Could not create temp folder: %s", err)
@@ -139,14 +133,20 @@ func NewInoHandler(stdio io.ReadWriteCloser, board lsp.Board) *InoHandler {
 		handler.buildPath = buildPath.Canonical()
 		handler.buildSketchRoot = handler.buildPath.Join("sketch")
 	}
-
-	handler.progressHandler = NewProgressProxy(handler.StdioConn)
-
 	if enableLogging {
 		log.Println("Initial board configuration:", board)
 		log.Println("Language server build path:", handler.buildPath)
 		log.Println("Language server build sketch root:", handler.buildSketchRoot)
 	}
+
+	stdStream := jsonrpc2.NewBufferedStream(stdio, jsonrpc2.VSCodeObjectCodec{})
+	var stdHandler jsonrpc2.Handler = jsonrpc2.HandlerWithError(handler.HandleMessageFromIDE)
+	handler.StdioConn = jsonrpc2.NewConn(context.Background(), stdStream, stdHandler,
+		jsonrpc2.OnRecv(streams.JSONRPCConnLogOnRecv("IDE --> LS     CL:")),
+		jsonrpc2.OnSend(streams.JSONRPCConnLogOnSend("IDE <-- LS     CL:")),
+	)
+
+	handler.progressHandler = NewProgressProxy(handler.StdioConn)
 
 	go handler.rebuildEnvironmentLoop()
 	return handler
