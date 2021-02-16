@@ -1632,7 +1632,6 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 	} else {
 		prefix += fmt.Sprintf("%s %v ", req.Method, req.ID)
 	}
-	defer log.Printf(prefix + "(done)")
 
 	if req.Method == "window/workDoneProgress/create" {
 		params := lsp.WorkDoneProgressCreateParams{}

@@ -85,12 +85,10 @@ func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 		}
 
 	case progressProxyCreated:
-		p.mux.Unlock()
 		err := p.conn.Notify(ctx, "$/progress", lsp.ProgressParams{
 			Token: id,
 			Value: lsp.Raw(proxy.beginReq),
 		})
-		p.mux.Lock()
 
 		proxy.beginReq = nil
 		if err != nil {
@@ -101,11 +99,9 @@ func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 
 	case progressProxyBegin:
 		if proxy.requiredStatus == progressProxyReport {
-			p.mux.Unlock()
 			err := p.conn.Notify(ctx, "$/progress", &lsp.ProgressParams{
 				Token: id,
 				Value: lsp.Raw(proxy.reportReq)})
-			p.mux.Lock()
 
 			proxy.reportReq = nil
 			if err != nil {
@@ -115,12 +111,10 @@ func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 			}
 
 		} else if proxy.requiredStatus == progressProxyEnd {
-			p.mux.Unlock()
 			err := p.conn.Notify(ctx, "$/progress", &lsp.ProgressParams{
 				Token: id,
 				Value: lsp.Raw(proxy.endReq),
 			})
-			p.mux.Lock()
 
 			proxy.endReq = nil
 			if err != nil {
@@ -157,6 +151,12 @@ func (p *ProgressProxyHandler) Begin(id string, req *lsp.WorkDoneProgressBegin) 
 	if !ok {
 		return
 	}
+	if proxy.requiredStatus == progressProxyReport {
+		return
+	}
+	if proxy.requiredStatus == progressProxyEnd {
+		return
+	}
 
 	proxy.beginReq = req
 	proxy.requiredStatus = progressProxyBegin
@@ -171,7 +171,9 @@ func (p *ProgressProxyHandler) Report(id string, req *lsp.WorkDoneProgressReport
 	if !ok {
 		return
 	}
-
+	if proxy.requiredStatus == progressProxyEnd {
+		return
+	}
 	proxy.reportReq = req
 	proxy.requiredStatus = progressProxyReport
 	p.actionRequiredCond.Broadcast()
