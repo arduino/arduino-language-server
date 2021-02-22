@@ -1062,7 +1062,13 @@ func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange l
 	if cppPath.EquivalentTo(handler.buildSketchCpp) {
 		inoPath, inoRange, err := handler.sketchMapper.CppToInoRangeOk(cppRange)
 		if err == nil {
-			log.Printf("    URI: converted %s to %s:%s", cppRange, inoPath, inoRange)
+			if handler.sketchMapper.IsPreprocessedCppLine(cppRange.Start.Line) {
+				inoPath = sourcemapper.NotIno.File
+				log.Printf("    URI: is in preprocessed section")
+				log.Printf("         converted %s to %s:%s", cppRange, inoPath, inoRange)
+			} else {
+				log.Printf("    URI: converted %s to %s:%s", cppRange, inoPath, inoRange)
+			}
 		} else if _, ok := err.(sourcemapper.AdjustedRangeErr); ok {
 			log.Printf("    URI: converted %s to %s:%s (END LINE ADJUSTED)", cppRange, inoPath, inoRange)
 			err = nil
