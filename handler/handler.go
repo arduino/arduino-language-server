@@ -411,6 +411,11 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
 		cppURI = p.TextDocument.URI
 		log.Printf("    --> formatting(%s)", p.TextDocument.URI)
+		if cleanup, e := handler.createClangdFormatterConfig(cppURI); e != nil {
+			err = e
+		} else {
+			defer cleanup()
+		}
 
 	case *lsp.DocumentRangeFormattingParams:
 		// Method: "textDocument/rangeFormatting"
@@ -420,6 +425,11 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			params = cppParams
 			cppURI = cppParams.TextDocument.URI
 			log.Printf("    --> %s(%s:%s)", req.Method, cppParams.TextDocument.URI, cppParams.Range)
+			if cleanup, e := handler.createClangdFormatterConfig(cppURI); e != nil {
+				err = e
+			} else {
+				defer cleanup()
+			}
 		} else {
 			err = e
 		}
@@ -1747,6 +1757,29 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 		result, err = lsp.SendRequest(ctx, handler.StdioConn, req.Method, params)
 	}
 	return result, err
+}
+
+func (handler *InoHandler) createClangdFormatterConfig(cppuri lsp.DocumentURI) (func(), error) {
+	// clangd looks for a .clang-format configuration file on the same directory
+	// pointed by the uri passed in the lsp command parameters.
+	// https://github.com/llvm/llvm-project/blob/64d06ed9c9e0389cd27545d2f6e20455a91d89b1/clang-tools-extra/clangd/ClangdLSPServer.cpp#L856-L868
+	// https://github.com/llvm/llvm-project/blob/64d06ed9c9e0389cd27545d2f6e20455a91d89b1/clang-tools-extra/clangd/ClangdServer.cpp#L402-L404
+
+	config := `
+AllowShortFunctionsOnASingleLine: None
+`
+	targetFile := cppuri.AsPath()
+	if targetFile.IsNotDir() {
+		targetFile = targetFile.Parent()
+	}
+	targetFile = targetFile.Join(".clang-format")
+	cleanup := func() {
+		targetFile.Remove()
+		log.Printf("    formatter config cleaned")
+	}
+	log.Printf("    writing formatter config in: %s", targetFile)
+	err := targetFile.WriteFile([]byte(config))
+	return cleanup, err
 }
 
 func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {
