@@ -1768,6 +1768,18 @@ func (handler *InoHandler) createClangdFormatterConfig(cppuri lsp.DocumentURI) (
 	config := `
 AllowShortFunctionsOnASingleLine: None
 `
+
+	// If a custom config is present in the sketch folder, use that one
+	customConfigFile := handler.sketchRoot.Join(".clang-format")
+	if customConfigFile.Exist() {
+		if c, err := customConfigFile.ReadFile(); err != nil {
+			log.Printf("    error reading custom formatter config file %s: %s", customConfigFile, err)
+		} else {
+			log.Printf("    using custom formatter config file %s", customConfigFile)
+			config = string(c)
+		}
+	}
+
 	targetFile := cppuri.AsPath()
 	if targetFile.IsNotDir() {
 		targetFile = targetFile.Parent()
