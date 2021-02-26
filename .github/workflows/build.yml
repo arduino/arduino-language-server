@@ -3,13 +3,13 @@ name: build
 on:
   push:
     branches:
-      - master
+      - main
   schedule:
     - cron: '0 4 * * MON-FRI' # run every weekday at 4AM (https://docs.github.com/en/actions/reference/events-that-trigger-workflows#scheduled-events-schedule)
   workflow_dispatch:
   pull_request:
     branches:
-      - master
+      - main
 
 jobs:
 
@@ -57,7 +57,7 @@ jobs:
 
   publish:
     needs: build
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - name: Download Workflow Artifact [GitHub Actions]
