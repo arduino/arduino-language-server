@@ -1,4 +1,4 @@
-module github.com/bcmi-labs/arduino-language-server
+module github.com/arduino/arduino-language-server
 
 go 1.12
 

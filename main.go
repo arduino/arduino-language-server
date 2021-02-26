@@ -7,10 +7,10 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/arduino/arduino-language-server/handler"
+	"github.com/arduino/arduino-language-server/lsp"
+	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
-	"github.com/bcmi-labs/arduino-language-server/handler"
-	"github.com/bcmi-labs/arduino-language-server/lsp"
-	"github.com/bcmi-labs/arduino-language-server/streams"
 )
 
 var clangdPath string
