@@ -5,8 +5,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/bcmi-labs/arduino-language-server/lsp"
-	"github.com/bcmi-labs/arduino-language-server/streams"
+	"github.com/arduino/arduino-language-server/lsp"
+	"github.com/arduino/arduino-language-server/streams"
 	"github.com/sourcegraph/jsonrpc2"
 )
 

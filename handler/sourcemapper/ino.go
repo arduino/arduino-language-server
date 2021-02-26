@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/arduino/arduino-language-server/handler/textutils"
+	"github.com/arduino/arduino-language-server/lsp"
 	"github.com/arduino/go-paths-helper"
-	"github.com/bcmi-labs/arduino-language-server/handler/textutils"
-	"github.com/bcmi-labs/arduino-language-server/lsp"
 	"github.com/pkg/errors"
 )
 

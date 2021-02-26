@@ -6,7 +6,7 @@ import (
 	"log"
 	"runtime/debug"
 
-	"github.com/bcmi-labs/arduino-language-server/lsp"
+	"github.com/arduino/arduino-language-server/lsp"
 	"github.com/fatih/color"
 	"github.com/sourcegraph/jsonrpc2"
 )

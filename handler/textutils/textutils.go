@@ -3,7 +3,7 @@ package textutils
 import (
 	"fmt"
 
-	"github.com/bcmi-labs/arduino-language-server/lsp"
+	"github.com/arduino/arduino-language-server/lsp"
 )
 
 // ApplyLSPTextDocumentContentChangeEvent applies the LSP change in the given text

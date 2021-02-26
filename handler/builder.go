@@ -10,9 +10,9 @@ import (
 
 	"github.com/arduino/arduino-cli/arduino/libraries"
 	"github.com/arduino/arduino-cli/executils"
+	"github.com/arduino/arduino-language-server/lsp"
+	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
-	"github.com/bcmi-labs/arduino-language-server/lsp"
-	"github.com/bcmi-labs/arduino-language-server/streams"
 	"github.com/pkg/errors"
 )
 
