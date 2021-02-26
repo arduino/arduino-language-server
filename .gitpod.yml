@@ -1,5 +1,0 @@
-image:
-  file: .gitpod.Dockerfile
-
-tasks:
-- command: echo "please run .gitpod.setup.sh to get started (cannot checkout private repos before Gitpod is up and running)"
