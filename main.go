@@ -20,6 +20,7 @@ var initialFqbn string
 var initialBoardName string
 var enableLogging bool
 var loggingBasePath string
+var formatFilePath string
 
 func main() {
 	flag.StringVar(&clangdPath, "clangd", "clangd", "Path to clangd executable")
@@ -29,6 +30,7 @@ func main() {
 	flag.StringVar(&initialBoardName, "board-name", "", "User-friendly board name to use initially (can be changed via JSON-RPC)")
 	flag.BoolVar(&enableLogging, "log", false, "Enable logging to files")
 	flag.StringVar(&loggingBasePath, "logpath", ".", "Location where to write logging files to when logging is enabled")
+	flag.StringVar(&formatFilePath, "format-conf-path", "", "Path to global clang-format configuration file")
 	flag.Parse()
 
 	if loggingBasePath != "" {
@@ -45,7 +47,7 @@ func main() {
 		log.SetOutput(os.Stderr)
 	}
 
-	handler.Setup(cliPath, clangdPath, enableLogging)
+	handler.Setup(cliPath, clangdPath, formatFilePath, enableLogging)
 	initialBoard := lsp.Board{Fqbn: initialFqbn, Name: initialBoardName}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)

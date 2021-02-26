@@ -30,12 +30,16 @@ import (
 
 var globalCliPath string
 var globalClangdPath string
+var globalFormatterConf *paths.Path
 var enableLogging bool
 
 // Setup initializes global variables.
-func Setup(cliPath string, clangdPath string, _enableLogging bool) {
+func Setup(cliPath string, clangdPath string, formatFilePath string, _enableLogging bool) {
 	globalCliPath = cliPath
 	globalClangdPath = clangdPath
+	if formatFilePath != "" {
+		globalFormatterConf = paths.New(formatFilePath)
+	}
 	enableLogging = _enableLogging
 }
 
@@ -1769,15 +1773,22 @@ func (handler *InoHandler) createClangdFormatterConfig(cppuri lsp.DocumentURI) (
 AllowShortFunctionsOnASingleLine: None
 `
 
-	// If a custom config is present in the sketch folder, use that one
-	customConfigFile := handler.sketchRoot.Join(".clang-format")
-	if customConfigFile.Exist() {
-		if c, err := customConfigFile.ReadFile(); err != nil {
-			log.Printf("    error reading custom formatter config file %s: %s", customConfigFile, err)
+	try := func(conf *paths.Path) bool {
+		if c, err := conf.ReadFile(); err != nil {
+			log.Printf("    error reading custom formatter config file %s: %s", conf, err)
 		} else {
-			log.Printf("    using custom formatter config file %s", customConfigFile)
+			log.Printf("    using custom formatter config file %s", conf)
 			config = string(c)
 		}
+		return true
+	}
+
+	if sketchFormatterConf := handler.sketchRoot.Join(".clang-format"); sketchFormatterConf.Exist() {
+		// If a custom config is present in the sketch folder, use that one
+		try(sketchFormatterConf)
+	} else if globalFormatterConf != nil && globalFormatterConf.Exist() {
+		// Otherwise if a global config file is present, use that one
+		try(globalFormatterConf)
 	}
 
 	targetFile := cppuri.AsPath()
