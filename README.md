@@ -19,7 +19,7 @@ Qualities of an excellent report:
 
 ## How to contribute
 
-Contributions are welcome! Here are all the way you can contribute to the project.
+Contributions are welcome! Here are all the ways you can contribute to the project.
 
 ### Pull Requests
 
