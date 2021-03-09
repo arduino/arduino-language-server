@@ -17,6 +17,14 @@ Qualities of an excellent report:
 - Be responsive. We may need you to provide additional information in order to investigate and resolve the issue.
 - If you find a solution to your problem, please comment on your issue report with an explanation of how you were able to fix it and close the issue.
 
+### Security
+
+If you think you found a vulnerability or other security-related bug in this project, please read our
+[security policy](https://github.com/arduino/arduino-language-server/security/policy) and report the bug to our Security Team 🛡️
+Thank you!
+
+e-mail contact: security@arduino.cc
+
 ## How to contribute
 
 Contributions are welcome! Here are all the ways you can contribute to the project.
