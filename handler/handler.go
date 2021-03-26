@@ -30,12 +30,16 @@ import (
 
 var globalCliPath string
 var globalClangdPath string
+var globalFormatterConf *paths.Path
 var enableLogging bool
 
 // Setup initializes global variables.
-func Setup(cliPath string, clangdPath string, _enableLogging bool) {
+func Setup(cliPath string, clangdPath string, formatFilePath string, _enableLogging bool) {
 	globalCliPath = cliPath
 	globalClangdPath = clangdPath
+	if formatFilePath != "" {
+		globalFormatterConf = paths.New(formatFilePath)
+	}
 	enableLogging = _enableLogging
 }
 
@@ -411,6 +415,11 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(p.TextDocument)
 		cppURI = p.TextDocument.URI
 		log.Printf("    --> formatting(%s)", p.TextDocument.URI)
+		if cleanup, e := handler.createClangdFormatterConfig(cppURI); e != nil {
+			err = e
+		} else {
+			defer cleanup()
+		}
 
 	case *lsp.DocumentRangeFormattingParams:
 		// Method: "textDocument/rangeFormatting"
@@ -420,6 +429,11 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 			params = cppParams
 			cppURI = cppParams.TextDocument.URI
 			log.Printf("    --> %s(%s:%s)", req.Method, cppParams.TextDocument.URI, cppParams.Range)
+			if cleanup, e := handler.createClangdFormatterConfig(cppURI); e != nil {
+				err = e
+			} else {
+				defer cleanup()
+			}
 		} else {
 			err = e
 		}
@@ -1062,7 +1076,13 @@ func (handler *InoHandler) cpp2inoDocumentURI(cppURI lsp.DocumentURI, cppRange l
 	if cppPath.EquivalentTo(handler.buildSketchCpp) {
 		inoPath, inoRange, err := handler.sketchMapper.CppToInoRangeOk(cppRange)
 		if err == nil {
-			log.Printf("    URI: converted %s to %s:%s", cppRange, inoPath, inoRange)
+			if handler.sketchMapper.IsPreprocessedCppLine(cppRange.Start.Line) {
+				inoPath = sourcemapper.NotIno.File
+				log.Printf("    URI: is in preprocessed section")
+				log.Printf("         converted %s to %s:%s", cppRange, inoPath, inoRange)
+			} else {
+				log.Printf("    URI: converted %s to %s:%s", cppRange, inoPath, inoRange)
+			}
 		} else if _, ok := err.(sourcemapper.AdjustedRangeErr); ok {
 			log.Printf("    URI: converted %s to %s:%s (END LINE ADJUSTED)", cppRange, inoPath, inoRange)
 			err = nil
@@ -1741,6 +1761,191 @@ func (handler *InoHandler) FromClangd(ctx context.Context, connection *jsonrpc2.
 		result, err = lsp.SendRequest(ctx, handler.StdioConn, req.Method, params)
 	}
 	return result, err
+}
+
+func (handler *InoHandler) createClangdFormatterConfig(cppuri lsp.DocumentURI) (func(), error) {
+	// clangd looks for a .clang-format configuration file on the same directory
+	// pointed by the uri passed in the lsp command parameters.
+	// https://github.com/llvm/llvm-project/blob/64d06ed9c9e0389cd27545d2f6e20455a91d89b1/clang-tools-extra/clangd/ClangdLSPServer.cpp#L856-L868
+	// https://github.com/llvm/llvm-project/blob/64d06ed9c9e0389cd27545d2f6e20455a91d89b1/clang-tools-extra/clangd/ClangdServer.cpp#L402-L404
+
+	config := `# See: https://releases.llvm.org/11.0.1/tools/clang/docs/ClangFormatStyleOptions.html
+---
+Language: Cpp
+# LLVM is the default style setting, used when a configuration option is not set here
+BasedOnStyle: LLVM
+AccessModifierOffset: -2
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveBitFields: false
+AlignConsecutiveDeclarations: false
+AlignConsecutiveMacros: false
+AlignEscapedNewlines: DontAlign
+AlignOperands: Align
+AlignTrailingComments: true
+AllowAllArgumentsOnNextLine: true
+AllowAllConstructorInitializersOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowShortBlocksOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Always
+AllowShortLambdasOnASingleLine: Empty
+AllowShortLoopsOnASingleLine: true
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakAfterReturnType: None
+AlwaysBreakBeforeMultilineStrings: false
+AlwaysBreakTemplateDeclarations: No
+BinPackArguments: true
+BinPackParameters: true
+# Only used when "BreakBeforeBraces" set to "Custom"
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterFunction: false
+  AfterNamespace: false
+  #AfterObjCDeclaration:
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+# Java-specific
+#BreakAfterJavaFieldAnnotations:
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeBraces: Attach
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+BreakInheritanceList: BeforeColon
+BreakStringLiterals: false
+ColumnLimit: 0
+# "" matches none
+CommentPragmas: ""
+CompactNamespaces: false
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+ConstructorInitializerIndentWidth: 2
+ContinuationIndentWidth: 2
+Cpp11BracedListStyle: false
+DeriveLineEnding: true
+DerivePointerAlignment: true
+DisableFormat: false
+# Docs say "Do not use this in config files". The default (LLVM 11.0.1) is "false".
+#ExperimentalAutoDetectBinPacking:
+FixNamespaceComments: false
+ForEachMacros: []
+IncludeBlocks: Preserve
+IncludeCategories: []
+# "" matches none
+IncludeIsMainRegex: ""
+IncludeIsMainSourceRegex: ""
+IndentCaseBlocks: true
+IndentCaseLabels: true
+IndentExternBlock: Indent
+IndentGotoLabels: false
+IndentPPDirectives: None
+IndentWidth: 2
+IndentWrappedFunctionNames: false
+InsertTrailingCommas: None
+# Java-specific
+#JavaImportGroups:
+# JavaScript-specific
+#JavaScriptQuotes:
+#JavaScriptWrapImports
+KeepEmptyLinesAtTheStartOfBlocks: true
+MacroBlockBegin: ""
+MacroBlockEnd: ""
+# Set to a large number to effectively disable
+MaxEmptyLinesToKeep: 100000
+NamespaceIndentation: None
+NamespaceMacros: []
+# Objective C-specific
+#ObjCBinPackProtocolList:
+#ObjCBlockIndentWidth:
+#ObjCBreakBeforeNestedBlockParam:
+#ObjCSpaceAfterProperty:
+#ObjCSpaceBeforeProtocolList
+PenaltyBreakAssignment: 1
+PenaltyBreakBeforeFirstCallParameter: 1
+PenaltyBreakComment: 1
+PenaltyBreakFirstLessLess: 1
+PenaltyBreakString: 1
+PenaltyBreakTemplateDeclaration: 1
+PenaltyExcessCharacter: 1
+PenaltyReturnTypeOnItsOwnLine: 1
+# Used as a fallback if alignment style can't be detected from code (DerivePointerAlignment: true)
+PointerAlignment: Right
+RawStringFormats: []
+ReflowComments: false
+SortIncludes: false
+SortUsingDeclarations: false
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: false
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceBeforeSquareBrackets: false
+SpaceInEmptyBlock: false
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 2
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInConditionalStatement: false
+SpacesInContainerLiterals: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+Standard: Auto
+StatementMacros: []
+TabWidth: 2
+TypenameMacros: []
+# Default to LF if line endings can't be detected from the content (DeriveLineEnding).
+UseCRLF: false
+UseTab: Never
+WhitespaceSensitiveMacros: []
+`
+
+	try := func(conf *paths.Path) bool {
+		if c, err := conf.ReadFile(); err != nil {
+			log.Printf("    error reading custom formatter config file %s: %s", conf, err)
+		} else {
+			log.Printf("    using custom formatter config file %s", conf)
+			config = string(c)
+		}
+		return true
+	}
+
+	if sketchFormatterConf := handler.sketchRoot.Join(".clang-format"); sketchFormatterConf.Exist() {
+		// If a custom config is present in the sketch folder, use that one
+		try(sketchFormatterConf)
+	} else if globalFormatterConf != nil && globalFormatterConf.Exist() {
+		// Otherwise if a global config file is present, use that one
+		try(globalFormatterConf)
+	}
+
+	targetFile := cppuri.AsPath()
+	if targetFile.IsNotDir() {
+		targetFile = targetFile.Parent()
+	}
+	targetFile = targetFile.Join(".clang-format")
+	cleanup := func() {
+		targetFile.Remove()
+		log.Printf("    formatter config cleaned")
+	}
+	log.Printf("    writing formatter config in: %s", targetFile)
+	err := targetFile.WriteFile([]byte(config))
+	return cleanup, err
 }
 
 func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {
