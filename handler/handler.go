@@ -29,13 +29,15 @@ import (
 )
 
 var globalCliPath string
+var globalCliConfigPath string
 var globalClangdPath string
 var globalFormatterConf *paths.Path
 var enableLogging bool
 
 // Setup initializes global variables.
-func Setup(cliPath string, clangdPath string, formatFilePath string, _enableLogging bool) {
+func Setup(cliPath, cliConfigPath, clangdPath, formatFilePath string, _enableLogging bool) {
 	globalCliPath = cliPath
+	globalCliConfigPath = cliConfigPath
 	globalClangdPath = clangdPath
 	if formatFilePath != "" {
 		globalFormatterConf = paths.New(formatFilePath)
@@ -632,6 +634,7 @@ func (handler *InoHandler) initializeWorkbench(ctx context.Context, params *lsp.
 func extractDataFolderFromArduinoCLI() (*paths.Path, error) {
 	// XXX: do this from IDE or via gRPC
 	args := []string{globalCliPath,
+		"--config-file", globalCliConfigPath,
 		"config",
 		"dump",
 		"--format", "json",
