@@ -113,6 +113,7 @@ func (handler *InoHandler) generateBuildEnvironment(buildPath *paths.Path) error
 
 	// XXX: do this from IDE or via gRPC
 	args := []string{globalCliPath,
+		"--config-file", globalCliConfigPath,
 		"compile",
 		"--fqbn", fqbn,
 		"--only-compilation-database",

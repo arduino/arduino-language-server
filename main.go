@@ -16,6 +16,7 @@ import (
 var clangdPath string
 var compileCommandsDir string
 var cliPath string
+var cliConfigPath string
 var initialFqbn string
 var initialBoardName string
 var enableLogging bool
@@ -26,6 +27,7 @@ func main() {
 	flag.StringVar(&clangdPath, "clangd", "clangd", "Path to clangd executable")
 	flag.StringVar(&compileCommandsDir, "compile-commands-dir", "", "Specify a path to look for compile_commands.json. If path is invalid, clangd will look in the current directory and parent paths of each source file. If not specified, the clangd process is started without the compilation database.")
 	flag.StringVar(&cliPath, "cli", "arduino-cli", "Path to arduino-cli executable")
+	flag.StringVar(&cliConfigPath, "cli-config", "", "Path to arduino-cli config file")
 	flag.StringVar(&initialFqbn, "fqbn", "arduino:avr:uno", "Fully qualified board name to use initially (can be changed via JSON-RPC)")
 	flag.StringVar(&initialBoardName, "board-name", "", "User-friendly board name to use initially (can be changed via JSON-RPC)")
 	flag.BoolVar(&enableLogging, "log", false, "Enable logging to files")
@@ -47,7 +49,11 @@ func main() {
 		log.SetOutput(os.Stderr)
 	}
 
-	handler.Setup(cliPath, clangdPath, formatFilePath, enableLogging)
+	if cliConfigPath == "" {
+		log.Fatal("Path to ArduinoCLI config file must be set.")
+	}
+
+	handler.Setup(cliPath, cliConfigPath, clangdPath, formatFilePath, enableLogging)
 	initialBoard := lsp.Board{Fqbn: initialFqbn, Name: initialBoardName}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
