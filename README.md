@@ -75,7 +75,7 @@ For example:
 ```
 ./arduino-language-server -cli-config $HOME/.arduino15/arduino-cli.yaml
 ```
-Note: If you do not have an ArduinoCLI config file, you can create one by running:
+Note: If you do not have an Arduino CLI config file, you can create one by running:
 ```
 arduino-cli config init
 ```
