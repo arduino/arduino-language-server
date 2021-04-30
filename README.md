@@ -60,6 +60,25 @@ To run tests:
 ```
 go test -v ./...
 ```
+## Usage
+
+To run the Arduino Language Server you need:
+
+- [arduino-cli](https://github.com/arduino/arduino-cli)
+
+After building, call:
+
+```
+./arduino-language-server -cli-config <path-to-cli-config>
+```
+For example:
+```
+./arduino-language-server -cli-config $HOME/.arduino15/arduino-cli.yaml
+```
+Note: If you do not have an ArduinoCLI config file, you can create one by running:
+```
+arduino-cli config init
+```
 
 ## Donations
 
