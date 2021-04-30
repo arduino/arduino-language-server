@@ -64,7 +64,7 @@ go test -v ./...
 
 To run the Arduino Language Server you need:
 
-- [arduino-cli](https://github.com/arduino/arduino-cli)
+- [Arduino CLI](https://github.com/arduino/arduino-cli)
 
 After building, call:
 
