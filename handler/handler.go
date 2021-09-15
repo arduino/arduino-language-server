@@ -361,7 +361,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.CompletionParams:
 		// method: "textDocument/completion"
-		inoURI = p.TextDocument.URI
 		log.Printf("--> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
 
 		if res, e := handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams); e == nil {
@@ -370,6 +369,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		} else {
 			err = e
 		}
+		inoURI = p.TextDocument.URI
 
 	case *lsp.CodeActionParams:
 		// method "textDocument/codeAction"
