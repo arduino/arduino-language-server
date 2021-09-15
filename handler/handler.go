@@ -391,7 +391,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.HoverParams:
 		// method: "textDocument/hover"
-		inoURI = p.TextDocument.URI
 		doc := &p.TextDocumentPositionParams
 		log.Printf("--> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
 
@@ -401,6 +400,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		} else {
 			err = e
 		}
+		inoURI = p.TextDocument.URI
 
 	case *lsp.DocumentSymbolParams:
 		// method "textDocument/documentSymbol"
