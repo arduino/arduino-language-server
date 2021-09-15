@@ -361,7 +361,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.CompletionParams:
 		// method: "textDocument/completion"
-		inoURI = p.TextDocument.URI
 		log.Printf("--> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
 
 		if res, e := handler.ino2cppTextDocumentPositionParams(&p.TextDocumentPositionParams); e == nil {
@@ -370,6 +369,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		} else {
 			err = e
 		}
+		inoURI = p.TextDocument.URI
 
 	case *lsp.CodeActionParams:
 		// method "textDocument/codeAction"
@@ -391,7 +391,6 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 
 	case *lsp.HoverParams:
 		// method: "textDocument/hover"
-		inoURI = p.TextDocument.URI
 		doc := &p.TextDocumentPositionParams
 		log.Printf("--> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
 
@@ -401,6 +400,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, conn *jsonr
 		} else {
 			err = e
 		}
+		inoURI = p.TextDocument.URI
 
 	case *lsp.DocumentSymbolParams:
 		// method "textDocument/documentSymbol"
@@ -1259,7 +1259,7 @@ func (handler *InoHandler) transformClangdResult(method string, inoURI, cppURI l
 			}
 		}
 		r.Items = newItems
-		log.Printf("<-- completion(%d items)", len(r.Items))
+		log.Printf("<-- completion(%d items) cppToIno=%v", len(r.Items), cppToIno)
 		return r
 
 	case *lsp.DocumentSymbolArrayOrSymbolInformationArray:
