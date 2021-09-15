@@ -1259,7 +1259,7 @@ func (handler *InoHandler) transformClangdResult(method string, inoURI, cppURI l
 			}
 		}
 		r.Items = newItems
-		log.Printf("<-- completion(%d items)", len(r.Items))
+		log.Printf("<-- completion(%d items) cppToIno=%v", len(r.Items), cppToIno)
 		return r
 
 	case *lsp.DocumentSymbolArrayOrSymbolInformationArray:
