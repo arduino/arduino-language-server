@@ -6,6 +6,7 @@
 [![Check Go status](https://github.com/arduino/arduino-language-server/actions/workflows/check-go-task.yml/badge.svg)](https://github.com/arduino/arduino-language-server/actions/workflows/check-go-task.yml)
 [![Check Markdown status](https://github.com/arduino/arduino-language-server/actions/workflows/check-markdown-task.yml/badge.svg)](https://github.com/arduino/arduino-language-server/actions/workflows/check-markdown-task.yml)
 [![Check License status](https://github.com/arduino/arduino-language-server/actions/workflows/check-license.yml/badge.svg)](https://github.com/arduino/arduino-language-server/actions/workflows/check-license.yml)
+[![Check Go Dependencies status](https://github.com/arduino/arduino-language-server/actions/workflows/check-go-dependencies-task.yml/badge.svg)](https://github.com/arduino/arduino-language-server/actions/workflows/check-go-dependencies-task.yml)
 
 The **Arduino Language Server** is the tool that powers the autocompletion of the new [Arduino IDE 2][arduino-ide-repo]. It implements the standard [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) so it can be used with other IDEs as well.
 
