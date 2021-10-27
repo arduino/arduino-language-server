@@ -2,18 +2,17 @@ package handler
 
 import (
 	"bytes"
-	"context"
-	"encoding/json"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/arduino/arduino-cli/arduino/libraries"
 	"github.com/arduino/arduino-cli/executils"
-	"github.com/arduino/arduino-language-server/lsp"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
+	"github.com/fatih/color"
 	"github.com/pkg/errors"
+	"go.bug.st/json"
+	"go.bug.st/lsp"
 )
 
 func (handler *InoHandler) scheduleRebuildEnvironment() {
@@ -25,6 +24,7 @@ func (handler *InoHandler) scheduleRebuildEnvironment() {
 
 func (handler *InoHandler) rebuildEnvironmentLoop() {
 	defer streams.CatchAndLogPanic()
+	logger := streams.NewPrefixLogger(color.New(color.FgHiMagenta), "RBLD---")
 
 	grabDeadline := func() *time.Time {
 		handler.rebuildSketchDeadlineMutex.Lock()
@@ -68,24 +68,24 @@ func (handler *InoHandler) rebuildEnvironmentLoop() {
 				case <-time.After(time.Millisecond * 400):
 					msg := "compiling" + dots[count%3]
 					count++
-					handler.progressHandler.Report("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressReport{Message: &msg})
+					handler.progressHandler.Report("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressReport{Message: msg})
 				case <-done:
 					msg := "done"
-					handler.progressHandler.End("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressEnd{Message: &msg})
+					handler.progressHandler.End("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressEnd{Message: msg})
 					return
 				}
 			}
 		}()
 
-		handler.dataLock("RBLD---")
-		handler.initializeWorkbench(context.Background(), nil)
-		handler.dataUnlock("RBLD---")
+		handler.writeLock(logger, false)
+		handler.initializeWorkbench(logger, nil)
+		handler.writeUnlock(logger)
 		done <- true
 		close(done)
 	}
 }
 
-func (handler *InoHandler) generateBuildEnvironment(buildPath *paths.Path) error {
+func (handler *InoHandler) generateBuildEnvironment(logger streams.PrefixLogger, buildPath *paths.Path) error {
 	sketchDir := handler.sketchRoot
 	fqbn := handler.config.SelectedBoard.Fqbn
 
@@ -130,7 +130,7 @@ func (handler *InoHandler) generateBuildEnvironment(buildPath *paths.Path) error
 	cmdOutput := &bytes.Buffer{}
 	cmd.RedirectStdoutTo(cmdOutput)
 	cmd.SetDirFromPath(sketchDir)
-	log.Println("running: ", strings.Join(args, " "))
+	logger("running: %s", strings.Join(args, " "))
 	if err := cmd.Run(); err != nil {
 		return errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 	}
@@ -150,7 +150,7 @@ func (handler *InoHandler) generateBuildEnvironment(buildPath *paths.Path) error
 	if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
 		return errors.Errorf("parsing arduino-cli output: %s", err)
 	}
-	log.Println("arduino-cli output:", cmdOutput)
+	logger("arduino-cli output: %s", cmdOutput)
 
 	return nil
 }

@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/arduino/arduino-language-server/handler/textutils"
-	"github.com/arduino/arduino-language-server/lsp"
 	"github.com/arduino/go-paths-helper"
 	"github.com/pkg/errors"
+	"go.bug.st/lsp"
 )
 
 // InoMapper is a mapping between the .ino sketch and the preprocessed .cpp file
@@ -206,7 +206,7 @@ func unquoteCppString(str string) string {
 // It returns true if the change is "dirty", this happens when the change alters preprocessed lines
 // and a new preprocessing may be probably required.
 func (s *InoMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDocumentContentChangeEvent) (dirty bool) {
-	inoRange := *inoChange.Range
+	inoRange := inoChange.Range
 	cppRange := s.InoToCppLSPRange(inoURI, inoRange)
 	deletedLines := inoRange.End.Line - inoRange.Start.Line
 

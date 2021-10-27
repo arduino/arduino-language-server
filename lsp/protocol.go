@@ -100,9 +100,9 @@ func ReadParams(method string, raw *json.RawMessage) (interface{}, error) {
 		err := json.Unmarshal(*raw, params)
 		return params, err
 	case "arduino/selectedBoard":
-		params := new(BoardConfig)
-		err := json.Unmarshal(*raw, params)
-		return params, err
+		// 	params := new(BoardConfig)
+		// 	err := json.Unmarshal(*raw, params)
+		// 	return params, err
 	}
 	return nil, nil
 }
@@ -315,16 +315,4 @@ type ApplyWorkspaceEditParams struct {
 type ApplyWorkspaceEditResponse struct {
 	Applied       bool   `json:"applied"`
 	FailureReason string `json:"failureReason,omitempty"`
-}
-
-// BoardConfig describes the board and port selected by the user.
-type BoardConfig struct {
-	SelectedBoard Board  `json:"selectedBoard"`
-	SelectedPort  string `json:"selectedPort"`
-}
-
-// Board structure.
-type Board struct {
-	Name string `json:"name"`
-	Fqbn string `json:"fqbn"`
 }

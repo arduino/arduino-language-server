@@ -8,7 +8,6 @@ import (
 	"os/signal"
 
 	"github.com/arduino/arduino-language-server/handler"
-	"github.com/arduino/arduino-language-server/lsp"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
 )
@@ -54,14 +53,14 @@ func main() {
 	}
 
 	handler.Setup(cliPath, cliConfigPath, clangdPath, formatFilePath, enableLogging)
-	initialBoard := lsp.Board{Fqbn: initialFqbn, Name: initialBoardName}
+	initialBoard := handler.Board{Fqbn: initialFqbn, Name: initialBoardName}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
 	if enableLogging {
 		stdio = streams.LogReadWriteCloserAs(stdio, "inols.log")
 	}
 
-	inoHandler := handler.NewInoHandler(stdio, initialBoard)
+	inoHandler := handler.NewInoHandler(stdio, stdio, initialBoard)
 
 	// Intercept kill signal
 	c := make(chan os.Signal, 2)
