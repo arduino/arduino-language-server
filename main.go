@@ -60,7 +60,7 @@ func main() {
 		stdio = streams.LogReadWriteCloserAs(stdio, "inols.log")
 	}
 
-	inoHandler := handler.NewInoHandler(stdio, stdio, initialBoard)
+	inoHandler := handler.NewINOLanguageServer(stdio, stdio, initialBoard)
 
 	// Intercept kill signal
 	c := make(chan os.Signal, 2)

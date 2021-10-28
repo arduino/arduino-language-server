@@ -47,14 +47,12 @@ func Setup(cliPath, cliConfigPath, clangdPath, formatFilePath string, _enableLog
 // CLangdStarter starts clangd and returns its stdin/out/err
 type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser)
 
-// InoHandler is a JSON-RPC handler that delegates messages to clangd.
-type InoHandler struct {
+// INOLanguageServer is a JSON-RPC handler that delegates messages to clangd.
+type INOLanguageServer struct {
 	IDEConn    *jsonrpc.Connection
 	ClangdConn *jsonrpc.Connection
 
-	ideMessageCount    int64
-	clangdMessageCount int64
-	progressHandler    *ProgressProxyHandler
+	progressHandler *ProgressProxyHandler
 
 	closing                    chan bool
 	clangdStarted              *sync.Cond
@@ -95,7 +93,7 @@ type Board struct {
 
 var yellow = color.New(color.FgHiYellow)
 
-func (handler *InoHandler) writeLock(logger streams.PrefixLogger, requireClangd bool) {
+func (handler *INOLanguageServer) writeLock(logger streams.PrefixLogger, requireClangd bool) {
 	handler.dataMux.Lock()
 	logger(yellow.Sprintf("write-locked"))
 	if requireClangd {
@@ -103,12 +101,12 @@ func (handler *InoHandler) writeLock(logger streams.PrefixLogger, requireClangd 
 	}
 }
 
-func (handler *InoHandler) writeUnlock(logger streams.PrefixLogger) {
+func (handler *INOLanguageServer) writeUnlock(logger streams.PrefixLogger) {
 	logger(yellow.Sprintf("write-unlocked"))
 	handler.dataMux.Unlock()
 }
 
-func (handler *InoHandler) readLock(logger streams.PrefixLogger, requireClangd bool) {
+func (handler *INOLanguageServer) readLock(logger streams.PrefixLogger, requireClangd bool) {
 	handler.dataMux.RLock()
 	logger(yellow.Sprintf("read-locked"))
 
@@ -128,12 +126,12 @@ func (handler *InoHandler) readLock(logger streams.PrefixLogger, requireClangd b
 	}
 }
 
-func (handler *InoHandler) readUnlock(logger streams.PrefixLogger) {
+func (handler *INOLanguageServer) readUnlock(logger streams.PrefixLogger) {
 	logger(yellow.Sprintf("read-unlocked"))
 	handler.dataMux.RUnlock()
 }
 
-func (handler *InoHandler) waitClangdStart(logger streams.PrefixLogger) error {
+func (handler *INOLanguageServer) waitClangdStart(logger streams.PrefixLogger) error {
 	if handler.ClangdConn != nil {
 		return nil
 	}
@@ -150,10 +148,10 @@ func (handler *InoHandler) waitClangdStart(logger streams.PrefixLogger) error {
 	return nil
 }
 
-// NewInoHandler creates and configures an InoHandler.
-func NewInoHandler(stdin io.Reader, stdout io.Writer, board Board) *InoHandler {
+// NewINOLanguageServer creates and configures an Arduino Language Server.
+func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLanguageServer {
 	logger := streams.NewPrefixLogger(color.New(color.FgWhite), "LS: ")
-	handler := &InoHandler{
+	handler := &INOLanguageServer{
 		docs:                   map[string]*lsp.TextDocumentItem{},
 		inoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
 		closing:                make(chan bool),
@@ -202,17 +200,8 @@ func NewInoHandler(stdin io.Reader, stdout io.Writer, board Board) *InoHandler {
 	return handler
 }
 
-// // FileData gathers information on a .ino source file.
-// type FileData struct {
-// 	sourceText string
-// 	sourceURI  lsp.DocumentURI
-// 	targetURI  lsp.DocumentURI
-// 	sourceMap  *sourcemapper.InoMapper
-// 	version    int
-// }
-
 // Close closes all the json-rpc connections.
-func (handler *InoHandler) Close() {
+func (handler *INOLanguageServer) Close() {
 	if handler.ClangdConn != nil {
 		handler.ClangdConn.Close()
 		handler.ClangdConn = nil
@@ -224,22 +213,20 @@ func (handler *InoHandler) Close() {
 }
 
 // CloseNotify returns a channel that is closed when the InoHandler is closed
-func (handler *InoHandler) CloseNotify() <-chan bool {
+func (handler *INOLanguageServer) CloseNotify() <-chan bool {
 	return handler.closing
 }
 
 // CleanUp performs cleanup of the workspace and temp files create by the language server
-func (handler *InoHandler) CleanUp() {
+func (handler *INOLanguageServer) CleanUp() {
 	if handler.buildPath != nil {
 		handler.buildPath.RemoveAll()
 		handler.buildPath = nil
 	}
 }
 
-func (handler *InoHandler) HandleNotificationFromIDE(ctx context.Context, logger streams.PrefixLogger, method string, paramsRaw json.RawMessage) {
+func (handler *INOLanguageServer) HandleNotificationFromIDE(ctx context.Context, logger streams.PrefixLogger, method string, paramsRaw json.RawMessage) {
 	defer streams.CatchAndLogPanic()
-	// n := atomic.AddInt64(&handler.ideMessageCount, 1)
-	// prefix := fmt.Sprintf("IDE --> %s notif%d ", method, n)
 
 	params, err := lsp.DecodeNotificationParams(method, paramsRaw)
 	if err != nil {
@@ -375,13 +362,11 @@ func (handler *InoHandler) HandleNotificationFromIDE(ctx context.Context, logger
 }
 
 // HandleMessageFromIDE handles a message received from the IDE client (via stdio).
-func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, logger streams.PrefixLogger,
+func (handler *INOLanguageServer) HandleMessageFromIDE(ctx context.Context, logger streams.PrefixLogger,
 	method string, paramsRaw json.RawMessage,
 	returnCB func(result json.RawMessage, err *jsonrpc.ResponseError),
 ) {
 	defer streams.CatchAndLogPanic()
-	// n := atomic.AddInt64(&handler.ideMessageCount, 1)
-	// prefix := fmt.Sprintf("IDE --> %s %v ", method, n)
 
 	params, err := lsp.DecodeRequestParams(method, paramsRaw)
 	if err != nil {
@@ -667,7 +652,7 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, logger stre
 	returnCB(lsp.EncodeMessage(clangResp), nil)
 }
 
-func (handler *InoHandler) initializeWorkbench(logger streams.PrefixLogger, params *lsp.InitializeParams) error {
+func (handler *INOLanguageServer) initializeWorkbench(logger streams.PrefixLogger, params *lsp.InitializeParams) error {
 	currCppTextVersion := 0
 	if params != nil {
 		logger("    --> initialize(%s)", params.RootURI)
@@ -814,7 +799,7 @@ func extractDataFolderFromArduinoCLI(logger streams.PrefixLogger) (*paths.Path, 
 	return paths.New(res.Directories.Data), nil
 }
 
-func (handler *InoHandler) refreshCppDocumentSymbols(logger streams.PrefixLogger) error {
+func (handler *INOLanguageServer) refreshCppDocumentSymbols(logger streams.PrefixLogger) error {
 	// Query source code symbols
 	handler.readUnlock(logger)
 	cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
@@ -875,7 +860,7 @@ func (handler *InoHandler) refreshCppDocumentSymbols(logger streams.PrefixLogger
 	return nil
 }
 
-func (handler *InoHandler) LoadCppDocumentSymbols() error {
+func (handler *INOLanguageServer) LoadCppDocumentSymbols() error {
 	logger := streams.NewPrefixLogger(color.New(color.FgHiBlue), "SYLD --- ")
 	defer logger("(done)")
 	handler.readLock(logger, true)
@@ -883,7 +868,7 @@ func (handler *InoHandler) LoadCppDocumentSymbols() error {
 	return handler.refreshCppDocumentSymbols(logger)
 }
 
-func (handler *InoHandler) CheckCppDocumentSymbols() error {
+func (handler *INOLanguageServer) CheckCppDocumentSymbols() error {
 	logger := streams.NewPrefixLogger(color.New(color.FgHiBlue), "SYCK --- ")
 	defer logger("(done)")
 	handler.readLock(logger, true)
@@ -901,7 +886,7 @@ func (handler *InoHandler) CheckCppDocumentSymbols() error {
 	return nil
 }
 
-func (handler *InoHandler) CheckCppIncludesChanges() {
+func (handler *INOLanguageServer) CheckCppIncludesChanges() {
 	logger := streams.NewPrefixLogger(color.New(color.FgHiBlue), "INCK --- ")
 	logger("check for Cpp Include Changes")
 	includesCanary := ""
@@ -976,7 +961,7 @@ func startClangd(logger streams.PrefixLogger, compileCommandsDir, sketchCpp *pat
 	}
 }
 
-func (handler *InoHandler) didOpen(logger streams.PrefixLogger, inoDidOpen *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
+func (handler *INOLanguageServer) didOpen(logger streams.PrefixLogger, inoDidOpen *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
 	// Add the TextDocumentItem in the tracked files list
 	inoItem := inoDidOpen.TextDocument
 	handler.docs[inoItem.URI.AsPath().String()] = &inoItem
@@ -998,7 +983,7 @@ func (handler *InoHandler) didOpen(logger streams.PrefixLogger, inoDidOpen *lsp.
 	}, err
 }
 
-func (handler *InoHandler) didClose(logger streams.PrefixLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
+func (handler *INOLanguageServer) didClose(logger streams.PrefixLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
 	inoIdentifier := inoDidClose.TextDocument
 	if _, exist := handler.docs[inoIdentifier.URI.AsPath().String()]; exist {
 		delete(handler.docs, inoIdentifier.URI.AsPath().String())
@@ -1024,7 +1009,7 @@ func (handler *InoHandler) didClose(logger streams.PrefixLogger, inoDidClose *ls
 	}, err
 }
 
-func (handler *InoHandler) ino2cppTextDocumentItem(logger streams.PrefixLogger, inoItem lsp.TextDocumentItem) (cppItem lsp.TextDocumentItem, err error) {
+func (handler *INOLanguageServer) ino2cppTextDocumentItem(logger streams.PrefixLogger, inoItem lsp.TextDocumentItem) (cppItem lsp.TextDocumentItem, err error) {
 	cppURI, err := handler.ino2cppDocumentURI(logger, inoItem.URI)
 	if err != nil {
 		return cppItem, err
@@ -1045,7 +1030,7 @@ func (handler *InoHandler) ino2cppTextDocumentItem(logger streams.PrefixLogger, 
 	return cppItem, nil
 }
 
-func (handler *InoHandler) didChange(logger streams.PrefixLogger, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
+func (handler *INOLanguageServer) didChange(logger streams.PrefixLogger, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
 	doc := req.TextDocument
 
 	trackedDoc, ok := handler.docs[doc.URI.AsPath().String()]
@@ -1123,7 +1108,7 @@ func (handler *InoHandler) didChange(logger streams.PrefixLogger, req *lsp.DidCh
 	return cppReq, err
 }
 
-func (handler *InoHandler) handleError(ctx context.Context, err error) error {
+func (handler *INOLanguageServer) handleError(ctx context.Context, err error) error {
 	errorStr := err.Error()
 	var message string
 	if strings.Contains(errorStr, "#error") {
@@ -1158,21 +1143,21 @@ func (handler *InoHandler) handleError(ctx context.Context, err error) error {
 	return errors.New(message)
 }
 
-func (handler *InoHandler) ino2cppVersionedTextDocumentIdentifier(logger streams.PrefixLogger, doc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
+func (handler *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger streams.PrefixLogger, doc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
 	cppURI, err := handler.ino2cppDocumentURI(logger, doc.URI)
 	res := doc
 	res.URI = cppURI
 	return res, err
 }
 
-func (handler *InoHandler) ino2cppTextDocumentIdentifier(logger streams.PrefixLogger, doc lsp.TextDocumentIdentifier) (lsp.TextDocumentIdentifier, error) {
+func (handler *INOLanguageServer) ino2cppTextDocumentIdentifier(logger streams.PrefixLogger, doc lsp.TextDocumentIdentifier) (lsp.TextDocumentIdentifier, error) {
 	cppURI, err := handler.ino2cppDocumentURI(logger, doc.URI)
 	res := doc
 	res.URI = cppURI
 	return res, err
 }
 
-func (handler *InoHandler) ino2cppDocumentURI(logger streams.PrefixLogger, inoURI lsp.DocumentURI) (lsp.DocumentURI, error) {
+func (handler *INOLanguageServer) ino2cppDocumentURI(logger streams.PrefixLogger, inoURI lsp.DocumentURI) (lsp.DocumentURI, error) {
 	// Sketchbook/Sketch/Sketch.ino      -> build-path/sketch/Sketch.ino.cpp
 	// Sketchbook/Sketch/AnotherTab.ino  -> build-path/sketch/Sketch.ino.cpp  (different section from above)
 	// Sketchbook/Sketch/AnotherFile.cpp -> build-path/sketch/AnotherFile.cpp (1:1)
@@ -1205,7 +1190,7 @@ func (handler *InoHandler) ino2cppDocumentURI(logger streams.PrefixLogger, inoUR
 	return lsp.NilURI, err
 }
 
-func (handler *InoHandler) inoDocumentURIFromInoPath(logger streams.PrefixLogger, inoPath string) (lsp.DocumentURI, error) {
+func (handler *INOLanguageServer) inoDocumentURIFromInoPath(logger streams.PrefixLogger, inoPath string) (lsp.DocumentURI, error) {
 	if inoPath == sourcemapper.NotIno.File {
 		return sourcemapper.NotInoURI, nil
 	}
@@ -1222,7 +1207,7 @@ func (handler *InoHandler) inoDocumentURIFromInoPath(logger streams.PrefixLogger
 	return doc.URI, nil
 }
 
-func (handler *InoHandler) cpp2inoDocumentURI(logger streams.PrefixLogger, cppURI lsp.DocumentURI, cppRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
+func (handler *INOLanguageServer) cpp2inoDocumentURI(logger streams.PrefixLogger, cppURI lsp.DocumentURI, cppRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
 	// TODO: Split this function into 2
 	//       - Cpp2inoSketchDocumentURI: converts sketch     (cppURI, cppRange) -> (inoURI, inoRange)
 	//       - Cpp2inoDocumentURI      : converts non-sketch (cppURI)           -> (inoURI)              [range is the same]
@@ -1280,7 +1265,7 @@ func (handler *InoHandler) cpp2inoDocumentURI(logger streams.PrefixLogger, cppUR
 	return lsp.NilURI, lsp.NilRange, err
 }
 
-func (handler *InoHandler) ino2cppTextDocumentPositionParams(logger streams.PrefixLogger, inoParams lsp.TextDocumentPositionParams) (lsp.TextDocumentPositionParams, error) {
+func (handler *INOLanguageServer) ino2cppTextDocumentPositionParams(logger streams.PrefixLogger, inoParams lsp.TextDocumentPositionParams) (lsp.TextDocumentPositionParams, error) {
 	res := lsp.TextDocumentPositionParams{}
 	cppDoc, err := handler.ino2cppTextDocumentIdentifier(logger, inoParams.TextDocument)
 	if err != nil {
@@ -1301,7 +1286,7 @@ func (handler *InoHandler) ino2cppTextDocumentPositionParams(logger streams.Pref
 	return res, nil
 }
 
-func (handler *InoHandler) ino2cppRange(logger streams.PrefixLogger, inoURI lsp.DocumentURI, inoRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
+func (handler *INOLanguageServer) ino2cppRange(logger streams.PrefixLogger, inoURI lsp.DocumentURI, inoRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
 	cppURI, err := handler.ino2cppDocumentURI(logger, inoURI)
 	if err != nil {
 		return lsp.NilURI, lsp.Range{}, err
@@ -1313,7 +1298,7 @@ func (handler *InoHandler) ino2cppRange(logger streams.PrefixLogger, inoURI lsp.
 	return cppURI, inoRange, nil
 }
 
-func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(logger streams.PrefixLogger, inoParams *lsp.DocumentRangeFormattingParams) (*lsp.DocumentRangeFormattingParams, error) {
+func (handler *INOLanguageServer) ino2cppDocumentRangeFormattingParams(logger streams.PrefixLogger, inoParams *lsp.DocumentRangeFormattingParams) (*lsp.DocumentRangeFormattingParams, error) {
 	cppTextDocument, err := handler.ino2cppTextDocumentIdentifier(logger, inoParams.TextDocument)
 	if err != nil {
 		return nil, err
@@ -1327,7 +1312,7 @@ func (handler *InoHandler) ino2cppDocumentRangeFormattingParams(logger streams.P
 	}, err
 }
 
-func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
+func (handler *INOLanguageServer) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
 	panic("not implemented")
 	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
 	// if data, ok := handler.data[params.TextDocument.URI]; ok {
@@ -1337,7 +1322,7 @@ func (handler *InoHandler) ino2cppDocumentOnTypeFormattingParams(params *lsp.Doc
 	return unknownURI(params.TextDocument.URI)
 }
 
-func (handler *InoHandler) ino2cppRenameParams(params *lsp.RenameParams) error {
+func (handler *INOLanguageServer) ino2cppRenameParams(params *lsp.RenameParams) error {
 	panic("not implemented")
 	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
 	// if data, ok := handler.data[params.TextDocument.URI]; ok {
@@ -1347,7 +1332,7 @@ func (handler *InoHandler) ino2cppRenameParams(params *lsp.RenameParams) error {
 	return unknownURI(params.TextDocument.URI)
 }
 
-func (handler *InoHandler) ino2cppDidChangeWatchedFilesParams(params *lsp.DidChangeWatchedFilesParams) error {
+func (handler *INOLanguageServer) ino2cppDidChangeWatchedFilesParams(params *lsp.DidChangeWatchedFilesParams) error {
 	panic("not implemented")
 	// for index := range params.Changes {
 	// 	fileEvent := &params.Changes[index]
@@ -1358,7 +1343,7 @@ func (handler *InoHandler) ino2cppDidChangeWatchedFilesParams(params *lsp.DidCha
 	return nil
 }
 
-func (handler *InoHandler) ino2cppExecuteCommand(executeCommand *lsp.ExecuteCommandParams) error {
+func (handler *INOLanguageServer) ino2cppExecuteCommand(executeCommand *lsp.ExecuteCommandParams) error {
 	panic("not implemented")
 	// if len(executeCommand.Arguments) == 1 {
 	// 	arg := handler.parseCommandArgument(executeCommand.Arguments[0])
@@ -1369,7 +1354,7 @@ func (handler *InoHandler) ino2cppExecuteCommand(executeCommand *lsp.ExecuteComm
 	return nil
 }
 
-func (handler *InoHandler) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
+func (handler *INOLanguageServer) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
 	panic("not implemented")
 	newEdit := lsp.WorkspaceEdit{}
 	// for uri, edit := range origEdit.Changes {
@@ -1389,7 +1374,7 @@ func (handler *InoHandler) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *ls
 	return &newEdit
 }
 
-func (handler *InoHandler) transformClangdResult(logger streams.PrefixLogger, method string, inoURI, cppURI lsp.DocumentURI, result interface{}) interface{} {
+func (handler *INOLanguageServer) transformClangdResult(logger streams.PrefixLogger, method string, inoURI, cppURI lsp.DocumentURI, result interface{}) interface{} {
 	cppToIno := inoURI != lsp.NilURI && inoURI.AsPath().EquivalentTo(handler.buildSketchCpp)
 
 	switch r := result.(type) {
@@ -1521,7 +1506,7 @@ func (handler *InoHandler) transformClangdResult(logger streams.PrefixLogger, me
 	return result
 }
 
-func (handler *InoHandler) cpp2inoCodeAction(logger streams.PrefixLogger, codeAction lsp.CodeAction, uri lsp.DocumentURI) lsp.CodeAction {
+func (handler *INOLanguageServer) cpp2inoCodeAction(logger streams.PrefixLogger, codeAction lsp.CodeAction, uri lsp.DocumentURI) lsp.CodeAction {
 	inoCodeAction := lsp.CodeAction{
 		Title:       codeAction.Title,
 		Kind:        codeAction.Kind,
@@ -1540,7 +1525,7 @@ func (handler *InoHandler) cpp2inoCodeAction(logger streams.PrefixLogger, codeAc
 	return inoCodeAction
 }
 
-func (handler *InoHandler) Cpp2InoCommand(logger streams.PrefixLogger, command lsp.Command) lsp.Command {
+func (handler *INOLanguageServer) Cpp2InoCommand(logger streams.PrefixLogger, command lsp.Command) lsp.Command {
 	inoCommand := lsp.Command{
 		Title:     command.Title,
 		Command:   command.Command,
@@ -1574,7 +1559,7 @@ func (handler *InoHandler) Cpp2InoCommand(logger streams.PrefixLogger, command l
 	return inoCommand
 }
 
-func (handler *InoHandler) cpp2inoWorkspaceEdit(logger streams.PrefixLogger, cppWorkspaceEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
+func (handler *INOLanguageServer) cpp2inoWorkspaceEdit(logger streams.PrefixLogger, cppWorkspaceEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
 	if cppWorkspaceEdit == nil {
 		return nil
 	}
@@ -1611,7 +1596,7 @@ func (handler *InoHandler) cpp2inoWorkspaceEdit(logger streams.PrefixLogger, cpp
 	return inoWorkspaceEdit
 }
 
-func (handler *InoHandler) cpp2inoLocation(logger streams.PrefixLogger, cppLocation lsp.Location) (lsp.Location, error) {
+func (handler *INOLanguageServer) cpp2inoLocation(logger streams.PrefixLogger, cppLocation lsp.Location) (lsp.Location, error) {
 	inoURI, inoRange, err := handler.cpp2inoDocumentURI(logger, cppLocation.URI, cppLocation.Range)
 	return lsp.Location{
 		URI:   inoURI,
@@ -1619,7 +1604,7 @@ func (handler *InoHandler) cpp2inoLocation(logger streams.PrefixLogger, cppLocat
 	}, err
 }
 
-func (handler *InoHandler) cpp2inoDocumentHighlight(logger streams.PrefixLogger, cppHighlight *lsp.DocumentHighlight, cppURI lsp.DocumentURI) (*lsp.DocumentHighlight, error) {
+func (handler *INOLanguageServer) cpp2inoDocumentHighlight(logger streams.PrefixLogger, cppHighlight *lsp.DocumentHighlight, cppURI lsp.DocumentURI) (*lsp.DocumentHighlight, error) {
 	_, inoRange, err := handler.cpp2inoDocumentURI(logger, cppURI, cppHighlight.Range)
 	if err != nil {
 		return nil, err
@@ -1630,7 +1615,7 @@ func (handler *InoHandler) cpp2inoDocumentHighlight(logger streams.PrefixLogger,
 	}, nil
 }
 
-func (handler *InoHandler) cpp2inoTextEdits(logger streams.PrefixLogger, cppURI lsp.DocumentURI, cppEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {
+func (handler *INOLanguageServer) cpp2inoTextEdits(logger streams.PrefixLogger, cppURI lsp.DocumentURI, cppEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {
 	res := map[lsp.DocumentURI][]lsp.TextEdit{}
 	for _, cppEdit := range cppEdits {
 		inoURI, inoEdit, err := handler.cpp2inoTextEdit(logger, cppURI, cppEdit)
@@ -1647,14 +1632,14 @@ func (handler *InoHandler) cpp2inoTextEdits(logger streams.PrefixLogger, cppURI 
 	return res, nil
 }
 
-func (handler *InoHandler) cpp2inoTextEdit(logger streams.PrefixLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, error) {
+func (handler *INOLanguageServer) cpp2inoTextEdit(logger streams.PrefixLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, error) {
 	inoURI, inoRange, err := handler.cpp2inoDocumentURI(logger, cppURI, cppEdit.Range)
 	inoEdit := cppEdit
 	inoEdit.Range = inoRange
 	return inoURI, inoEdit, err
 }
 
-func (handler *InoHandler) cpp2inoDocumentSymbols(logger streams.PrefixLogger, cppSymbols []lsp.DocumentSymbol, inoRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
+func (handler *INOLanguageServer) cpp2inoDocumentSymbols(logger streams.PrefixLogger, cppSymbols []lsp.DocumentSymbol, inoRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
 	inoRequested := inoRequestedURI.AsPath().String()
 	logger("    filtering for requested ino file: %s", inoRequested)
 	if inoRequestedURI.Ext() != ".ino" || len(cppSymbols) == 0 {
@@ -1698,7 +1683,7 @@ func (handler *InoHandler) cpp2inoDocumentSymbols(logger streams.PrefixLogger, c
 	return inoSymbols
 }
 
-func (handler *InoHandler) cpp2inoSymbolInformation(syms []lsp.SymbolInformation) []lsp.SymbolInformation {
+func (handler *INOLanguageServer) cpp2inoSymbolInformation(syms []lsp.SymbolInformation) []lsp.SymbolInformation {
 	panic("not implemented")
 	// // Much like in cpp2inoDocumentSymbols we de-duplicate symbols based on file in-file location.
 	// idx := make(map[string]*lsp.SymbolInformation)
@@ -1723,7 +1708,7 @@ func (handler *InoHandler) cpp2inoSymbolInformation(syms []lsp.SymbolInformation
 	// return symbols
 }
 
-func (handler *InoHandler) cpp2inoDiagnostics(logger streams.PrefixLogger, cppDiags *lsp.PublishDiagnosticsParams) ([]*lsp.PublishDiagnosticsParams, error) {
+func (handler *INOLanguageServer) cpp2inoDiagnostics(logger streams.PrefixLogger, cppDiags *lsp.PublishDiagnosticsParams) ([]*lsp.PublishDiagnosticsParams, error) {
 	inoDiagsParam := map[lsp.DocumentURI]*lsp.PublishDiagnosticsParams{}
 
 	cppURI := cppDiags.URI
@@ -1795,7 +1780,7 @@ func (handler *InoHandler) cpp2inoDiagnostics(logger streams.PrefixLogger, cppDi
 }
 
 // HandleRequestFromClangd handles a notification message received from clangd.
-func (handler *InoHandler) HandleNotificationFromClangd(ctx context.Context, logger streams.PrefixLogger, method string, paramsRaw json.RawMessage) {
+func (handler *INOLanguageServer) HandleNotificationFromClangd(ctx context.Context, logger streams.PrefixLogger, method string, paramsRaw json.RawMessage) {
 	defer streams.CatchAndLogPanic()
 
 	// n := atomic.AddInt64(&handler.clangdMessageCount, 1)
@@ -1883,7 +1868,7 @@ func (handler *InoHandler) HandleNotificationFromClangd(ctx context.Context, log
 }
 
 // HandleRequestFromClangd handles a request message received from clangd.
-func (handler *InoHandler) HandleRequestFromClangd(ctx context.Context, logger streams.PrefixLogger,
+func (handler *INOLanguageServer) HandleRequestFromClangd(ctx context.Context, logger streams.PrefixLogger,
 	method string, paramsRaw json.RawMessage,
 	respCallback func(result json.RawMessage, err *jsonrpc.ResponseError),
 ) {
@@ -1952,7 +1937,7 @@ func (handler *InoHandler) HandleRequestFromClangd(ctx context.Context, logger s
 	respCallback(resp, respErr)
 }
 
-func (handler *InoHandler) createClangdFormatterConfig(logger streams.PrefixLogger, cppuri lsp.DocumentURI) (func(), error) {
+func (handler *INOLanguageServer) createClangdFormatterConfig(logger streams.PrefixLogger, cppuri lsp.DocumentURI) (func(), error) {
 	// clangd looks for a .clang-format configuration file on the same directory
 	// pointed by the uri passed in the lsp command parameters.
 	// https://github.com/llvm/llvm-project/blob/64d06ed9c9e0389cd27545d2f6e20455a91d89b1/clang-tools-extra/clangd/ClangdLSPServer.cpp#L856-L868
@@ -2137,7 +2122,7 @@ WhitespaceSensitiveMacros: []
 	return cleanup, err
 }
 
-func (handler *InoHandler) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {
+func (handler *INOLanguageServer) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {
 	defer streams.CatchAndLogPanic()
 
 	params := lsp.ShowMessageParams{

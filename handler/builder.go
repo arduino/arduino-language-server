@@ -15,14 +15,14 @@ import (
 	"go.bug.st/lsp"
 )
 
-func (handler *InoHandler) scheduleRebuildEnvironment() {
+func (handler *INOLanguageServer) scheduleRebuildEnvironment() {
 	handler.rebuildSketchDeadlineMutex.Lock()
 	defer handler.rebuildSketchDeadlineMutex.Unlock()
 	d := time.Now().Add(time.Second)
 	handler.rebuildSketchDeadline = &d
 }
 
-func (handler *InoHandler) rebuildEnvironmentLoop() {
+func (handler *INOLanguageServer) rebuildEnvironmentLoop() {
 	defer streams.CatchAndLogPanic()
 	logger := streams.NewPrefixLogger(color.New(color.FgHiMagenta), "RBLD---")
 
@@ -85,7 +85,7 @@ func (handler *InoHandler) rebuildEnvironmentLoop() {
 	}
 }
 
-func (handler *InoHandler) generateBuildEnvironment(logger streams.PrefixLogger, buildPath *paths.Path) error {
+func (handler *INOLanguageServer) generateBuildEnvironment(logger streams.PrefixLogger, buildPath *paths.Path) error {
 	sketchDir := handler.sketchRoot
 	fqbn := handler.config.SelectedBoard.Fqbn
 
