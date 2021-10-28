@@ -432,8 +432,14 @@ func (handler *InoHandler) HandleMessageFromIDE(ctx context.Context, logger stre
 
 		returnCB(lsp.EncodeMessage(&lsp.InitializeResult{
 			Capabilities: lsp.ServerCapabilities{
-				TextDocumentSync: &lsp.TextDocumentSyncOptions{}, //{Kind: &lsp.TDSKIncremental},
-				HoverProvider:    &lsp.HoverOptions{},            // true,
+				TextDocumentSync: &lsp.TextDocumentSyncOptions{
+					OpenClose: true,
+					Change:    lsp.TextDocumentSyncKindIncremental,
+					Save: &lsp.SaveOptions{
+						IncludeText: true,
+					},
+				},
+				HoverProvider: &lsp.HoverOptions{}, // true,
 				CompletionProvider: &lsp.CompletionOptions{
 					TriggerCharacters: []string{".", "\u003e", ":"},
 				},
@@ -1833,10 +1839,8 @@ func (handler *InoHandler) HandleNotificationFromClangd(ctx context.Context, log
 	}
 
 	// Default to read lock
-	logger("(queued)")
 	handler.readLock(logger, false)
 	defer handler.readUnlock(logger)
-	logger("(running)")
 
 	switch p := params.(type) {
 	case *lsp.PublishDiagnosticsParams:
@@ -1916,10 +1920,8 @@ func (handler *InoHandler) HandleRequestFromClangd(ctx context.Context, logger s
 	}
 
 	// Default to read lock
-	logger("(queued)")
 	handler.readLock(logger, false)
 	defer handler.readUnlock(logger)
-	logger("(running)")
 
 	switch p := params.(type) {
 	case *lsp.ApplyWorkspaceEditParams:
