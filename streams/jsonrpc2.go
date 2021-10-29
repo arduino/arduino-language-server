@@ -21,24 +21,18 @@ func NewPrefixLogger(col *color.Color, prefix string) PrefixLogger {
 }
 
 type JsonRPCLogger struct {
-	client   string
-	server   string
-	clColor  *color.Color
-	srvColor *color.Color
+	client string
+	server string
 }
 
-func NewJsonRPCLogger(client, server string, weAreClient bool) *JsonRPCLogger {
+var clColor = color.New(color.FgHiRed)
+var srvColor = color.New(color.FgHiGreen)
+
+func NewJsonRPCLogger(client, server string) *JsonRPCLogger {
 	color.NoColor = false
-	clColor := color.New(color.FgHiRed)
-	srvColor := color.New(color.FgHiGreen)
-	if !weAreClient {
-		clColor, srvColor = srvColor, clColor
-	}
 	return &JsonRPCLogger{
-		client:   client + " --> " + server + " ",
-		server:   client + " <-- " + server + " ",
-		clColor:  clColor,
-		srvColor: srvColor,
+		client: client + " --> " + server + " ",
+		server: client + " <-- " + server + " ",
 	}
 }
 
@@ -50,8 +44,8 @@ func (l *JsonRPCLogger) LogClientRequest(method string, params json.RawMessage) 
 	id := atomic.AddInt64(&index, 1)
 	prefix := fmt.Sprintf("REQ %s %v: ", method, id)
 	dec := ""
-	log.Print(l.clColor.Sprintf(l.client+prefix+"%s", dec))
-	return NewPrefixLogger(l.clColor, empty(l.client)+prefix), id
+	log.Print(clColor.Sprintf(l.client+prefix+"%s", dec))
+	return NewPrefixLogger(clColor, empty(l.client)+prefix), id
 }
 
 func (l *JsonRPCLogger) LogClientResponse(id int64, method string, params json.RawMessage, err *jsonrpc.ResponseError) {
@@ -59,14 +53,14 @@ func (l *JsonRPCLogger) LogClientResponse(id int64, method string, params json.R
 	if err != nil {
 		dec += fmt.Sprintf("ERROR %v", err.AsError())
 	}
-	log.Print(l.clColor.Sprintf(l.client+"RESP %s %v: %s", method, id, dec))
+	log.Print(clColor.Sprintf(l.client+"RESP %s %v: %s", method, id, dec))
 }
 
 func (l *JsonRPCLogger) LogClientNotification(method string, params json.RawMessage) PrefixLogger {
 	prefix := fmt.Sprintf("NOTIF %s: ", method)
 	dec := ""
-	log.Print(l.clColor.Sprintf(l.client+prefix+"%s", dec))
-	return NewPrefixLogger(l.clColor, empty(l.client)+prefix)
+	log.Print(clColor.Sprintf(l.client+prefix+"%s", dec))
+	return NewPrefixLogger(clColor, empty(l.client)+prefix)
 }
 
 func (l *JsonRPCLogger) LogServerRequest(method string, params json.RawMessage) (PrefixLogger, int64) {
@@ -74,8 +68,8 @@ func (l *JsonRPCLogger) LogServerRequest(method string, params json.RawMessage) 
 
 	prefix := fmt.Sprintf("REQ %s %v: ", method, id)
 	dec := ""
-	log.Print(l.srvColor.Sprintf(l.server+prefix+"%s", dec))
-	return NewPrefixLogger(l.srvColor, empty(l.server)+prefix), id
+	log.Print(srvColor.Sprintf(l.server+prefix+"%s", dec))
+	return NewPrefixLogger(srvColor, empty(l.server)+prefix), id
 }
 
 func (l *JsonRPCLogger) LogServerResponse(id int64, method string, params json.RawMessage, err *jsonrpc.ResponseError) {
@@ -83,34 +77,12 @@ func (l *JsonRPCLogger) LogServerResponse(id int64, method string, params json.R
 	if err != nil {
 		dec += fmt.Sprintf("ERROR %v", err.AsError())
 	}
-	log.Print(l.srvColor.Sprintf(l.server+"RESP %s %v: %s", method, id, dec))
+	log.Print(srvColor.Sprintf(l.server+"RESP %s %v: %s", method, id, dec))
 }
 
 func (l *JsonRPCLogger) LogServerNotification(method string, params json.RawMessage) PrefixLogger {
 	prefix := fmt.Sprintf("NOTIF %s: ", method)
 	dec := ""
-	log.Print(l.srvColor.Sprintf(l.server+prefix+"%s", dec))
-	return NewPrefixLogger(l.srvColor, empty(l.server)+prefix)
-}
-
-func decodeLspRequest(method string, req json.RawMessage) string {
-	switch method {
-	case "$/progress":
-		// var begin lsp.WorkDoneProgressBegin
-		// if json.Unmarshal(*v.Value, &begin) == nil {
-		// 	return fmt.Sprintf("TOKEN=%s BEGIN %v %v", v.Token, begin.Title, begin.Message)
-		// }
-		// var report lsp.WorkDoneProgressReport
-		// if json.Unmarshal(*v.Value, &report) == nil {
-		// 	return fmt.Sprintf("TOKEN=%s REPORT %v %v%%", v.Token, report.Message, fmtFloat(report.Percentage))
-		// }
-		// var end lsp.WorkDoneProgressEnd
-		// if json.Unmarshal(*v.Value, &end) == nil {
-		// 	return fmt.Sprintf("TOKEN=%s END %v", v.Token, fmtString(end.Message))
-		// }
-		// return "UNKNOWN?"
-		return "SOME PROGRESS..."
-	default:
-		return ""
-	}
+	log.Print(srvColor.Sprintf(l.server+prefix+"%s", dec))
+	return NewPrefixLogger(srvColor, empty(l.server)+prefix)
 }

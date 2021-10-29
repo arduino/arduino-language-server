@@ -173,7 +173,7 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLa
 		logger("Language server build sketch root: %s", handler.buildSketchRoot)
 	}
 
-	jsonrpcLogger := streams.NewJsonRPCLogger("IDE", "LS", false)
+	jsonrpcLogger := streams.NewJsonRPCLogger("IDE", "LS")
 	handler.IDEConn = jsonrpc.NewConnection(stdin, stdout,
 		func(ctx context.Context, method string, params json.RawMessage, respCallback func(result json.RawMessage, err *jsonrpc.ResponseError)) {
 			reqLogger, idx := jsonrpcLogger.LogClientRequest(method, params)
@@ -228,7 +228,7 @@ func (handler *INOLanguageServer) CleanUp() {
 func (handler *INOLanguageServer) HandleNotificationFromIDE(ctx context.Context, logger streams.PrefixLogger, method string, paramsRaw json.RawMessage) {
 	defer streams.CatchAndLogPanic()
 
-	params, err := lsp.DecodeNotificationParams(method, paramsRaw)
+	params, err := lsp.DecodeClientNotificationParams(method, paramsRaw)
 	if err != nil {
 		// TODO: log?
 		return
@@ -314,10 +314,10 @@ func (handler *INOLanguageServer) HandleNotificationFromIDE(ctx context.Context,
 		for _, change := range p.ContentChanges {
 			logger("         > %s -> %s", change.Range, strconv.Quote(change.Text))
 		}
+		logger("LS --> CL NOTIF %s:", method)
 		if err := handler.ClangdConn.SendNotification(method, lsp.EncodeMessage(p)); err != nil {
 			// Exit the process and trigger a restart by the client in case of a severe error
-			logger("Connection error with clangd server:")
-			logger("%v", err)
+			logger("Connection error with clangd server: %v", err)
 			logger("Please restart the language server.")
 			handler.Close()
 		}
@@ -340,7 +340,7 @@ func (handler *INOLanguageServer) HandleNotificationFromIDE(ctx context.Context,
 		return
 	}
 
-	logger("sending to Clang")
+	logger("LS --> CL NOTIF %s:", method)
 	if err := handler.ClangdConn.SendNotification(method, lsp.EncodeMessage(params)); err != nil {
 		// Exit the process and trigger a restart by the client in case of a severe error
 		logger("Connection error with clangd server:")
@@ -368,7 +368,7 @@ func (handler *INOLanguageServer) HandleMessageFromIDE(ctx context.Context, logg
 ) {
 	defer streams.CatchAndLogPanic()
 
-	params, err := lsp.DecodeRequestParams(method, paramsRaw)
+	params, err := lsp.DecodeClientRequestParams(method, paramsRaw)
 	if err != nil {
 		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInvalidParams, Message: err.Error()})
 		return
@@ -531,11 +531,21 @@ func (handler *INOLanguageServer) HandleMessageFromIDE(ctx context.Context, logg
 			err = e
 		}
 
+	case *lsp.DocumentHighlightParams:
+		tdp := p.TextDocumentPositionParams
+
+		inoURI = tdp.TextDocument.URI
+		if res, e := handler.ino2cppTextDocumentPositionParams(logger, tdp); e == nil {
+			cppURI = res.TextDocument.URI
+			params = res
+		} else {
+			err = e
+		}
+
 	case *lsp.SignatureHelpParams,
 		*lsp.DefinitionParams,
 		*lsp.TypeDefinitionParams,
-		*lsp.ImplementationParams,
-		*lsp.DocumentHighlightParams:
+		*lsp.ImplementationParams:
 		// it was *lsp.TextDocumentPositionParams:
 
 		// Method: "textDocument/signatureHelp"
@@ -599,10 +609,7 @@ func (handler *INOLanguageServer) HandleMessageFromIDE(ctx context.Context, logg
 		return
 	}
 
-	logger("sent to Clang")
-
-	// var result interface{}
-	// result, err = lsp.SendRequest(ctx, handler.ClangdConn, method, params)
+	logger("LS --> CL REQ %s", method)
 	clangRawResp, clangErr, err := handler.ClangdConn.SendRequest(ctx, method, lsp.EncodeMessage(params))
 	if err != nil {
 		// Exit the process and trigger a restart by the client in case of a severe error
@@ -626,7 +633,8 @@ func (handler *INOLanguageServer) HandleMessageFromIDE(ctx context.Context, logg
 		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()})
 		return
 	}
-	clangResp, err := lsp.DecodeResponseResult(method, clangRawResp)
+	logger("LS <-- CL RESP %s", method)
+	clangResp, err := lsp.DecodeServerResponseResult(method, clangRawResp)
 	if err != nil {
 		logger("Error decoding clang response: %v", err)
 		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
@@ -696,7 +704,9 @@ func (handler *INOLanguageServer) initializeWorkbench(logger streams.PrefixLogge
 			},
 		}
 
-		if err := handler.ClangdConn.SendNotification("textDocument/didChange", lsp.EncodeMessage(syncEvent)); err != nil {
+		method := "textDocument/didChange"
+		logger("LS --> CL NOTIF %s:", method)
+		if err := handler.ClangdConn.SendNotification(method, lsp.EncodeMessage(syncEvent)); err != nil {
 			logger("    error reinitilizing clangd:", err)
 			return err
 		}
@@ -716,7 +726,7 @@ func (handler *INOLanguageServer) initializeWorkbench(logger streams.PrefixLogge
 			go io.Copy(os.Stderr, clangdStderr)
 		}
 
-		rpcLogger := streams.NewJsonRPCLogger("IDE     LS", "CL", true)
+		rpcLogger := streams.NewJsonRPCLogger("IDE     LS", "CL")
 		handler.ClangdConn = jsonrpc.NewConnection(clangdStdio, clangdStdio,
 			func(ctx context.Context, method string, params json.RawMessage, respCallback func(result json.RawMessage, err *jsonrpc.ResponseError)) {
 				logger, idx := rpcLogger.LogServerRequest(method, params)
@@ -726,7 +736,7 @@ func (handler *INOLanguageServer) initializeWorkbench(logger streams.PrefixLogge
 				})
 			},
 			func(ctx context.Context, method string, params json.RawMessage) {
-				logger := rpcLogger.LogClientNotification(method, params)
+				logger := rpcLogger.LogServerNotification(method, params)
 				handler.HandleNotificationFromClangd(ctx, logger, method, params)
 			},
 			func(e error) {
@@ -743,20 +753,28 @@ func (handler *INOLanguageServer) initializeWorkbench(logger streams.PrefixLogge
 		// Send initialization command to clangd
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		if rawResp, clangErr, err := handler.ClangdConn.SendRequest(ctx, "initialize", lsp.EncodeMessage(handler.lspInitializeParams)); err != nil {
+		method1 := "initialize"
+		logger("LS --> CL REQ %s", method1)
+		rawResp, clangErr, err := handler.ClangdConn.SendRequest(
+			ctx, method1, lsp.EncodeMessage(handler.lspInitializeParams))
+		if err != nil {
 			logger("    error initilizing clangd: %v", err)
 			return err
-		} else if clangErr != nil {
+		}
+		logger("LS <-- CL RESP %s", method1)
+		if clangErr != nil {
 			logger("    error initilizing clangd: %v", clangErr.AsError())
 			return clangErr.AsError()
-		} else if resp, err := lsp.DecodeResponseResult("initialize", rawResp); err != nil {
+		} else if resp, err := lsp.DecodeServerResponseResult("initialize", rawResp); err != nil {
 			logger("    error initilizing clangd: %v", err)
 			return err
 		} else {
-			logger("    clangd successfully started: %v", resp)
+			logger("clangd successfully started: %v", resp)
 		}
 
-		if err := handler.ClangdConn.SendNotification("initialized", lsp.EncodeMessage(lsp.InitializedParams{})); err != nil {
+		method2 := "initialized"
+		logger("LS --> CL NOTIF %s:", method2)
+		if err := handler.ClangdConn.SendNotification(method2, lsp.EncodeMessage(lsp.InitializedParams{})); err != nil {
 			logger("    error sending initialized notification to clangd: %v", err)
 			return err
 		}
@@ -804,7 +822,9 @@ func (handler *INOLanguageServer) refreshCppDocumentSymbols(logger streams.Prefi
 	handler.readUnlock(logger)
 	cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
 	logger("requesting documentSymbol for %s", cppURI)
-	respRaw, resErr, err := handler.ClangdConn.SendRequest(context.Background(), "textDocument/documentSymbol",
+	method := "textDocument/documentSymbol"
+	logger("LS --> CL REQ %s", method)
+	respRaw, resErr, err := handler.ClangdConn.SendRequest(context.Background(), method,
 		lsp.EncodeMessage(&lsp.DocumentSymbolParams{
 			TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
 		}))
@@ -814,11 +834,12 @@ func (handler *INOLanguageServer) refreshCppDocumentSymbols(logger streams.Prefi
 		logger("error: %s", err)
 		return fmt.Errorf("quering source code symbols: %w", err)
 	}
+	logger("LS <-- CL RESP %s", method)
 	if resErr != nil {
 		logger("error: %s", resErr.AsError())
 		return fmt.Errorf("quering source code symbols: %w", resErr.AsError())
 	}
-	result, err := lsp.DecodeResponseResult("textDocument/documentSymbol", respRaw)
+	result, err := lsp.DecodeServerResponseResult("textDocument/documentSymbol", respRaw)
 	if err != nil {
 		logger("invalid response: %s", err)
 		return fmt.Errorf("quering source code symbols: invalid response: %w", err)
@@ -1108,7 +1129,7 @@ func (handler *INOLanguageServer) didChange(logger streams.PrefixLogger, req *ls
 	return cppReq, err
 }
 
-func (handler *INOLanguageServer) handleError(ctx context.Context, err error) error {
+func (handler *INOLanguageServer) handleError(logger streams.PrefixLogger, err error) error {
 	errorStr := err.Error()
 	var message string
 	if strings.Contains(errorStr, "#error") {
@@ -1139,7 +1160,7 @@ func (handler *INOLanguageServer) handleError(ctx context.Context, err error) er
 	} else {
 		message = "Could not start editor support.\n" + errorStr
 	}
-	go handler.showMessage(ctx, lsp.MessageTypeError, message)
+	go handler.showMessage(logger, lsp.MessageTypeError, message)
 	return errors.New(message)
 }
 
@@ -1266,24 +1287,31 @@ func (handler *INOLanguageServer) cpp2inoDocumentURI(logger streams.PrefixLogger
 }
 
 func (handler *INOLanguageServer) ino2cppTextDocumentPositionParams(logger streams.PrefixLogger, inoParams lsp.TextDocumentPositionParams) (lsp.TextDocumentPositionParams, error) {
-	res := lsp.TextDocumentPositionParams{}
-	cppDoc, err := handler.ino2cppTextDocumentIdentifier(logger, inoParams.TextDocument)
+	inoTextDocument := inoParams.TextDocument
+	inoPosition := inoParams.Position
+	inoURI := inoTextDocument.URI
+	prefix := fmt.Sprintf("TextDocumentIdentifier %s", inoParams)
+
+	cppTextDocument, err := handler.ino2cppTextDocumentIdentifier(logger, inoTextDocument)
 	if err != nil {
-		return res, err
+		logger("%s -> invalid text document: %s", prefix, err)
+		return lsp.TextDocumentPositionParams{}, err
 	}
-	cppPosition := inoParams.Position
-	inoURI := inoParams.TextDocument.URI
+	cppPosition := inoPosition
 	if inoURI.Ext() == ".ino" {
-		if cppLine, ok := handler.sketchMapper.InoToCppLineOk(inoURI, inoParams.Position.Line); ok {
+		if cppLine, ok := handler.sketchMapper.InoToCppLineOk(inoURI, inoPosition.Line); ok {
 			cppPosition.Line = cppLine
 		} else {
-			logger("    invalid line requested: %s:%d", inoURI, inoParams.Position.Line)
-			return res, unknownURI(inoURI)
+			logger("%s -> invalid line requested: %s:%d", prefix, inoURI, inoPosition.Line)
+			return lsp.TextDocumentPositionParams{}, unknownURI(inoURI)
 		}
 	}
-	res.TextDocument = cppDoc
-	res.Position = cppPosition
-	return res, nil
+	cppParams := lsp.TextDocumentPositionParams{
+		TextDocument: cppTextDocument,
+		Position:     cppPosition,
+	}
+	logger("%s -> %s", prefix, cppParams)
+	return cppParams, nil
 }
 
 func (handler *INOLanguageServer) ino2cppRange(logger streams.PrefixLogger, inoURI lsp.DocumentURI, inoRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
@@ -1783,17 +1811,14 @@ func (handler *INOLanguageServer) cpp2inoDiagnostics(logger streams.PrefixLogger
 func (handler *INOLanguageServer) HandleNotificationFromClangd(ctx context.Context, logger streams.PrefixLogger, method string, paramsRaw json.RawMessage) {
 	defer streams.CatchAndLogPanic()
 
-	// n := atomic.AddInt64(&handler.clangdMessageCount, 1)
-	// prefix := fmt.Sprintf("CLG <-- %s notif%d ", method, n)
-
-	params, err := lsp.DecodeNotificationParams(method, paramsRaw)
+	params, err := lsp.DecodeServerNotificationParams(method, paramsRaw)
 	if err != nil {
 		logger("error parsing clang message:", err)
 		return
 	}
 	if params == nil {
 		// passthrough
-		logger("passing through message")
+		logger("IDE <-- LS NOTIF %s: passing through message", method)
 		if err := handler.IDEConn.SendNotification(method, paramsRaw); err != nil {
 			logger("Error sending notification to IDE: " + err.Error())
 		}
@@ -1849,7 +1874,9 @@ func (handler *INOLanguageServer) HandleNotificationFromClangd(ctx context.Conte
 			for _, diag := range inoDiag.Diagnostics {
 				logger("> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
 			}
-			if err := handler.IDEConn.SendNotification("textDocument/publishDiagnostics", lsp.EncodeMessage(inoDiag)); err != nil {
+			method := "textDocument/publishDiagnostics"
+			logger("IDE <-- LS NOTIF %s:", method)
+			if err := handler.IDEConn.SendNotification(method, lsp.EncodeMessage(inoDiag)); err != nil {
 				logger("    Error sending diagnostics to IDE: %s", err)
 				return
 			}
@@ -1861,7 +1888,7 @@ func (handler *INOLanguageServer) HandleNotificationFromClangd(ctx context.Conte
 		return
 	}
 
-	logger("to IDE")
+	logger("IDE <-- LS NOTIF %s:", method)
 	if err := handler.IDEConn.SendNotification(method, lsp.EncodeMessage(params)); err != nil {
 		logger("Error sending notification to IDE: " + err.Error())
 	}
@@ -1877,7 +1904,7 @@ func (handler *INOLanguageServer) HandleRequestFromClangd(ctx context.Context, l
 	// n := atomic.AddInt64(&handler.clangdMessageCount, 1)
 	// prefix := fmt.Sprintf("CLG <-- %s %v ", method, n)
 
-	params, err := lsp.DecodeRequestParams(method, paramsRaw)
+	params, err := lsp.DecodeServerRequestParams(method, paramsRaw)
 	if err != nil {
 		logger("Error parsing clang message: %v", err)
 		respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
@@ -1926,14 +1953,14 @@ func (handler *INOLanguageServer) HandleRequestFromClangd(ctx context.Context, l
 		respRaw = paramsRaw
 	}
 
-	logger("to IDE")
+	logger("IDE <-- LS REQ %s", method)
 	resp, respErr, err := handler.IDEConn.SendRequest(ctx, method, respRaw)
 	if err != nil {
 		logger("Error sending request to IDE:", err)
 		respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
 		return
 	}
-
+	logger("IDE --> LS REQ %s", method)
 	respCallback(resp, respErr)
 }
 
@@ -2122,14 +2149,17 @@ WhitespaceSensitiveMacros: []
 	return cleanup, err
 }
 
-func (handler *INOLanguageServer) showMessage(ctx context.Context, msgType lsp.MessageType, message string) {
+func (handler *INOLanguageServer) showMessage(logger streams.PrefixLogger, msgType lsp.MessageType, message string) {
 	defer streams.CatchAndLogPanic()
 
 	params := lsp.ShowMessageParams{
 		Type:    msgType,
 		Message: message,
 	}
-	if err := handler.IDEConn.SendNotification("window/showMessage", lsp.EncodeMessage(params)); err != nil {
+
+	method := "window/showMessage"
+	logger("IDE <-- LS NOTIF %s:", method)
+	if err := handler.IDEConn.SendNotification(method, lsp.EncodeMessage(params)); err != nil {
 		// TODO: Log?
 	}
 }
