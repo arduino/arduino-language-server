@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/fatih/color"
 	"go.bug.st/json"
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
@@ -19,7 +20,11 @@ func NewIDELSPServer(logger jsonrpc.FunctionLogger, in io.Reader, out io.Writer,
 		ls: ls,
 	}
 	server.conn = lsp.NewServer(in, out, server)
-	server.conn.SetLogger(&LSPLogger{IncomingPrefix: "IDE --> LS", OutgoingPrefix: "IDE <-- LS"})
+	server.conn.SetLogger(&LSPLogger{
+		IncomingPrefix: "IDE --> LS",
+		OutgoingPrefix: "IDE <-- LS",
+		HiColor:        color.HiGreenString,
+		LoColor:        color.GreenString})
 	return server
 }
 

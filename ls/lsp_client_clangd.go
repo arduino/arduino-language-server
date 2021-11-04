@@ -10,6 +10,7 @@ import (
 	"github.com/arduino/arduino-cli/executils"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
+	"github.com/fatih/color"
 	"go.bug.st/json"
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
@@ -38,7 +39,11 @@ func NewClangdLSPClient(
 		ls: inoLanguageServer,
 	}
 	client.conn = lsp.NewClient(clangdStdio, clangdStdio, client)
-	client.conn.SetLogger(&LSPLogger{IncomingPrefix: "IDE     LS <-- Clangd", OutgoingPrefix: "IDE     LS --> Clangd"})
+	client.conn.SetLogger(&LSPLogger{
+		IncomingPrefix: "IDE     LS <-- Clangd",
+		OutgoingPrefix: "IDE     LS --> Clangd",
+		HiColor:        color.HiRedString,
+		LoColor:        color.RedString})
 	return client
 }
 
