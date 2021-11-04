@@ -73,7 +73,8 @@ func (client *ClangdLSPClient) Run() {
 }
 
 func (client *ClangdLSPClient) Close() {
-	panic("unimplemented")
+	client.conn.Exit() // send "exit" notification to Clangd
+	// TODO: kill client.conn
 }
 
 // The following are events incoming from Clangd

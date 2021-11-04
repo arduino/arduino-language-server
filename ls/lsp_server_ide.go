@@ -32,7 +32,7 @@ func (server *IDELSPServer) Initialize(ctx context.Context, logger jsonrpc.Funct
 }
 
 func (server *IDELSPServer) Shutdown(ctx context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
-	panic("unimplemented")
+	return server.ls.ShutdownReqFromIDE(ctx, logger)
 }
 
 func (server *IDELSPServer) WorkspaceSymbol(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkspaceSymbolParams) ([]lsp.SymbolInformation, *jsonrpc.ResponseError) {
@@ -206,7 +206,7 @@ func (server *IDELSPServer) Initialized(logger jsonrpc.FunctionLogger, params *l
 }
 
 func (server *IDELSPServer) Exit(logger jsonrpc.FunctionLogger) {
-	panic("unimplemented")
+	server.ls.ExitNotifFromIDE(logger)
 }
 
 func (server *IDELSPServer) SetTrace(logger jsonrpc.FunctionLogger, params *lsp.SetTraceParams) {

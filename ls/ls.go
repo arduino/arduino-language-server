@@ -308,6 +308,14 @@ func (handler *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logg
 	return resp, nil
 }
 
+func (ls *INOLanguageServer) ShutdownReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
+	logger.Logf("Sending shutdown notification to clangd...")
+	ls.Clangd.conn.Shutdown(context.Background())
+	logger.Logf("Arduino Language Server is shutting down.")
+	ls.Close()
+	return nil
+}
+
 func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.CompletionParams) (*lsp.CompletionList, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -812,6 +820,10 @@ func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.C
 }
 
 func (ls *INOLanguageServer) InitializedNotifFromIDE(logger jsonrpc.FunctionLogger, params *lsp.InitializedParams) {
+	logger.Logf("Notification is not propagated to clangd")
+}
+
+func (ls *INOLanguageServer) ExitNotifFromIDE(logger jsonrpc.FunctionLogger) {
 	logger.Logf("Notification is not propagated to clangd")
 }
 
