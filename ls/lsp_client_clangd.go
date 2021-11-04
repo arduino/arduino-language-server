@@ -20,9 +20,9 @@ type ClangdLSPClient struct {
 	ls   *INOLanguageServer
 }
 
-func NewClangdLSPClient(logger jsonrpc.FunctionLogger,
+func NewClangdLSPClient(
+	logger jsonrpc.FunctionLogger,
 	buildPath, buildSketchCpp, dataFolder *paths.Path,
-	connectionClosedCB func(),
 	inoLanguageServer *INOLanguageServer,
 ) *ClangdLSPClient {
 	clangdStdout, clangdStdin, clangdStderr := startClangd(logger, buildPath, buildSketchCpp, dataFolder)
@@ -39,12 +39,6 @@ func NewClangdLSPClient(logger jsonrpc.FunctionLogger,
 	}
 	client.conn = lsp.NewClient(clangdStdio, clangdStdio, client)
 	client.conn.SetLogger(&LSPLogger{IncomingPrefix: "IDE     LS <-- Clangd", OutgoingPrefix: "IDE     LS --> Clangd"})
-	go func() {
-		defer streams.CatchAndLogPanic()
-		client.conn.Run()
-		connectionClosedCB()
-	}()
-
 	return client
 }
 
@@ -74,6 +68,10 @@ func startClangd(logger jsonrpc.FunctionLogger, compileCommandsDir, sketchCpp, d
 	}
 }
 
+func (client *ClangdLSPClient) Run() {
+	client.conn.Run()
+}
+
 func (client *ClangdLSPClient) Close() {
 	panic("unimplemented")
 }
@@ -89,7 +87,7 @@ func (client *ClangdLSPClient) WindowShowDocument(context.Context, jsonrpc.Funct
 }
 
 func (client *ClangdLSPClient) WindowWorkDoneProgressCreate(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
-	return client.ls.WindowWorkDoneProgressCreateFromClangd(ctx, logger, params)
+	return client.ls.WindowWorkDoneProgressCreateReqFromClangd(ctx, logger, params)
 }
 
 func (client *ClangdLSPClient) ClientRegisterCapability(context.Context, jsonrpc.FunctionLogger, *lsp.RegistrationParams) *jsonrpc.ResponseError {
@@ -117,7 +115,7 @@ func (client *ClangdLSPClient) WorkspaceCodeLensRefresh(context.Context, jsonrpc
 }
 
 func (client *ClangdLSPClient) Progress(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
-	client.ls.ProgressFromClangd(logger, progress)
+	client.ls.ProgressNotifFromClangd(logger, progress)
 }
 
 func (client *ClangdLSPClient) LogTrace(jsonrpc.FunctionLogger, *lsp.LogTraceParams) {
@@ -137,5 +135,5 @@ func (client *ClangdLSPClient) TelemetryEvent(jsonrpc.FunctionLogger, json.RawMe
 }
 
 func (client *ClangdLSPClient) TextDocumentPublishDiagnostics(logger jsonrpc.FunctionLogger, params *lsp.PublishDiagnosticsParams) {
-	client.ls.PublishDiagnosticsFromClangd(logger, params)
+	client.ls.PublishDiagnosticsNotifFromClangd(logger, params)
 }
