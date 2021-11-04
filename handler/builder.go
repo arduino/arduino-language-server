@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"go.bug.st/json"
 	"go.bug.st/lsp"
+	"go.bug.st/lsp/jsonrpc"
 )
 
 func (handler *INOLanguageServer) scheduleRebuildEnvironment() {
@@ -23,8 +24,7 @@ func (handler *INOLanguageServer) scheduleRebuildEnvironment() {
 }
 
 func (handler *INOLanguageServer) rebuildEnvironmentLoop() {
-	defer streams.CatchAndLogPanic()
-	logger := streams.NewPrefixLogger(color.New(color.FgHiMagenta), "RBLD---")
+	logger := NewLSPFunctionLogger(color.HiMagentaString, "RBLD---")
 
 	grabDeadline := func() *time.Time {
 		handler.rebuildSketchDeadlineMutex.Lock()
@@ -85,7 +85,7 @@ func (handler *INOLanguageServer) rebuildEnvironmentLoop() {
 	}
 }
 
-func (handler *INOLanguageServer) generateBuildEnvironment(logger streams.PrefixLogger, buildPath *paths.Path) error {
+func (handler *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.FunctionLogger, buildPath *paths.Path) error {
 	sketchDir := handler.sketchRoot
 	fqbn := handler.config.SelectedBoard.Fqbn
 
@@ -130,7 +130,7 @@ func (handler *INOLanguageServer) generateBuildEnvironment(logger streams.Prefix
 	cmdOutput := &bytes.Buffer{}
 	cmd.RedirectStdoutTo(cmdOutput)
 	cmd.SetDirFromPath(sketchDir)
-	logger("running: %s", strings.Join(args, " "))
+	logger.Logf("running: %s", strings.Join(args, " "))
 	if err := cmd.Run(); err != nil {
 		return errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 	}
@@ -150,7 +150,7 @@ func (handler *INOLanguageServer) generateBuildEnvironment(logger streams.Prefix
 	if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
 		return errors.Errorf("parsing arduino-cli output: %s", err)
 	}
-	logger("arduino-cli output: %s", cmdOutput)
+	logger.Logf("arduino-cli output: %s", cmdOutput)
 
 	return nil
 }

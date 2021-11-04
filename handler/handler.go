@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -44,13 +43,10 @@ func Setup(cliPath, cliConfigPath, clangdPath, formatFilePath string, _enableLog
 	enableLogging = _enableLogging
 }
 
-// CLangdStarter starts clangd and returns its stdin/out/err
-type CLangdStarter func() (stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser)
-
 // INOLanguageServer is a JSON-RPC handler that delegates messages to clangd.
 type INOLanguageServer struct {
-	IDEConn    *jsonrpc.Connection
-	ClangdConn *jsonrpc.Connection
+	IDEConn *lsp.Server
+	Clangd  *ClangdClient
 
 	progressHandler *ProgressProxyHandler
 
@@ -65,15 +61,15 @@ type INOLanguageServer struct {
 	buildSketchSymbols         []lsp.DocumentSymbol
 	buildSketchIncludesCanary  string
 	buildSketchSymbolsCanary   string
-	buildSketchSymbolsLoad     bool
-	buildSketchSymbolsCheck    bool
+	buildSketchSymbolsLoad     chan bool
+	buildSketchSymbolsCheck    chan bool
 	rebuildSketchDeadline      *time.Time
 	rebuildSketchDeadlineMutex sync.Mutex
 	sketchRoot                 *paths.Path
 	sketchName                 string
 	sketchMapper               *sourcemapper.InoMapper
 	sketchTrackedFilesCount    int
-	docs                       map[string]*lsp.TextDocumentItem
+	docs                       map[string]lsp.TextDocumentItem
 	inoDocsWithDiagnostics     map[lsp.DocumentURI]bool
 
 	config BoardConfig
@@ -93,56 +89,56 @@ type Board struct {
 
 var yellow = color.New(color.FgHiYellow)
 
-func (handler *INOLanguageServer) writeLock(logger streams.PrefixLogger, requireClangd bool) {
+func (handler *INOLanguageServer) writeLock(logger jsonrpc.FunctionLogger, requireClangd bool) {
 	handler.dataMux.Lock()
-	logger(yellow.Sprintf("write-locked"))
+	logger.Logf(yellow.Sprintf("write-locked"))
 	if requireClangd {
 		handler.waitClangdStart(logger)
 	}
 }
 
-func (handler *INOLanguageServer) writeUnlock(logger streams.PrefixLogger) {
-	logger(yellow.Sprintf("write-unlocked"))
+func (handler *INOLanguageServer) writeUnlock(logger jsonrpc.FunctionLogger) {
+	logger.Logf(yellow.Sprintf("write-unlocked"))
 	handler.dataMux.Unlock()
 }
 
-func (handler *INOLanguageServer) readLock(logger streams.PrefixLogger, requireClangd bool) {
+func (handler *INOLanguageServer) readLock(logger jsonrpc.FunctionLogger, requireClangd bool) {
 	handler.dataMux.RLock()
-	logger(yellow.Sprintf("read-locked"))
+	logger.Logf(yellow.Sprintf("read-locked"))
 
-	for requireClangd && handler.ClangdConn == nil {
+	for requireClangd && handler.Clangd == nil {
 		// if clangd is not started...
 
 		// Release the read lock and acquire a write lock
 		// (this is required to wait on condition variable and restart clang).
-		logger(yellow.Sprintf("clang not started: read-unlocking..."))
+		logger.Logf(yellow.Sprintf("clang not started: read-unlocking..."))
 		handler.dataMux.RUnlock()
 
 		handler.writeLock(logger, true)
 		handler.writeUnlock(logger)
 
 		handler.dataMux.RLock()
-		logger(yellow.Sprintf("testing again if clang started: read-locked..."))
+		logger.Logf(yellow.Sprintf("testing again if clang started: read-locked..."))
 	}
 }
 
-func (handler *INOLanguageServer) readUnlock(logger streams.PrefixLogger) {
-	logger(yellow.Sprintf("read-unlocked"))
+func (handler *INOLanguageServer) readUnlock(logger jsonrpc.FunctionLogger) {
+	logger.Logf(yellow.Sprintf("read-unlocked"))
 	handler.dataMux.RUnlock()
 }
 
-func (handler *INOLanguageServer) waitClangdStart(logger streams.PrefixLogger) error {
-	if handler.ClangdConn != nil {
+func (handler *INOLanguageServer) waitClangdStart(logger jsonrpc.FunctionLogger) error {
+	if handler.Clangd != nil {
 		return nil
 	}
 
-	logger("(throttled: waiting for clangd)")
-	logger(yellow.Sprintf("unlocked (waiting clangd)"))
+	logger.Logf("(throttled: waiting for clangd)")
+	logger.Logf(yellow.Sprintf("unlocked (waiting clangd)"))
 	handler.clangdStarted.Wait()
-	logger(yellow.Sprintf("locked (waiting clangd)"))
+	logger.Logf(yellow.Sprintf("locked (waiting clangd)"))
 
-	if handler.ClangdConn == nil {
-		logger("clangd startup failed: aborting call")
+	if handler.Clangd == nil {
+		logger.Logf("clangd startup failed: aborting call")
 		return errors.New("could not start clangd, aborted")
 	}
 	return nil
@@ -150,11 +146,13 @@ func (handler *INOLanguageServer) waitClangdStart(logger streams.PrefixLogger) e
 
 // NewINOLanguageServer creates and configures an Arduino Language Server.
 func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLanguageServer {
-	logger := streams.NewPrefixLogger(color.New(color.FgWhite), "LS: ")
+	logger := NewLSPFunctionLogger(color.HiWhiteString, "LS: ")
 	handler := &INOLanguageServer{
-		docs:                   map[string]*lsp.TextDocumentItem{},
-		inoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
-		closing:                make(chan bool),
+		docs:                    map[string]lsp.TextDocumentItem{},
+		inoDocsWithDiagnostics:  map[lsp.DocumentURI]bool{},
+		closing:                 make(chan bool),
+		buildSketchSymbolsLoad:  make(chan bool, 1),
+		buildSketchSymbolsCheck: make(chan bool, 1),
 		config: BoardConfig{
 			SelectedBoard: board,
 		},
@@ -168,43 +166,1038 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLa
 		handler.buildSketchRoot = handler.buildPath.Join("sketch")
 	}
 	if enableLogging {
-		logger("Initial board configuration: %s", board)
-		logger("Language server build path: %s", handler.buildPath)
-		logger("Language server build sketch root: %s", handler.buildSketchRoot)
+		logger.Logf("Initial board configuration: %s", board)
+		logger.Logf("Language server build path: %s", handler.buildPath)
+		logger.Logf("Language server build sketch root: %s", handler.buildSketchRoot)
 	}
 
-	jsonrpcLogger := streams.NewJsonRPCLogger("IDE", "LS")
-	handler.IDEConn = jsonrpc.NewConnection(stdin, stdout,
-		func(ctx context.Context, method string, params json.RawMessage, respCallback func(result json.RawMessage, err *jsonrpc.ResponseError)) {
-			reqLogger, idx := jsonrpcLogger.LogClientRequest(method, params)
-			handler.HandleMessageFromIDE(ctx, reqLogger, method, params, func(result json.RawMessage, err *jsonrpc.ResponseError) {
-				jsonrpcLogger.LogServerResponse(idx, method, result, err)
-				respCallback(result, err)
-			})
-		},
-		func(ctx context.Context, method string, params json.RawMessage) {
-			notifLogger := jsonrpcLogger.LogClientNotification(method, params)
-			handler.HandleNotificationFromIDE(ctx, notifLogger, method, params)
-		},
-		func(e error) {},
-	)
+	handler.IDEConn = lsp.NewServer(stdin, stdout, handler)
+	handler.IDEConn.SetLogger(&LSPLogger{IncomingPrefix: "IDE --> LS", OutgoingPrefix: "IDE <-- LS"})
+	handler.progressHandler = NewProgressProxy(handler.IDEConn)
+
 	go func() {
+		defer streams.CatchAndLogPanic()
 		handler.IDEConn.Run()
-		logger("Lost connection with IDE!")
+		logger.Logf("Lost connection with IDE!")
 		handler.Close()
 	}()
 
-	handler.progressHandler = NewProgressProxy(handler.IDEConn)
+	go func() {
+		defer streams.CatchAndLogPanic()
+		for {
+			select {
+			case <-handler.buildSketchSymbolsLoad:
+				// ...also un-queue buildSketchSymbolsCheck
+				select {
+				case <-handler.buildSketchSymbolsCheck:
+				default:
+				}
+				handler.LoadCppDocumentSymbols()
 
-	go handler.rebuildEnvironmentLoop()
+			case <-handler.buildSketchSymbolsCheck:
+				handler.CheckCppDocumentSymbols()
+
+			case <-handler.closing:
+				return
+			}
+		}
+	}()
+
+	go func() {
+		defer streams.CatchAndLogPanic()
+		handler.rebuildEnvironmentLoop()
+	}()
 	return handler
+}
+
+func (handler *INOLanguageServer) queueLoadCppDocumentSymbols() {
+	select {
+	case handler.buildSketchSymbolsLoad <- true:
+	default:
+	}
+}
+
+func (handler *INOLanguageServer) queueCheckCppDocumentSymbols() {
+	select {
+	case handler.buildSketchSymbolsCheck <- true:
+	default:
+	}
+}
+
+func (handler *INOLanguageServer) LoadCppDocumentSymbols() error {
+	logger := NewLSPFunctionLogger(color.HiBlueString, "SYLD --- ")
+	defer logger.Logf("(done)")
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	return handler.refreshCppDocumentSymbols(logger)
+}
+
+func (handler *INOLanguageServer) CheckCppDocumentSymbols() error {
+	logger := NewLSPFunctionLogger(color.HiBlueString, "SYCK --- ")
+	defer logger.Logf("(done)")
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	oldSymbols := handler.buildSketchSymbols
+	canary := handler.buildSketchSymbolsCanary
+	if err := handler.refreshCppDocumentSymbols(logger); err != nil {
+		return err
+	}
+	if len(oldSymbols) != len(handler.buildSketchSymbols) || canary != handler.buildSketchSymbolsCanary {
+		logger.Logf("function symbols change detected, triggering sketch rebuild!")
+		handler.scheduleRebuildEnvironment()
+	}
+	return nil
+}
+
+func (handler *INOLanguageServer) startClangd(inoParams *lsp.InitializeParams) {
+	logger := NewLSPFunctionLogger(color.HiCyanString, "INIT --- ")
+	logger.Logf("initializing workbench")
+
+	// Start clangd asynchronously
+	handler.writeLock(logger, false) // do not wait for clangd... we are starting it :-)
+	defer handler.writeUnlock(logger)
+
+	// TODO: Inline this function
+	handler.initializeWorkbench(logger, inoParams)
+
+	// signal that clangd is running now...
+	handler.clangdStarted.Broadcast()
+
+	logger.Logf("Done initializing workbench")
+}
+
+func (handler *INOLanguageServer) Initialize(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
+	go func() {
+		defer streams.CatchAndLogPanic()
+		handler.startClangd(inoParams)
+	}()
+
+	resp := &lsp.InitializeResult{
+		Capabilities: lsp.ServerCapabilities{
+			TextDocumentSync: &lsp.TextDocumentSyncOptions{
+				OpenClose: true,
+				Change:    lsp.TextDocumentSyncKindIncremental,
+				Save: &lsp.SaveOptions{
+					IncludeText: true,
+				},
+			},
+			HoverProvider: &lsp.HoverOptions{}, // true,
+			CompletionProvider: &lsp.CompletionOptions{
+				TriggerCharacters: []string{".", "\u003e", ":"},
+			},
+			SignatureHelpProvider: &lsp.SignatureHelpOptions{
+				TriggerCharacters: []string{"(", ","},
+			},
+			DefinitionProvider: &lsp.DefinitionOptions{}, // true,
+			// ReferencesProvider:              &lsp.ReferenceOptions{},  // TODO: true
+			DocumentHighlightProvider:       &lsp.DocumentHighlightOptions{}, //true,
+			DocumentSymbolProvider:          &lsp.DocumentSymbolOptions{},    //true,
+			WorkspaceSymbolProvider:         &lsp.WorkspaceSymbolOptions{},   //true,
+			CodeActionProvider:              &lsp.CodeActionOptions{ResolveProvider: true},
+			DocumentFormattingProvider:      &lsp.DocumentFormattingOptions{},      //true,
+			DocumentRangeFormattingProvider: &lsp.DocumentRangeFormattingOptions{}, //true,
+			DocumentOnTypeFormattingProvider: &lsp.DocumentOnTypeFormattingOptions{
+				FirstTriggerCharacter: "\n",
+			},
+			RenameProvider: &lsp.RenameOptions{PrepareProvider: false}, // TODO: true
+			ExecuteCommandProvider: &lsp.ExecuteCommandOptions{
+				Commands: []string{"clangd.applyFix", "clangd.applyTweak"},
+			},
+		},
+	}
+	logger.Logf("initialization parameters: %s", string(lsp.EncodeMessage(resp)))
+	return resp, nil
+}
+
+func (handler *INOLanguageServer) Shutdown(context.Context, jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceSymbol(context.Context, jsonrpc.FunctionLogger, *lsp.WorkspaceSymbolParams) ([]lsp.SymbolInformation, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceExecuteCommand(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.ExecuteCommandParams) (json.RawMessage, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+	// return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesMethodNotFound, Message: "Unimplemented"}
+	// err = handler.ino2cppExecuteCommand(inoParams)
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceWillCreateFiles(context.Context, jsonrpc.FunctionLogger, *lsp.CreateFilesParams) (*lsp.WorkspaceEdit, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceWillRenameFiles(context.Context, jsonrpc.FunctionLogger, *lsp.RenameFilesParams) (*lsp.WorkspaceEdit, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceWillDeleteFiles(context.Context, jsonrpc.FunctionLogger, *lsp.DeleteFilesParams) (*lsp.WorkspaceEdit, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentWillSaveWaitUntil(context.Context, jsonrpc.FunctionLogger, *lsp.WillSaveTextDocumentParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentCompletion(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.CompletionParams) (*lsp.CompletionList, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	logger.Logf("--> completion(%s)\n", inoParams.TextDocument)
+	cppTextDocPositionParams, err := handler.ino2cppTextDocumentPositionParams(logger, inoParams.TextDocumentPositionParams)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+
+	cppParams := inoParams
+	cppParams.TextDocumentPositionParams = cppTextDocPositionParams
+	logger.Logf("    --> completion(%s)\n", inoParams.TextDocument)
+	inoURI := inoParams.TextDocument.URI
+
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+
+	clangResp, clangErr, err := handler.Clangd.conn.TextDocumentCompletion(ctx, cppParams)
+	if err != nil {
+		logger.Logf("clangd connection error: %v", err)
+		handler.Close()
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if clangErr != nil {
+		logger.Logf("clangd response error: %v", clangErr.AsError())
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
+	}
+
+	cppToIno := inoURI != lsp.NilURI && inoURI.AsPath().EquivalentTo(handler.buildSketchCpp)
+
+	inoResp := *clangResp
+	inoItems := make([]lsp.CompletionItem, 0)
+	for _, item := range clangResp.Items {
+		if !strings.HasPrefix(item.InsertText, "_") {
+			if cppToIno && item.TextEdit != nil {
+				_, item.TextEdit.Range = handler.sketchMapper.CppToInoRange(item.TextEdit.Range)
+			}
+			inoItems = append(inoItems, item)
+		}
+	}
+	inoResp.Items = inoItems
+	logger.Logf("<-- completion(%d items) cppToIno=%v", len(inoResp.Items), cppToIno)
+	return &inoResp, nil
+}
+
+func (handler *INOLanguageServer) CompletionItemResolve(context.Context, jsonrpc.FunctionLogger, *lsp.CompletionItem) (*lsp.CompletionItem, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentHover(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.HoverParams) (*lsp.Hover, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	inoURI := inoParams.TextDocument.URI
+	inoTextDocPosition := inoParams.TextDocumentPositionParams
+	logger.Logf("--> hover(%s)\n", inoTextDocPosition)
+
+	cppTextDocPosition, err := handler.ino2cppTextDocumentPositionParams(logger, inoTextDocPosition)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+
+	logger.Logf("    --> hover(%s)\n", cppTextDocPosition)
+	cppParams := &lsp.HoverParams{
+		TextDocumentPositionParams: cppTextDocPosition,
+	}
+	clangResp, clangErr, err := handler.Clangd.conn.TextDocumentHover(ctx, cppParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if clangErr != nil {
+		logger.Logf("clangd response error: %v", clangErr.AsError())
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
+	}
+
+	if clangResp == nil {
+		return nil, nil
+	}
+
+	inoResp := *clangResp
+	// TODO: ????
+	// if len(clangResp.Contents.Value) == 0 {
+	// 	return nil
+	// }
+	cppToIno := inoURI != lsp.NilURI && inoURI.AsPath().EquivalentTo(handler.buildSketchCpp)
+	if cppToIno {
+		_, inoRange := handler.sketchMapper.CppToInoRange(*clangResp.Range)
+		inoResp.Range = &inoRange
+	}
+	logger.Logf("<-- hover(%s)", strconv.Quote(inoResp.Contents.Value))
+	return &inoResp, nil
+}
+
+func (handler *INOLanguageServer) TextDocumentSignatureHelp(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.SignatureHelpParams) (*lsp.SignatureHelp, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	inoTextDocumentPosition := inoParams.TextDocumentPositionParams
+
+	logger.Logf("%s", inoTextDocumentPosition)
+	cppTextDocumentPosition, err := handler.ino2cppTextDocumentPositionParams(logger, inoTextDocumentPosition)
+	if err == nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+
+	logger.Logf("-> %s", cppTextDocumentPosition)
+	cppParams := *inoParams
+	cppParams.TextDocumentPositionParams = cppTextDocumentPosition
+	cppSignatureHelp, cppErr, err := handler.Clangd.conn.TextDocumentSignatureHelp(ctx, inoParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if cppErr != nil {
+		logger.Logf("clangd response error: %v", cppErr.AsError())
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: cppErr.AsError().Error()}
+	}
+
+	// No need to convert back to inoSignatureHelp
+
+	return cppSignatureHelp, nil
+}
+
+func (handler *INOLanguageServer) TextDocumentDeclaration(context.Context, jsonrpc.FunctionLogger, *lsp.DeclarationParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentDefinition(ctx context.Context, logger jsonrpc.FunctionLogger, p *lsp.DefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	inoTextDocPosition := p.TextDocumentPositionParams
+
+	logger.Logf("%s", inoTextDocPosition)
+	cppTextDocPosition, err := handler.ino2cppTextDocumentPositionParams(logger, inoTextDocPosition)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+
+	logger.Logf("-> %s", cppTextDocPosition)
+	cppParams := *p
+	cppParams.TextDocumentPositionParams = cppTextDocPosition
+	cppLocations, cppLocationLinks, cppErr, err := handler.Clangd.conn.TextDocumentDefinition(ctx, &cppParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if cppErr != nil {
+		logger.Logf("clangd response error: %v", cppErr.AsError())
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: cppErr.AsError().Error()}
+	}
+
+	var inoLocations []lsp.Location
+	if cppLocations != nil {
+		inoLocations, err = handler.cpp2inoLocationArray(logger, cppLocations)
+		if err != nil {
+			handler.Close()
+			return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+		}
+	}
+
+	var inoLocationLinks []lsp.LocationLink
+	if cppLocationLinks != nil {
+		panic("unimplemented")
+	}
+
+	return inoLocations, inoLocationLinks, nil
+}
+
+func (handler *INOLanguageServer) cpp2inoLocationArray(logger jsonrpc.FunctionLogger, cppLocations []lsp.Location) ([]lsp.Location, error) {
+	inoLocations := []lsp.Location{}
+	for _, cppLocation := range cppLocations {
+		inoLocation, err := handler.cpp2inoLocation(logger, cppLocation)
+		if err != nil {
+			logger.Logf("ERROR converting location %s: %s", cppLocation, err)
+			return nil, err
+		}
+		inoLocations = append(inoLocations, inoLocation)
+	}
+	return inoLocations, nil
+}
+
+func (handler *INOLanguageServer) TextDocumentTypeDefinition(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.TypeDefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	inoTextDocumentPosition := inoParams.TextDocumentPositionParams
+
+	logger.Logf("%s", inoTextDocumentPosition)
+	// inoURI := inoTextDocumentPosition.TextDocument.URI
+	cppTextDocumentPosition, err := handler.ino2cppTextDocumentPositionParams(logger, inoTextDocumentPosition)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+
+	// cppURI := cppTextDocumentPosition.TextDocument.URI
+	logger.Logf("-> %s", cppTextDocumentPosition)
+
+	cppParams := *inoParams
+	cppParams.TextDocumentPositionParams = cppTextDocumentPosition
+	cppLocations, cppLocationLinks, cppErr, err := handler.Clangd.conn.TextDocumentTypeDefinition(ctx, &cppParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if cppErr != nil {
+		logger.Logf("clangd response error: %v", cppErr.AsError())
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: cppErr.AsError().Error()}
+	}
+
+	var inoLocations []lsp.Location
+	if cppLocations != nil {
+		inoLocations, err = handler.cpp2inoLocationArray(logger, cppLocations)
+		if err != nil {
+			handler.Close()
+			return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+		}
+	}
+
+	var inoLocationLinks []lsp.LocationLink
+	if cppLocationLinks != nil {
+		panic("unimplemented")
+	}
+
+	return inoLocations, inoLocationLinks, nil
+}
+
+func (handler *INOLanguageServer) TextDocumentImplementation(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.ImplementationParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	inoTextDocumentPosition := inoParams.TextDocumentPositionParams
+	logger.Logf("%s", inoTextDocumentPosition)
+
+	cppTextDocumentPosition, err := handler.ino2cppTextDocumentPositionParams(logger, inoTextDocumentPosition)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+
+	logger.Logf("-> %s", cppTextDocumentPosition)
+	cppParams := *inoParams
+	cppParams.TextDocumentPositionParams = cppTextDocumentPosition
+	cppLocations, cppLocationLinks, cppErr, err := handler.Clangd.conn.TextDocumentImplementation(ctx, &cppParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if cppErr != nil {
+		logger.Logf("clangd response error: %v", cppErr.AsError())
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: cppErr.AsError().Error()}
+	}
+
+	var inoLocations []lsp.Location
+	if cppLocations != nil {
+		inoLocations, err = handler.cpp2inoLocationArray(logger, cppLocations)
+		if err != nil {
+			handler.Close()
+			return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+		}
+	}
+
+	var inoLocationLinks []lsp.LocationLink
+	if cppLocationLinks != nil {
+		panic("unimplemented")
+	}
+
+	return inoLocations, inoLocationLinks, nil
+}
+
+func (handler *INOLanguageServer) TextDocumentReferences(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.ReferenceParams) ([]lsp.Location, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+	panic("unimplemented")
+	// inoURI = p.TextDocument.URI
+	// _, err = handler.ino2cppTextDocumentPositionParams(logger, p.TextDocumentPositionParams)
+}
+
+func (handler *INOLanguageServer) TextDocumentDocumentHighlight(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentHighlightParams) ([]lsp.DocumentHighlight, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	inoTextDocumentPosition := inoParams.TextDocumentPositionParams
+	cppTextDocumentPosition, err := handler.ino2cppTextDocumentPositionParams(logger, inoTextDocumentPosition)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	cppURI := cppTextDocumentPosition.TextDocument.URI
+
+	cppParams := *inoParams
+	cppParams.TextDocumentPositionParams = cppTextDocumentPosition
+	cppHighlights, clangErr, err := handler.Clangd.conn.TextDocumentDocumentHighlight(ctx, &cppParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if clangErr != nil {
+		logger.Logf("clangd response error: %v", clangErr.AsError())
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
+	}
+
+	if cppHighlights != nil {
+		return nil, nil
+	}
+
+	inoHighlights := []lsp.DocumentHighlight{}
+	for _, cppHighlight := range cppHighlights {
+		inoHighlight, err := handler.cpp2inoDocumentHighlight(logger, cppHighlight, cppURI)
+		if err != nil {
+			logger.Logf("ERROR converting location %s:%s: %s", cppURI, cppHighlight.Range, err)
+			return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
+		}
+		inoHighlights = append(inoHighlights, inoHighlight)
+	}
+	return inoHighlights, nil
+}
+
+func (handler *INOLanguageServer) TextDocumentDocumentSymbol(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentSymbolParams) ([]lsp.DocumentSymbol, []lsp.SymbolInformation, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	inoTextDocument := inoParams.TextDocument
+	inoURI := inoTextDocument.URI
+	logger.Logf("--> %s")
+
+	cppTextDocument, err := handler.ino2cppTextDocumentIdentifier(logger, inoTextDocument)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+
+	cppParams := *inoParams
+	cppParams.TextDocument = cppTextDocument
+	logger.Logf("    --> documentSymbol(%s)", cppTextDocument)
+	cppDocSymbols, cppSymbolInformation, clangErr, err := handler.Clangd.conn.TextDocumentDocumentSymbol(ctx, &cppParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if clangErr != nil {
+		logger.Logf("clangd response error: %v", clangErr.AsError())
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
+	}
+
+	var inoDocSymbols []lsp.DocumentSymbol
+	if cppDocSymbols != nil {
+		logger.Logf("    <-- documentSymbol(%d document symbols)", len(cppDocSymbols))
+		inoDocSymbols = handler.cpp2inoDocumentSymbols(logger, cppDocSymbols, inoURI)
+	}
+	var inoSymbolInformation []lsp.SymbolInformation
+	if cppSymbolInformation != nil {
+		logger.Logf("    <-- documentSymbol(%d symbol information)", len(cppSymbolInformation))
+		inoSymbolInformation = handler.cpp2inoSymbolInformation(cppSymbolInformation)
+	}
+	return inoDocSymbols, inoSymbolInformation, nil
+}
+
+func (handler *INOLanguageServer) TextDocumentCodeAction(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.CodeActionParams) ([]lsp.CommandOrCodeAction, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	inoTextDocument := inoParams.TextDocument
+	inoURI := inoTextDocument.URI
+	logger.Logf("--> codeAction(%s:%s)", inoTextDocument, inoParams.Range.Start)
+
+	cppParams := *inoParams
+	cppTextDocument, err := handler.ino2cppTextDocumentIdentifier(logger, inoTextDocument)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	cppParams.TextDocument = cppTextDocument
+
+	if cppTextDocument.URI.AsPath().EquivalentTo(handler.buildSketchCpp) {
+		cppParams.Range = handler.sketchMapper.InoToCppLSPRange(inoURI, inoParams.Range)
+		for i, inoDiag := range inoParams.Context.Diagnostics {
+			cppParams.Context.Diagnostics[i].Range = handler.sketchMapper.InoToCppLSPRange(inoURI, inoDiag.Range)
+		}
+	}
+	logger.Logf("    --> codeAction(%s:%s)", cppParams.TextDocument, inoParams.Range.Start)
+
+	cppResp, cppErr, err := handler.Clangd.conn.TextDocumentCodeAction(ctx, &cppParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if cppErr != nil {
+		logger.Logf("clangd response error: %v", cppErr.AsError())
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: cppErr.AsError().Error()}
+	}
+
+	// TODO: Create a function for this one?
+	inoResp := []lsp.CommandOrCodeAction{}
+	if cppResp != nil {
+		logger.Logf("    <-- codeAction(%d elements)", len(cppResp))
+		for _, cppItem := range cppResp {
+			inoItem := lsp.CommandOrCodeAction{}
+			switch i := cppItem.Get().(type) {
+			case lsp.Command:
+				logger.Logf("        > Command: %s", i.Title)
+				inoItem.Set(handler.cpp2inoCommand(logger, i))
+			case lsp.CodeAction:
+				logger.Logf("        > CodeAction: %s", i.Title)
+				inoItem.Set(handler.cpp2inoCodeAction(logger, i, inoURI))
+			}
+			inoResp = append(inoResp, inoItem)
+		}
+		logger.Logf("<-- codeAction(%d elements)", len(inoResp))
+	}
+	return inoResp, nil
+}
+
+func (handler *INOLanguageServer) CodeActionResolve(context.Context, jsonrpc.FunctionLogger, *lsp.CodeAction) (*lsp.CodeAction, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentCodeLens(context.Context, jsonrpc.FunctionLogger, *lsp.CodeLensParams) ([]lsp.CodeLens, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) CodeLensResolve(context.Context, jsonrpc.FunctionLogger, *lsp.CodeLens) (*lsp.CodeLens, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentDocumentLink(context.Context, jsonrpc.FunctionLogger, *lsp.DocumentLinkParams) ([]lsp.DocumentLink, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) DocumentLinkResolve(context.Context, jsonrpc.FunctionLogger, *lsp.DocumentLink) (*lsp.DocumentLink, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentDocumentColor(context.Context, jsonrpc.FunctionLogger, *lsp.DocumentColorParams) ([]lsp.ColorInformation, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentColorPresentation(context.Context, jsonrpc.FunctionLogger, *lsp.ColorPresentationParams) ([]lsp.ColorPresentation, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentFormatting(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	inoTextDocument := inoParams.TextDocument
+	inoURI := inoTextDocument.URI
+	logger.Logf("--> formatting(%s)", inoTextDocument)
+
+	cppTextDocument, err := handler.ino2cppTextDocumentIdentifier(logger, inoTextDocument)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	cppURI := cppTextDocument.URI
+
+	logger.Logf("    --> formatting(%s)", cppTextDocument)
+
+	if cleanup, e := handler.createClangdFormatterConfig(logger, cppURI); e != nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	} else {
+		defer cleanup()
+	}
+
+	cppParams := *inoParams
+	cppParams.TextDocument = cppTextDocument
+	cppEdits, clangErr, err := handler.Clangd.conn.TextDocumentFormatting(ctx, &cppParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if clangErr != nil {
+		logger.Logf("clangd response error: %v", clangErr.AsError())
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
+	}
+
+	if cppEdits == nil {
+		return nil, nil
+	}
+
+	sketchEdits, err := handler.cpp2inoTextEdits(logger, cppURI, cppEdits)
+	if err != nil {
+		logger.Logf("ERROR converting textEdits: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if inoEdits, ok := sketchEdits[inoURI]; !ok {
+		return []lsp.TextEdit{}, nil
+	} else {
+		return inoEdits, nil
+	}
+}
+
+func (handler *INOLanguageServer) TextDocumentRangeFormatting(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentRangeFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+
+	// Method: "textDocument/rangeFormatting"
+	logger.Logf("%s", inoParams.TextDocument)
+	inoURI := inoParams.TextDocument.URI
+	cppParams, err := handler.ino2cppDocumentRangeFormattingParams(logger, inoParams)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	cppURI := cppParams.TextDocument.URI
+	logger.Logf("-> %s", cppParams.TextDocument)
+	if cleanup, e := handler.createClangdFormatterConfig(logger, cppURI); e != nil {
+		logger.Logf("cannot create formatter config file: %v", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	} else {
+		defer cleanup()
+	}
+
+	cppEdits, clangErr, err := handler.Clangd.conn.TextDocumentRangeFormatting(ctx, cppParams)
+	if err != nil {
+		logger.Logf("clangd connectiono error: %v", err)
+		handler.Close()
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if clangErr != nil {
+		logger.Logf("clangd response error: %v", clangErr.AsError())
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
+	}
+
+	// Transform and return the result
+	if cppEdits != nil {
+		return nil, nil
+	}
+
+	sketchEdits, err := handler.cpp2inoTextEdits(logger, cppURI, cppEdits)
+	if err != nil {
+		logger.Logf("ERROR converting textEdits: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if inoEdits, ok := sketchEdits[inoURI]; !ok {
+		return []lsp.TextEdit{}, nil
+	} else {
+		return inoEdits, nil
+	}
+}
+
+func (handler *INOLanguageServer) TextDocumentOnTypeFormatting(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentOnTypeFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+	// return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesMethodNotFound, Message: "Unimplemented"}
+	// inoURI = p.TextDocument.URI
+	// err = handler.ino2cppDocumentOnTypeFormattingParams(p)
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentRename(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.RenameParams) (*lsp.WorkspaceEdit, *jsonrpc.ResponseError) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+	// return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesMethodNotFound, Message: "Unimplemented"}
+	// inoURI = p.TextDocument.URI
+	// err = handler.ino2cppRenameParams(p)
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentFoldingRange(context.Context, jsonrpc.FunctionLogger, *lsp.FoldingRangeParams) ([]lsp.FoldingRange, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentSelectionRange(context.Context, jsonrpc.FunctionLogger, *lsp.SelectionRangeParams) ([]lsp.SelectionRange, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentPrepareCallHierarchy(context.Context, jsonrpc.FunctionLogger, *lsp.CallHierarchyPrepareParams) ([]lsp.CallHierarchyItem, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) CallHierarchyIncomingCalls(context.Context, jsonrpc.FunctionLogger, *lsp.CallHierarchyIncomingCallsParams) ([]lsp.CallHierarchyIncomingCall, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) CallHierarchyOutgoingCalls(context.Context, jsonrpc.FunctionLogger, *lsp.CallHierarchyOutgoingCallsParams) ([]lsp.CallHierarchyOutgoingCall, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentSemanticTokensFull(context.Context, jsonrpc.FunctionLogger, *lsp.SemanticTokensParams) (*lsp.SemanticTokens, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentSemanticTokensFullDelta(context.Context, jsonrpc.FunctionLogger, *lsp.SemanticTokensDeltaParams) (*lsp.SemanticTokens, *lsp.SemanticTokensDelta, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentSemanticTokensRange(context.Context, jsonrpc.FunctionLogger, *lsp.SemanticTokensRangeParams) (*lsp.SemanticTokens, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceSemanticTokensRefresh(context.Context, jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentLinkedEditingRange(context.Context, jsonrpc.FunctionLogger, *lsp.LinkedEditingRangeParams) (*lsp.LinkedEditingRanges, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentMoniker(context.Context, jsonrpc.FunctionLogger, *lsp.MonikerParams) ([]lsp.Moniker, *jsonrpc.ResponseError) {
+	panic("unimplemented")
+}
+
+// Notifications from IDE ->
+
+func (handler *INOLanguageServer) Progress(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) Initialized(logger jsonrpc.FunctionLogger, params *lsp.InitializedParams) {
+	logger.Logf("Notification is not propagated to clangd")
+}
+
+func (handler *INOLanguageServer) Exit(jsonrpc.FunctionLogger) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) SetTrace(jsonrpc.FunctionLogger, *lsp.SetTraceParams) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WindowWorkDoneProgressCancel(jsonrpc.FunctionLogger, *lsp.WorkDoneProgressCancelParams) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceDidChangeWorkspaceFolders(jsonrpc.FunctionLogger, *lsp.DidChangeWorkspaceFoldersParams) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceDidChangeConfiguration(jsonrpc.FunctionLogger, *lsp.DidChangeConfigurationParams) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceDidChangeWatchedFiles(logger jsonrpc.FunctionLogger, inoParams *lsp.DidChangeWatchedFilesParams) {
+	handler.readLock(logger, true)
+	defer handler.readUnlock(logger)
+	// return
+	// err = handler.ino2cppDidChangeWatchedFilesParams(p)
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceDidCreateFiles(jsonrpc.FunctionLogger, *lsp.CreateFilesParams) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceDidRenameFiles(jsonrpc.FunctionLogger, *lsp.RenameFilesParams) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) WorkspaceDidDeleteFiles(jsonrpc.FunctionLogger, *lsp.DeleteFilesParams) {
+	panic("unimplemented")
+}
+
+// Notifications from Clangd <-
+
+func (handler *INOLanguageServer) PublishDiagnosticsFromClangd(logger jsonrpc.FunctionLogger, cppParams *lsp.PublishDiagnosticsParams) {
+	// Default to read lock
+	handler.readLock(logger, false)
+	defer handler.readUnlock(logger)
+
+	logger.Logf("publishDiagnostics(%s):", cppParams.URI)
+	for _, diag := range cppParams.Diagnostics {
+		logger.Logf("> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+	}
+
+	// the diagnostics on sketch.cpp.ino once mapped into their
+	// .ino counter parts may span over multiple .ino files...
+	allInoParams, err := handler.cpp2inoDiagnostics(logger, cppParams)
+	if err != nil {
+		logger.Logf("    Error converting diagnostics to .ino: %s", err)
+		return
+	}
+
+	// Push back to IDE the converted diagnostics
+	for _, inoParams := range allInoParams {
+		logger.Logf("to IDE: publishDiagnostics(%s):", inoParams.URI)
+		for _, diag := range inoParams.Diagnostics {
+			logger.Logf("> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+		}
+		logger.Logf("IDE <-- LS NOTIF textDocument/publishDiagnostics:")
+
+		if err := handler.IDEConn.TextDocumentPublishDiagnostics(inoParams); err != nil {
+			logger.Logf("    Error sending diagnostics to IDE: %s", err)
+			return
+		}
+	}
+}
+
+func (handler *INOLanguageServer) ProgressFromClangd(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
+	var token string
+	if err := json.Unmarshal(progress.Token, &token); err != nil {
+		logger.Logf("error decoding progess token: %s", err)
+		return
+	}
+	switch value := progress.TryToDecodeWellKnownValues().(type) {
+	case lsp.WorkDoneProgressBegin:
+		logger.Logf("begin %s %v", token, value)
+		handler.progressHandler.Begin(token, &value)
+	case lsp.WorkDoneProgressReport:
+		logger.Logf("report %s %v", token, value)
+		handler.progressHandler.Report(token, &value)
+	case lsp.WorkDoneProgressEnd:
+		logger.Logf("end %s %v", token, value)
+		handler.progressHandler.End(token, &value)
+	default:
+		logger.Logf("error unsupported $/progress: " + string(progress.Value))
+	}
+}
+
+// Requests from IDE <->
+
+func (handler *INOLanguageServer) TextDocumentDidOpen(logger jsonrpc.FunctionLogger, inoParam *lsp.DidOpenTextDocumentParams) {
+	handler.writeLock(logger, true)
+	defer handler.writeUnlock(logger)
+
+	// Add the TextDocumentItem in the tracked files list
+	inoTextDocItem := inoParam.TextDocument
+	handler.docs[inoTextDocItem.URI.AsPath().String()] = inoTextDocItem
+
+	// If we are tracking a .ino...
+	if inoTextDocItem.URI.Ext() == ".ino" {
+		handler.sketchTrackedFilesCount++
+		logger.Logf("Increasing .ino tracked files count to %d", handler.sketchTrackedFilesCount)
+
+		// Notify clangd that sketchCpp has been opened only once
+		if handler.sketchTrackedFilesCount != 1 {
+			logger.Logf("Clang already notified, do not notify it anymore")
+			return
+		}
+	}
+
+	if cppItem, err := handler.ino2cppTextDocumentItem(logger, inoTextDocItem); err != nil {
+		logger.Logf("Error: %s", err)
+	} else if err := handler.Clangd.conn.TextDocumentDidOpen(&lsp.DidOpenTextDocumentParams{
+		TextDocument: cppItem,
+	}); err != nil {
+		// Exit the process and trigger a restart by the client in case of a severe error
+		logger.Logf("Error sending notification to clangd server: %v", err)
+		logger.Logf("Please restart the language server.")
+		handler.Close()
+	}
+}
+
+func (handler *INOLanguageServer) TextDocumentDidChange(logger jsonrpc.FunctionLogger, inoParams *lsp.DidChangeTextDocumentParams) {
+	handler.writeLock(logger, true)
+	defer handler.writeUnlock(logger)
+
+	logger.Logf("didChange(%s)", inoParams.TextDocument)
+	for _, change := range inoParams.ContentChanges {
+		logger.Logf("> %s", change)
+	}
+
+	if cppParams, err := handler.didChange(logger, inoParams); err != nil {
+		logger.Logf("--E Error: %s", err)
+	} else if cppParams == nil {
+		logger.Logf("--X Notification is not propagated to clangd")
+	} else {
+		logger.Logf("LS --> CL NOTIF didChange(%s@%d)", cppParams.TextDocument)
+		for _, change := range cppParams.ContentChanges {
+			logger.Logf("                > %s", change)
+		}
+		if err := handler.Clangd.conn.TextDocumentDidChange(cppParams); err != nil {
+			// Exit the process and trigger a restart by the client in case of a severe error
+			logger.Logf("Connection error with clangd server: %v", err)
+			logger.Logf("Please restart the language server.")
+			handler.Close()
+		}
+	}
+}
+
+func (handler *INOLanguageServer) TextDocumentWillSave(jsonrpc.FunctionLogger, *lsp.WillSaveTextDocumentParams) {
+	panic("unimplemented")
+}
+
+func (handler *INOLanguageServer) TextDocumentDidSave(logger jsonrpc.FunctionLogger, inoParams *lsp.DidSaveTextDocumentParams) {
+	handler.writeLock(logger, true)
+	defer handler.writeUnlock(logger)
+
+	logger.Logf("didSave(%s)", inoParams.TextDocument)
+	if cppTextDocument, err := handler.ino2cppTextDocumentIdentifier(logger, inoParams.TextDocument); err != nil {
+		logger.Logf("--E Error: %s", err)
+	} else if cppTextDocument.URI.AsPath().EquivalentTo(handler.buildSketchCpp) {
+		logger.Logf("    didSave(%s) equals %s", cppTextDocument, handler.buildSketchCpp)
+		logger.Logf("--| didSave not forwarded to clangd")
+	} else {
+		logger.Logf("LS --> CL NOTIF didSave(%s)", cppTextDocument)
+		if err := handler.Clangd.conn.TextDocumentDidSave(&lsp.DidSaveTextDocumentParams{
+			TextDocument: cppTextDocument,
+			Text:         inoParams.Text,
+		}); err != nil {
+			// Exit the process and trigger a restart by the client in case of a severe error
+			logger.Logf("Connection error with clangd server: %v", err)
+			logger.Logf("Please restart the language server.")
+			handler.Close()
+		}
+	}
+}
+
+func (handler *INOLanguageServer) TextDocumentDidClose(logger jsonrpc.FunctionLogger, inoParams *lsp.DidCloseTextDocumentParams) {
+	handler.writeLock(logger, true)
+	defer handler.writeUnlock(logger)
+
+	logger.Logf("didClose(%s)", inoParams.TextDocument)
+
+	if cppParams, err := handler.didClose(logger, inoParams); err != nil {
+		logger.Logf("--E Error: %s", err)
+	} else if cppParams == nil {
+		logger.Logf("--X Notification is not propagated to clangd")
+	} else {
+		logger.Logf("--> CL NOTIF didClose(%s)", cppParams.TextDocument)
+		if err := handler.Clangd.conn.TextDocumentDidClose(cppParams); err != nil {
+			// Exit the process and trigger a restart by the client in case of a severe error
+			logger.Logf("Error sending notification to clangd server: %v", err)
+			logger.Logf("Please restart the language server.")
+			handler.Close()
+		}
+	}
+}
+
+// Requests from Clangd <->
+
+func (handler *INOLanguageServer) WindowWorkDoneProgressCreateFromClangd(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
+	var token string
+	if err := json.Unmarshal(params.Token, &token); err != nil {
+		logger.Logf("error decoding progress token: %s", err)
+		return &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	handler.progressHandler.Create(token)
+	return nil
 }
 
 // Close closes all the json-rpc connections.
 func (handler *INOLanguageServer) Close() {
-	if handler.ClangdConn != nil {
-		handler.ClangdConn.Close()
-		handler.ClangdConn = nil
+	if handler.Clangd != nil {
+		handler.Clangd.Close()
+		handler.Clangd = nil
 	}
 	if handler.closing != nil {
 		close(handler.closing)
@@ -225,450 +1218,20 @@ func (handler *INOLanguageServer) CleanUp() {
 	}
 }
 
-func (handler *INOLanguageServer) HandleNotificationFromIDE(ctx context.Context, logger streams.PrefixLogger, method string, paramsRaw json.RawMessage) {
-	defer streams.CatchAndLogPanic()
+func (handler *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, params *lsp.InitializeParams) error {
+	// TODO: This function must be split into two
+	// -> start clang (when params != nil)
+	// -> reser clang status (when params == nil)
+	// the two flows shares very little
 
-	params, err := lsp.DecodeClientNotificationParams(method, paramsRaw)
-	if err != nil {
-		// TODO: log?
-		return
-	}
-	if params == nil {
-		// TODO: log?
-		return
-	}
-
-	// Set up RWLocks and wait for clangd startup
-	switch method {
-	case "textDocument/didOpen",
-		"textDocument/didChange",
-		"textDocument/didClose":
-		// Write lock - clangd required
-		handler.writeLock(logger, true)
-		defer handler.writeUnlock(logger)
-	case "initialized":
-		// Read lock - NO clangd required
-		handler.readLock(logger, false)
-		defer handler.readUnlock(logger)
-	default:
-		// Read lock - clangd required
-		handler.readLock(logger, true)
-		defer handler.readUnlock(logger)
-	}
-
-	// Handle LSP methods: transform parameters and send to clangd
-	var cppURI lsp.DocumentURI
-
-	switch p := params.(type) {
-	case *lsp.InitializedParams:
-		// method "initialized"
-		logger("notification is not propagated to clangd")
-		return // Do not propagate to clangd
-
-	case *lsp.DidOpenTextDocumentParams:
-		// method "textDocument/didOpen"
-		logger("(%s@%d as '%s')", p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.LanguageID)
-
-		if res, e := handler.didOpen(logger, p); e != nil {
-			params = nil
-			err = e
-		} else if res == nil {
-			logger("notification is not propagated to clangd")
-			return
-		} else {
-			logger("to clang: didOpen(%s@%d as '%s')", res.TextDocument.URI, res.TextDocument.Version, res.TextDocument.LanguageID)
-			params = res
-		}
-
-	case *lsp.DidCloseTextDocumentParams:
-		// Method: "textDocument/didClose"
-		logger("--> didClose(%s)", p.TextDocument.URI)
-
-		if res, e := handler.didClose(logger, p); e != nil {
-		} else if res == nil {
-			logger("    --X notification is not propagated to clangd")
-			return
-		} else {
-			logger("    --> didClose(%s)", res.TextDocument.URI)
-			params = res
-		}
-
-	case *lsp.DidChangeTextDocumentParams:
-		// notification "textDocument/didChange"
-		logger("--> didChange(%s@%d)", p.TextDocument.URI, p.TextDocument.Version)
-		for _, change := range p.ContentChanges {
-			logger("     > %s -> %s", change.Range, strconv.Quote(change.Text))
-		}
-
-		if res, err := handler.didChange(logger, p); err != nil {
-			logger("    --E error: %s", err)
-			return
-		} else if res == nil {
-			logger("    --X notification is not propagated to clangd")
-			return
-		} else {
-			p = res
-		}
-
-		logger("    --> didChange(%s@%d)", p.TextDocument.URI, p.TextDocument.Version)
-		for _, change := range p.ContentChanges {
-			logger("         > %s -> %s", change.Range, strconv.Quote(change.Text))
-		}
-		logger("LS --> CL NOTIF %s:", method)
-		if err := handler.ClangdConn.SendNotification(method, lsp.EncodeMessage(p)); err != nil {
-			// Exit the process and trigger a restart by the client in case of a severe error
-			logger("Connection error with clangd server: %v", err)
-			logger("Please restart the language server.")
-			handler.Close()
-		}
-		return
-
-	case *lsp.DidSaveTextDocumentParams:
-		// Method: "textDocument/didSave"
-		logger("--> %s(%s)", method, p.TextDocument.URI)
-		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(logger, p.TextDocument)
-		cppURI = p.TextDocument.URI
-		if cppURI.AsPath().EquivalentTo(handler.buildSketchCpp) {
-			logger("    --| didSave not forwarded to clangd")
-			return
-		}
-		logger("    --> %s(%s)", method, p.TextDocument.URI)
-	}
-
-	if err != nil {
-		logger("Error: %s", err)
-		return
-	}
-
-	logger("LS --> CL NOTIF %s:", method)
-	if err := handler.ClangdConn.SendNotification(method, lsp.EncodeMessage(params)); err != nil {
-		// Exit the process and trigger a restart by the client in case of a severe error
-		logger("Connection error with clangd server:")
-		logger("vs", err)
-		logger("Please restart the language server.")
-		handler.Close()
-	}
-	if handler.buildSketchSymbolsLoad {
-		handler.buildSketchSymbolsLoad = false
-		handler.buildSketchSymbolsCheck = false
-		logger("Queued resfreshing document symbols")
-		go handler.LoadCppDocumentSymbols()
-	}
-	if handler.buildSketchSymbolsCheck {
-		handler.buildSketchSymbolsCheck = false
-		logger("Queued check document symbols")
-		go handler.CheckCppDocumentSymbols()
-	}
-}
-
-// HandleMessageFromIDE handles a message received from the IDE client (via stdio).
-func (handler *INOLanguageServer) HandleMessageFromIDE(ctx context.Context, logger streams.PrefixLogger,
-	method string, paramsRaw json.RawMessage,
-	returnCB func(result json.RawMessage, err *jsonrpc.ResponseError),
-) {
-	defer streams.CatchAndLogPanic()
-
-	params, err := lsp.DecodeClientRequestParams(method, paramsRaw)
-	if err != nil {
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInvalidParams, Message: err.Error()})
-		return
-	}
-	if params == nil {
-		// TODO: log?
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInvalidParams})
-		return
-	}
-
-	// Set up RWLocks and wait for clangd startup
-	switch method {
-	case "initialize":
-		// Write lock - NO clangd required
-		handler.writeLock(logger, false)
-		defer handler.writeUnlock(logger)
-	default:
-		// Read lock - clangd required
-		handler.readLock(logger, true)
-		defer handler.readUnlock(logger)
-	}
-
-	// Handle LSP methods: transform parameters and send to clangd
-	var inoURI, cppURI lsp.DocumentURI
-
-	switch p := params.(type) {
-	case *lsp.InitializeParams:
-		// method "initialize"
-
-		go func() {
-			defer streams.CatchAndLogPanic()
-			logger := streams.NewPrefixLogger(color.New(color.FgCyan), "INIT --- ")
-			logger("initializing workbench")
-
-			// Start clangd asynchronously
-			handler.writeLock(logger, false) // do not wait for clangd... we are starting it :-)
-			defer handler.writeUnlock(logger)
-
-			handler.initializeWorkbench(logger, p)
-
-			// clangd should be running now...
-			handler.clangdStarted.Broadcast()
-
-			logger("initializing workbench (done)")
-		}()
-
-		returnCB(lsp.EncodeMessage(&lsp.InitializeResult{
-			Capabilities: lsp.ServerCapabilities{
-				TextDocumentSync: &lsp.TextDocumentSyncOptions{
-					OpenClose: true,
-					Change:    lsp.TextDocumentSyncKindIncremental,
-					Save: &lsp.SaveOptions{
-						IncludeText: true,
-					},
-				},
-				HoverProvider: &lsp.HoverOptions{}, // true,
-				CompletionProvider: &lsp.CompletionOptions{
-					TriggerCharacters: []string{".", "\u003e", ":"},
-				},
-				SignatureHelpProvider: &lsp.SignatureHelpOptions{
-					TriggerCharacters: []string{"(", ","},
-				},
-				DefinitionProvider: &lsp.DefinitionOptions{}, // true,
-				// ReferencesProvider:              &lsp.ReferenceOptions{},  // TODO: true
-				DocumentHighlightProvider:       &lsp.DocumentHighlightOptions{}, //true,
-				DocumentSymbolProvider:          &lsp.DocumentSymbolOptions{},    //true,
-				WorkspaceSymbolProvider:         &lsp.WorkspaceSymbolOptions{},   //true,
-				CodeActionProvider:              &lsp.CodeActionOptions{ResolveProvider: true},
-				DocumentFormattingProvider:      &lsp.DocumentFormattingOptions{},      //true,
-				DocumentRangeFormattingProvider: &lsp.DocumentRangeFormattingOptions{}, //true,
-				DocumentOnTypeFormattingProvider: &lsp.DocumentOnTypeFormattingOptions{
-					FirstTriggerCharacter: "\n",
-				},
-				RenameProvider: &lsp.RenameOptions{PrepareProvider: false}, // TODO: true
-				ExecuteCommandProvider: &lsp.ExecuteCommandOptions{
-					Commands: []string{"clangd.applyFix", "clangd.applyTweak"},
-				},
-			},
-		}), nil)
-		return
-
-	case *lsp.CompletionParams:
-		// method: "textDocument/completion"
-		logger("--> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
-
-		if res, e := handler.ino2cppTextDocumentPositionParams(logger, p.TextDocumentPositionParams); e == nil {
-			p.TextDocumentPositionParams = res
-			logger("    --> completion(%s:%d:%d)\n", p.TextDocument.URI, p.Position.Line, p.Position.Character)
-		} else {
-			err = e
-		}
-		inoURI = p.TextDocument.URI
-
-	case *lsp.CodeActionParams:
-		// method "textDocument/codeAction"
-		inoURI = p.TextDocument.URI
-		logger("--> codeAction(%s:%s)", p.TextDocument.URI, p.Range.Start)
-
-		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(logger, p.TextDocument)
-		if err != nil {
-			break
-		}
-		if p.TextDocument.URI.AsPath().EquivalentTo(handler.buildSketchCpp) {
-			p.Range = handler.sketchMapper.InoToCppLSPRange(inoURI, p.Range)
-			for index := range p.Context.Diagnostics {
-				r := &p.Context.Diagnostics[index].Range
-				*r = handler.sketchMapper.InoToCppLSPRange(inoURI, *r)
-			}
-		}
-		logger("    --> codeAction(%s:%s)", p.TextDocument.URI, p.Range.Start)
-
-	case *lsp.HoverParams:
-		// method: "textDocument/hover"
-		doc := p.TextDocumentPositionParams
-		logger("--> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
-
-		if res, e := handler.ino2cppTextDocumentPositionParams(logger, doc); e == nil {
-			p.TextDocumentPositionParams = res
-			logger("    --> hover(%s:%d:%d)\n", doc.TextDocument.URI, doc.Position.Line, doc.Position.Character)
-		} else {
-			err = e
-		}
-		inoURI = p.TextDocument.URI
-
-	case *lsp.DocumentSymbolParams:
-		// method "textDocument/documentSymbol"
-		inoURI = p.TextDocument.URI
-		logger("--> documentSymbol(%s)", p.TextDocument.URI)
-
-		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(logger, p.TextDocument)
-		logger("    --> documentSymbol(%s)", p.TextDocument.URI)
-
-	case *lsp.DocumentFormattingParams:
-		// method "textDocument/formatting"
-		inoURI = p.TextDocument.URI
-		logger("--> formatting(%s)", p.TextDocument.URI)
-		p.TextDocument, err = handler.ino2cppTextDocumentIdentifier(logger, p.TextDocument)
-		cppURI = p.TextDocument.URI
-		logger("    --> formatting(%s)", p.TextDocument.URI)
-		if cleanup, e := handler.createClangdFormatterConfig(logger, cppURI); e != nil {
-			err = e
-		} else {
-			defer cleanup()
-		}
-
-	case *lsp.DocumentRangeFormattingParams:
-		// Method: "textDocument/rangeFormatting"
-		logger("--> %s(%s:%s)", method, p.TextDocument.URI, p.Range)
-		inoURI = p.TextDocument.URI
-		if cppParams, e := handler.ino2cppDocumentRangeFormattingParams(logger, p); e == nil {
-			params = cppParams
-			cppURI = cppParams.TextDocument.URI
-			logger("    --> %s(%s:%s)", method, cppParams.TextDocument.URI, cppParams.Range)
-			if cleanup, e := handler.createClangdFormatterConfig(logger, cppURI); e != nil {
-				err = e
-			} else {
-				defer cleanup()
-			}
-		} else {
-			err = e
-		}
-
-	case *lsp.DocumentHighlightParams:
-		tdp := p.TextDocumentPositionParams
-
-		inoURI = tdp.TextDocument.URI
-		if res, e := handler.ino2cppTextDocumentPositionParams(logger, tdp); e == nil {
-			cppURI = res.TextDocument.URI
-			params = res
-		} else {
-			err = e
-		}
-
-	case *lsp.SignatureHelpParams,
-		*lsp.DefinitionParams,
-		*lsp.TypeDefinitionParams,
-		*lsp.ImplementationParams:
-		// it was *lsp.TextDocumentPositionParams:
-
-		// Method: "textDocument/signatureHelp"
-		// Method: "textDocument/definition"
-		// Method: "textDocument/typeDefinition"
-		// Method: "textDocument/implementation"
-		// Method: "textDocument/documentHighlight"
-
-		tdp := p.(lsp.TextDocumentPositionParams)
-
-		logger("--> %s(%s:%s)", method, tdp.TextDocument.URI, tdp.Position)
-		inoURI = tdp.TextDocument.URI
-		if res, e := handler.ino2cppTextDocumentPositionParams(logger, tdp); e == nil {
-			cppURI = res.TextDocument.URI
-			params = res
-			logger("    --> %s(%s:%s)", method, res.TextDocument.URI, res.Position)
-		} else {
-			err = e
-		}
-
-	case *lsp.ReferenceParams:
-		// "textDocument/references":
-		logger("--X " + method)
-		return
-		inoURI = p.TextDocument.URI
-		_, err = handler.ino2cppTextDocumentPositionParams(logger, p.TextDocumentPositionParams)
-
-	case *lsp.DocumentOnTypeFormattingParams:
-		// "textDocument/onTypeFormatting":
-		logger("--X " + method)
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesMethodNotFound, Message: "Unimplemented"})
-		return
-		inoURI = p.TextDocument.URI
-		err = handler.ino2cppDocumentOnTypeFormattingParams(p)
-
-	case *lsp.RenameParams:
-		// "textDocument/rename":
-		logger("--X " + method)
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesMethodNotFound, Message: "Unimplemented"})
-		return
-		inoURI = p.TextDocument.URI
-		err = handler.ino2cppRenameParams(p)
-
-	case *lsp.DidChangeWatchedFilesParams:
-		// "workspace/didChangeWatchedFiles":
-		logger("--X " + method)
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesMethodNotFound, Message: "Unimplemented"})
-		return
-		err = handler.ino2cppDidChangeWatchedFilesParams(p)
-
-	case *lsp.ExecuteCommandParams:
-		// "workspace/executeCommand":
-		logger("--X " + method)
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesMethodNotFound, Message: "Unimplemented"})
-		return
-		err = handler.ino2cppExecuteCommand(p)
-	}
-	if err != nil {
-		logger("Error: %s", err)
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
-		return
-	}
-
-	logger("LS --> CL REQ %s", method)
-	clangRawResp, clangErr, err := handler.ClangdConn.SendRequest(ctx, method, lsp.EncodeMessage(params))
-	if err != nil {
-		// Exit the process and trigger a restart by the client in case of a severe error
-		if err.Error() == "context deadline exceeded" {
-			logger("Timeout exceeded while waiting for a reply from clangd.")
-			logger("Please restart the language server.")
-			handler.Close()
-		} else if strings.Contains(err.Error(), "non-added document") || strings.Contains(err.Error(), "non-added file") {
-			logger("The clangd process has lost track of the open document.")
-			logger("%v", err)
-			logger("Please restart the language server.")
-			handler.Close()
-		} else {
-			logger("clangd error: %v", err)
-		}
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
-		return
-	}
-	if clangErr != nil {
-		logger("clangd response error: %v", clangErr.AsError())
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()})
-		return
-	}
-	logger("LS <-- CL RESP %s", method)
-	clangResp, err := lsp.DecodeServerResponseResult(method, clangRawResp)
-	if err != nil {
-		logger("Error decoding clang response: %v", err)
-		returnCB(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
-		return
-	}
-
-	if handler.buildSketchSymbolsLoad {
-		handler.buildSketchSymbolsLoad = false
-		handler.buildSketchSymbolsCheck = false
-		logger("Queued resfreshing document symbols")
-		go handler.LoadCppDocumentSymbols()
-	}
-	if handler.buildSketchSymbolsCheck {
-		handler.buildSketchSymbolsCheck = false
-		logger("Queued check document symbols")
-		go handler.CheckCppDocumentSymbols()
-	}
-
-	// Transform and return the result
-	if clangResp != nil {
-		clangResp = handler.transformClangdResult(logger, method, inoURI, cppURI, clangResp)
-	}
-	returnCB(lsp.EncodeMessage(clangResp), nil)
-}
-
-func (handler *INOLanguageServer) initializeWorkbench(logger streams.PrefixLogger, params *lsp.InitializeParams) error {
 	currCppTextVersion := 0
 	if params != nil {
-		logger("    --> initialize(%s)", params.RootURI)
+		logger.Logf("    --> initialize(%s)", params.RootURI)
 		handler.lspInitializeParams = params
 		handler.sketchRoot = params.RootURI.AsPath()
 		handler.sketchName = handler.sketchRoot.Base()
 	} else {
-		logger("    --> RE-initialize()")
+		logger.Logf("    --> RE-initialize()")
 		currCppTextVersion = handler.sketchMapper.CppText.Version
 	}
 
@@ -704,87 +1267,51 @@ func (handler *INOLanguageServer) initializeWorkbench(logger streams.PrefixLogge
 			},
 		}
 
-		method := "textDocument/didChange"
-		logger("LS --> CL NOTIF %s:", method)
-		if err := handler.ClangdConn.SendNotification(method, lsp.EncodeMessage(syncEvent)); err != nil {
-			logger("    error reinitilizing clangd:", err)
+		logger.Logf("LS --> CL NOTIF textDocument/didChange:")
+		if err := handler.Clangd.conn.TextDocumentDidChange(syncEvent); err != nil {
+			logger.Logf("    error reinitilizing clangd:", err)
 			return err
 		}
 	} else {
 		// Otherwise start clangd!
 		dataFolder, err := extractDataFolderFromArduinoCLI(logger)
 		if err != nil {
-			logger("    error: %s", err)
-		}
-		clangdStdout, clangdStdin, clangdStderr := startClangd(logger, handler.buildPath, handler.buildSketchCpp, dataFolder)
-
-		clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
-		if enableLogging {
-			clangdStdio = streams.LogReadWriteCloserAs(clangdStdio, "inols-clangd.log")
-			go io.Copy(streams.OpenLogFileAs("inols-clangd-err.log"), clangdStderr)
-		} else {
-			go io.Copy(os.Stderr, clangdStderr)
+			logger.Logf("    error: %s", err)
 		}
 
-		rpcLogger := streams.NewJsonRPCLogger("IDE     LS", "CL")
-		handler.ClangdConn = jsonrpc.NewConnection(clangdStdio, clangdStdio,
-			func(ctx context.Context, method string, params json.RawMessage, respCallback func(result json.RawMessage, err *jsonrpc.ResponseError)) {
-				logger, idx := rpcLogger.LogServerRequest(method, params)
-				handler.HandleRequestFromClangd(ctx, logger, method, params, func(result json.RawMessage, err *jsonrpc.ResponseError) {
-					rpcLogger.LogClientResponse(idx, method, result, err)
-					respCallback(result, err)
-				})
-			},
-			func(ctx context.Context, method string, params json.RawMessage) {
-				logger := rpcLogger.LogServerNotification(method, params)
-				handler.HandleNotificationFromClangd(ctx, logger, method, params)
-			},
-			func(e error) {
-				logger("connection error with clangd! %s", e)
+		handler.Clangd = NewClangdClient(
+			logger, handler.buildPath, handler.buildSketchCpp, dataFolder,
+			func() {
+				logger.Logf("Lost connection with clangd!")
 				handler.Close()
-			},
-		)
-		go func() {
-			handler.ClangdConn.Run()
-			logger("Lost connection with clangd!")
-			handler.Close()
-		}()
+			}, handler)
 
 		// Send initialization command to clangd
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		method1 := "initialize"
-		logger("LS --> CL REQ %s", method1)
-		rawResp, clangErr, err := handler.ClangdConn.SendRequest(
-			ctx, method1, lsp.EncodeMessage(handler.lspInitializeParams))
+		initRes, clangErr, err := handler.Clangd.conn.Initialize(ctx, handler.lspInitializeParams)
 		if err != nil {
-			logger("    error initilizing clangd: %v", err)
+			logger.Logf("    error initilizing clangd: %v", err)
 			return err
 		}
-		logger("LS <-- CL RESP %s", method1)
 		if clangErr != nil {
-			logger("    error initilizing clangd: %v", clangErr.AsError())
+			logger.Logf("    error initilizing clangd: %v", clangErr.AsError())
 			return clangErr.AsError()
-		} else if resp, err := lsp.DecodeServerResponseResult("initialize", rawResp); err != nil {
-			logger("    error initilizing clangd: %v", err)
-			return err
 		} else {
-			logger("clangd successfully started: %v", resp)
+			logger.Logf("clangd successfully started: %s", string(lsp.EncodeMessage(initRes)))
 		}
 
-		method2 := "initialized"
-		logger("LS --> CL NOTIF %s:", method2)
-		if err := handler.ClangdConn.SendNotification(method2, lsp.EncodeMessage(lsp.InitializedParams{})); err != nil {
-			logger("    error sending initialized notification to clangd: %v", err)
+		if err := handler.Clangd.conn.Initialized(&lsp.InitializedParams{}); err != nil {
+			logger.Logf("    error sending initialized notification to clangd: %v", err)
 			return err
 		}
 	}
 
-	handler.buildSketchSymbolsLoad = true
+	handler.queueLoadCppDocumentSymbols()
 	return nil
 }
 
-func extractDataFolderFromArduinoCLI(logger streams.PrefixLogger) (*paths.Path, error) {
+func extractDataFolderFromArduinoCLI(logger jsonrpc.FunctionLogger) (*paths.Path, error) {
 	// XXX: do this from IDE or via gRPC
 	args := []string{globalCliPath,
 		"--config-file", globalCliConfigPath,
@@ -798,7 +1325,7 @@ func extractDataFolderFromArduinoCLI(logger streams.PrefixLogger) (*paths.Path, 
 	}
 	cmdOutput := &bytes.Buffer{}
 	cmd.RedirectStdoutTo(cmdOutput)
-	logger("running: %s", strings.Join(args, " "))
+	logger.Logf("running: %s", strings.Join(args, " "))
 	if err := cmd.Run(); err != nil {
 		return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 	}
@@ -813,67 +1340,59 @@ func extractDataFolderFromArduinoCLI(logger streams.PrefixLogger) (*paths.Path, 
 		return nil, errors.Errorf("parsing arduino-cli output: %s", err)
 	}
 	// Return only the build path
-	logger("Arduino Data Dir -> %s", res.Directories.Data)
+	logger.Logf("Arduino Data Dir -> %s", res.Directories.Data)
 	return paths.New(res.Directories.Data), nil
 }
 
-func (handler *INOLanguageServer) refreshCppDocumentSymbols(logger streams.PrefixLogger) error {
+func (handler *INOLanguageServer) refreshCppDocumentSymbols(logger jsonrpc.FunctionLogger) error {
 	// Query source code symbols
 	handler.readUnlock(logger)
 	cppURI := lsp.NewDocumentURIFromPath(handler.buildSketchCpp)
-	logger("requesting documentSymbol for %s", cppURI)
-	method := "textDocument/documentSymbol"
-	logger("LS --> CL REQ %s", method)
-	respRaw, resErr, err := handler.ClangdConn.SendRequest(context.Background(), method,
-		lsp.EncodeMessage(&lsp.DocumentSymbolParams{
-			TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
-		}))
-	handler.readLock(logger, true)
+	logger.Logf("requesting documentSymbol for %s", cppURI)
 
+	cppParams := &lsp.DocumentSymbolParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
+	}
+	cppDocumentSymbols, _ /* cppSymbolInformation */, cppErr, err := handler.Clangd.conn.TextDocumentDocumentSymbol(context.Background(), cppParams)
+	handler.readLock(logger, true)
 	if err != nil {
-		logger("error: %s", err)
+		logger.Logf("error: %s", err)
 		return fmt.Errorf("quering source code symbols: %w", err)
 	}
-	logger("LS <-- CL RESP %s", method)
-	if resErr != nil {
-		logger("error: %s", resErr.AsError())
-		return fmt.Errorf("quering source code symbols: %w", resErr.AsError())
-	}
-	result, err := lsp.DecodeServerResponseResult("textDocument/documentSymbol", respRaw)
-	if err != nil {
-		logger("invalid response: %s", err)
-		return fmt.Errorf("quering source code symbols: invalid response: %w", err)
+	if cppErr != nil {
+		logger.Logf("error: %s", cppErr.AsError())
+		return fmt.Errorf("quering source code symbols: %w", cppErr.AsError())
 	}
 
-	symbols, ok := result.([]lsp.DocumentSymbol)
-	if !ok {
-		logger("error: expected DocumenSymbol array but got %T", result)
-		return fmt.Errorf("expected DocumenSymbol but got %T", result)
+	if cppDocumentSymbols == nil {
+		err := errors.New("expected DocumenSymbol array but got SymbolInformation instead")
+		logger.Logf("error: %s", err)
+		return err
 	}
 
 	// Filter non-functions symbols
 	i := 0
-	for _, symbol := range symbols {
+	for _, symbol := range cppDocumentSymbols {
 		if symbol.Kind != lsp.SymbolKindFunction {
 			continue
 		}
-		symbols[i] = symbol
+		cppDocumentSymbols[i] = symbol
 		i++
 	}
-	symbols = symbols[:i]
-	handler.buildSketchSymbols = symbols
+	cppDocumentSymbols = cppDocumentSymbols[:i]
+	handler.buildSketchSymbols = cppDocumentSymbols
 
 	symbolsCanary := ""
-	for _, symbol := range symbols {
-		logger("   symbol: %s %s %s", symbol.Kind, symbol.Name, symbol.Range)
+	for _, symbol := range cppDocumentSymbols {
+		logger.Logf("   symbol: %s %s %s", symbol.Kind, symbol.Name, symbol.Range)
 		if symbolText, err := textutils.ExtractRange(handler.sketchMapper.CppText.Text, symbol.Range); err != nil {
-			logger("     > invalid range: %s", err)
+			logger.Logf("     > invalid range: %s", err)
 			symbolsCanary += "/"
 		} else if end := strings.Index(symbolText, "{"); end != -1 {
-			logger("     TRIMMED> %s", symbolText[:end])
+			logger.Logf("     TRIMMED> %s", symbolText[:end])
 			symbolsCanary += symbolText[:end]
 		} else {
-			logger("            > %s", symbolText)
+			logger.Logf("            > %s", symbolText)
 			symbolsCanary += symbolText
 		}
 	}
@@ -881,35 +1400,9 @@ func (handler *INOLanguageServer) refreshCppDocumentSymbols(logger streams.Prefi
 	return nil
 }
 
-func (handler *INOLanguageServer) LoadCppDocumentSymbols() error {
-	logger := streams.NewPrefixLogger(color.New(color.FgHiBlue), "SYLD --- ")
-	defer logger("(done)")
-	handler.readLock(logger, true)
-	defer handler.readUnlock(logger)
-	return handler.refreshCppDocumentSymbols(logger)
-}
-
-func (handler *INOLanguageServer) CheckCppDocumentSymbols() error {
-	logger := streams.NewPrefixLogger(color.New(color.FgHiBlue), "SYCK --- ")
-	defer logger("(done)")
-	handler.readLock(logger, true)
-	defer handler.readUnlock(logger)
-
-	oldSymbols := handler.buildSketchSymbols
-	canary := handler.buildSketchSymbolsCanary
-	if err := handler.refreshCppDocumentSymbols(logger); err != nil {
-		return err
-	}
-	if len(oldSymbols) != len(handler.buildSketchSymbols) || canary != handler.buildSketchSymbolsCanary {
-		logger("function symbols change detected, triggering sketch rebuild!")
-		handler.scheduleRebuildEnvironment()
-	}
-	return nil
-}
-
 func (handler *INOLanguageServer) CheckCppIncludesChanges() {
-	logger := streams.NewPrefixLogger(color.New(color.FgHiBlue), "INCK --- ")
-	logger("check for Cpp Include Changes")
+	logger := NewLSPFunctionLogger(color.HiBlueString, "INCK --- ")
+	logger.Logf("check for Cpp Include Changes")
 	includesCanary := ""
 	for _, line := range strings.Split(handler.sketchMapper.CppText.Text, "\n") {
 		if strings.Contains(line, "#include ") {
@@ -919,7 +1412,7 @@ func (handler *INOLanguageServer) CheckCppIncludesChanges() {
 
 	if includesCanary != handler.buildSketchIncludesCanary {
 		handler.buildSketchIncludesCanary = includesCanary
-		logger("#include change detected, triggering sketch rebuild!")
+		logger.Logf("#include change detected, triggering sketch rebuild!")
 		handler.scheduleRebuildEnvironment()
 	}
 }
@@ -954,69 +1447,19 @@ func canonicalizeCompileCommandsJSON(compileCommandsDir *paths.Path) map[string]
 	return compilers
 }
 
-func startClangd(logger streams.PrefixLogger, compileCommandsDir, sketchCpp *paths.Path, dataFolder *paths.Path) (io.WriteCloser, io.ReadCloser, io.ReadCloser) {
-	// Start clangd
-	args := []string{
-		globalClangdPath,
-		"-log=verbose",
-		fmt.Sprintf(`--compile-commands-dir=%s`, compileCommandsDir),
-	}
-	if dataFolder != nil {
-		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**")))
-	}
-	if enableLogging {
-		logger("    Starting clangd: %s", strings.Join(args, " "))
-	}
-	if clangdCmd, err := executils.NewProcess(args...); err != nil {
-		panic("starting clangd: " + err.Error())
-	} else if clangdIn, err := clangdCmd.StdinPipe(); err != nil {
-		panic("getting clangd stdin: " + err.Error())
-	} else if clangdOut, err := clangdCmd.StdoutPipe(); err != nil {
-		panic("getting clangd stdout: " + err.Error())
-	} else if clangdErr, err := clangdCmd.StderrPipe(); err != nil {
-		panic("getting clangd stderr: " + err.Error())
-	} else if err := clangdCmd.Start(); err != nil {
-		panic("running clangd: " + err.Error())
-	} else {
-		return clangdIn, clangdOut, clangdErr
-	}
-}
-
-func (handler *INOLanguageServer) didOpen(logger streams.PrefixLogger, inoDidOpen *lsp.DidOpenTextDocumentParams) (*lsp.DidOpenTextDocumentParams, error) {
-	// Add the TextDocumentItem in the tracked files list
-	inoItem := inoDidOpen.TextDocument
-	handler.docs[inoItem.URI.AsPath().String()] = &inoItem
-
-	// If we are tracking a .ino...
-	if inoItem.URI.Ext() == ".ino" {
-		handler.sketchTrackedFilesCount++
-		logger("    increasing .ino tracked files count: %d", handler.sketchTrackedFilesCount)
-
-		// notify clang that sketchCpp has been opened only once
-		if handler.sketchTrackedFilesCount != 1 {
-			return nil, nil
-		}
-	}
-
-	cppItem, err := handler.ino2cppTextDocumentItem(logger, inoItem)
-	return &lsp.DidOpenTextDocumentParams{
-		TextDocument: cppItem,
-	}, err
-}
-
-func (handler *INOLanguageServer) didClose(logger streams.PrefixLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
+func (handler *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
 	inoIdentifier := inoDidClose.TextDocument
 	if _, exist := handler.docs[inoIdentifier.URI.AsPath().String()]; exist {
 		delete(handler.docs, inoIdentifier.URI.AsPath().String())
 	} else {
-		logger("    didClose of untracked document: %s", inoIdentifier.URI)
+		logger.Logf("    didClose of untracked document: %s", inoIdentifier.URI)
 		return nil, unknownURI(inoIdentifier.URI)
 	}
 
 	// If we are tracking a .ino...
 	if inoIdentifier.URI.Ext() == ".ino" {
 		handler.sketchTrackedFilesCount--
-		logger("    decreasing .ino tracked files count: %d", handler.sketchTrackedFilesCount)
+		logger.Logf("    decreasing .ino tracked files count: %d", handler.sketchTrackedFilesCount)
 
 		// notify clang that sketchCpp has been close only once all .ino are closed
 		if handler.sketchTrackedFilesCount != 0 {
@@ -1030,7 +1473,7 @@ func (handler *INOLanguageServer) didClose(logger streams.PrefixLogger, inoDidCl
 	}, err
 }
 
-func (handler *INOLanguageServer) ino2cppTextDocumentItem(logger streams.PrefixLogger, inoItem lsp.TextDocumentItem) (cppItem lsp.TextDocumentItem, err error) {
+func (handler *INOLanguageServer) ino2cppTextDocumentItem(logger jsonrpc.FunctionLogger, inoItem lsp.TextDocumentItem) (cppItem lsp.TextDocumentItem, err error) {
 	cppURI, err := handler.ino2cppDocumentURI(logger, inoItem.URI)
 	if err != nil {
 		return cppItem, err
@@ -1051,14 +1494,14 @@ func (handler *INOLanguageServer) ino2cppTextDocumentItem(logger streams.PrefixL
 	return cppItem, nil
 }
 
-func (handler *INOLanguageServer) didChange(logger streams.PrefixLogger, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
+func (handler *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
 	doc := req.TextDocument
 
 	trackedDoc, ok := handler.docs[doc.URI.AsPath().String()]
 	if !ok {
 		return nil, unknownURI(doc.URI)
 	}
-	textutils.ApplyLSPTextDocumentContentChangeEvent(trackedDoc, req.ContentChanges, doc.Version)
+	textutils.ApplyLSPTextDocumentContentChangeEvent(&trackedDoc, req.ContentChanges, doc.Version)
 
 	// If changes are applied to a .ino file we increment the global .ino.cpp versioning
 	// for each increment of the single .ino file.
@@ -1077,21 +1520,21 @@ func (handler *INOLanguageServer) didChange(logger streams.PrefixLogger, req *ls
 			for _, sym := range handler.buildSketchSymbols {
 				if sym.SelectionRange.Overlaps(cppRange) {
 					dirty = true
-					logger("--! DIRTY CHANGE detected using symbol tables, force sketch rebuild!")
+					logger.Logf("--! DIRTY CHANGE detected using symbol tables, force sketch rebuild!")
 					break
 				}
 			}
 			if handler.sketchMapper.ApplyTextChange(doc.URI, inoChange) {
 				dirty = true
-				logger("--! DIRTY CHANGE detected with sketch mapper, force sketch rebuild!")
+				logger.Logf("--! DIRTY CHANGE detected with sketch mapper, force sketch rebuild!")
 			}
 			if dirty {
 				handler.scheduleRebuildEnvironment()
 			}
 
-			// logger("New version:----------")
-			// logger(handler.sketchMapper.CppText.Text)
-			// logger("----------------------")
+			// logger.Logf("New version:----------")
+			// logger.Logf(handler.sketchMapper.CppText.Text)
+			// logger.Logf("----------------------")
 
 			cppChange := lsp.TextDocumentContentChangeEvent{
 				Range:       cppRange,
@@ -1129,7 +1572,7 @@ func (handler *INOLanguageServer) didChange(logger streams.PrefixLogger, req *ls
 	return cppReq, err
 }
 
-func (handler *INOLanguageServer) handleError(logger streams.PrefixLogger, err error) error {
+func (handler *INOLanguageServer) handleError(logger jsonrpc.FunctionLogger, err error) error {
 	errorStr := err.Error()
 	var message string
 	if strings.Contains(errorStr, "#error") {
@@ -1150,7 +1593,7 @@ func (handler *INOLanguageServer) handleError(logger streams.PrefixLogger, err e
 			return err
 		}
 	} else if strings.Contains(errorStr, "No such file or directory") {
-		exp, regexpErr := regexp.Compile("([\\w\\.\\-]+): No such file or directory")
+		exp, regexpErr := regexp.Compile(`([\w\.\-]+): No such file or directory`)
 		if regexpErr != nil {
 			panic(regexpErr)
 		}
@@ -1160,25 +1603,28 @@ func (handler *INOLanguageServer) handleError(logger streams.PrefixLogger, err e
 	} else {
 		message = "Could not start editor support.\n" + errorStr
 	}
-	go handler.showMessage(logger, lsp.MessageTypeError, message)
+	go func() {
+		defer streams.CatchAndLogPanic()
+		handler.showMessage(logger, lsp.MessageTypeError, message)
+	}()
 	return errors.New(message)
 }
 
-func (handler *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger streams.PrefixLogger, doc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
+func (handler *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger jsonrpc.FunctionLogger, doc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
 	cppURI, err := handler.ino2cppDocumentURI(logger, doc.URI)
 	res := doc
 	res.URI = cppURI
 	return res, err
 }
 
-func (handler *INOLanguageServer) ino2cppTextDocumentIdentifier(logger streams.PrefixLogger, doc lsp.TextDocumentIdentifier) (lsp.TextDocumentIdentifier, error) {
+func (handler *INOLanguageServer) ino2cppTextDocumentIdentifier(logger jsonrpc.FunctionLogger, doc lsp.TextDocumentIdentifier) (lsp.TextDocumentIdentifier, error) {
 	cppURI, err := handler.ino2cppDocumentURI(logger, doc.URI)
 	res := doc
 	res.URI = cppURI
 	return res, err
 }
 
-func (handler *INOLanguageServer) ino2cppDocumentURI(logger streams.PrefixLogger, inoURI lsp.DocumentURI) (lsp.DocumentURI, error) {
+func (handler *INOLanguageServer) ino2cppDocumentURI(logger jsonrpc.FunctionLogger, inoURI lsp.DocumentURI) (lsp.DocumentURI, error) {
 	// Sketchbook/Sketch/Sketch.ino      -> build-path/sketch/Sketch.ino.cpp
 	// Sketchbook/Sketch/AnotherTab.ino  -> build-path/sketch/Sketch.ino.cpp  (different section from above)
 	// Sketchbook/Sketch/AnotherFile.cpp -> build-path/sketch/AnotherFile.cpp (1:1)
@@ -1192,35 +1638,35 @@ func (handler *INOLanguageServer) ino2cppDocumentURI(logger streams.PrefixLogger
 
 	inside, err := inoPath.IsInsideDir(handler.sketchRoot)
 	if err != nil {
-		logger("    could not determine if '%s' is inside '%s'", inoPath, handler.sketchRoot)
+		logger.Logf("    could not determine if '%s' is inside '%s'", inoPath, handler.sketchRoot)
 		return lsp.NilURI, unknownURI(inoURI)
 	}
 	if !inside {
-		logger("    '%s' not inside sketchroot '%s', passing doc identifier to as-is", handler.sketchRoot, inoPath)
+		logger.Logf("    '%s' not inside sketchroot '%s', passing doc identifier to as-is", handler.sketchRoot, inoPath)
 		return inoURI, nil
 	}
 
 	rel, err := handler.sketchRoot.RelTo(inoPath)
 	if err == nil {
 		cppPath := handler.buildSketchRoot.JoinPath(rel)
-		logger("    URI: '%s' -> '%s'", inoPath, cppPath)
+		logger.Logf("    URI: '%s' -> '%s'", inoPath, cppPath)
 		return lsp.NewDocumentURIFromPath(cppPath), nil
 	}
 
-	logger("    could not determine rel-path of '%s' in '%s': %s", inoPath, handler.sketchRoot, err)
+	logger.Logf("    could not determine rel-path of '%s' in '%s': %s", inoPath, handler.sketchRoot, err)
 	return lsp.NilURI, err
 }
 
-func (handler *INOLanguageServer) inoDocumentURIFromInoPath(logger streams.PrefixLogger, inoPath string) (lsp.DocumentURI, error) {
+func (handler *INOLanguageServer) inoDocumentURIFromInoPath(logger jsonrpc.FunctionLogger, inoPath string) (lsp.DocumentURI, error) {
 	if inoPath == sourcemapper.NotIno.File {
 		return sourcemapper.NotInoURI, nil
 	}
 	doc, ok := handler.docs[inoPath]
 	if !ok {
-		logger("    !!! Unresolved .ino path: %s", inoPath)
-		logger("    !!! Known doc paths are:")
+		logger.Logf("    !!! Unresolved .ino path: %s", inoPath)
+		logger.Logf("    !!! Known doc paths are:")
 		for p := range handler.docs {
-			logger("    !!! > %s", p)
+			logger.Logf("    !!! > %s", p)
 		}
 		uri := lsp.NewDocumentURI(inoPath)
 		return uri, unknownURI(uri)
@@ -1228,7 +1674,7 @@ func (handler *INOLanguageServer) inoDocumentURIFromInoPath(logger streams.Prefi
 	return doc.URI, nil
 }
 
-func (handler *INOLanguageServer) cpp2inoDocumentURI(logger streams.PrefixLogger, cppURI lsp.DocumentURI, cppRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
+func (handler *INOLanguageServer) cpp2inoDocumentURI(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
 	// TODO: Split this function into 2
 	//       - Cpp2inoSketchDocumentURI: converts sketch     (cppURI, cppRange) -> (inoURI, inoRange)
 	//       - Cpp2inoDocumentURI      : converts non-sketch (cppURI)           -> (inoURI)              [range is the same]
@@ -1245,16 +1691,16 @@ func (handler *INOLanguageServer) cpp2inoDocumentURI(logger streams.PrefixLogger
 		if err == nil {
 			if handler.sketchMapper.IsPreprocessedCppLine(cppRange.Start.Line) {
 				inoPath = sourcemapper.NotIno.File
-				logger("    URI: is in preprocessed section")
-				logger("         converted %s to %s:%s", cppRange, inoPath, inoRange)
+				logger.Logf("    URI: is in preprocessed section")
+				logger.Logf("         converted %s to %s:%s", cppRange, inoPath, inoRange)
 			} else {
-				logger("    URI: converted %s to %s:%s", cppRange, inoPath, inoRange)
+				logger.Logf("    URI: converted %s to %s:%s", cppRange, inoPath, inoRange)
 			}
 		} else if _, ok := err.(sourcemapper.AdjustedRangeErr); ok {
-			logger("    URI: converted %s to %s:%s (END LINE ADJUSTED)", cppRange, inoPath, inoRange)
+			logger.Logf("    URI: converted %s to %s:%s (END LINE ADJUSTED)", cppRange, inoPath, inoRange)
 			err = nil
 		} else {
-			logger("    URI: ERROR: %s", err)
+			logger.Logf("    URI: ERROR: %s", err)
 			handler.sketchMapper.DebugLogAll()
 			return lsp.NilURI, lsp.NilRange, err
 		}
@@ -1264,29 +1710,29 @@ func (handler *INOLanguageServer) cpp2inoDocumentURI(logger streams.PrefixLogger
 
 	inside, err := cppPath.IsInsideDir(handler.buildSketchRoot)
 	if err != nil {
-		logger("    could not determine if '%s' is inside '%s'", cppPath, handler.buildSketchRoot)
+		logger.Logf("    could not determine if '%s' is inside '%s'", cppPath, handler.buildSketchRoot)
 		return lsp.NilURI, lsp.NilRange, err
 	}
 	if !inside {
-		logger("    '%s' is not inside '%s'", cppPath, handler.buildSketchRoot)
-		logger("    keep doc identifier to '%s' as-is", cppPath)
+		logger.Logf("    '%s' is not inside '%s'", cppPath, handler.buildSketchRoot)
+		logger.Logf("    keep doc identifier to '%s' as-is", cppPath)
 		return cppURI, cppRange, nil
 	}
 
 	rel, err := handler.buildSketchRoot.RelTo(cppPath)
 	if err == nil {
 		inoPath := handler.sketchRoot.JoinPath(rel).String()
-		logger("    URI: '%s' -> '%s'", cppPath, inoPath)
+		logger.Logf("    URI: '%s' -> '%s'", cppPath, inoPath)
 		inoURI, err := handler.inoDocumentURIFromInoPath(logger, inoPath)
-		logger("              as URI: '%s'", inoURI)
+		logger.Logf("              as URI: '%s'", inoURI)
 		return inoURI, cppRange, err
 	}
 
-	logger("    could not determine rel-path of '%s' in '%s': %s", cppPath, handler.buildSketchRoot, err)
+	logger.Logf("    could not determine rel-path of '%s' in '%s': %s", cppPath, handler.buildSketchRoot, err)
 	return lsp.NilURI, lsp.NilRange, err
 }
 
-func (handler *INOLanguageServer) ino2cppTextDocumentPositionParams(logger streams.PrefixLogger, inoParams lsp.TextDocumentPositionParams) (lsp.TextDocumentPositionParams, error) {
+func (handler *INOLanguageServer) ino2cppTextDocumentPositionParams(logger jsonrpc.FunctionLogger, inoParams lsp.TextDocumentPositionParams) (lsp.TextDocumentPositionParams, error) {
 	inoTextDocument := inoParams.TextDocument
 	inoPosition := inoParams.Position
 	inoURI := inoTextDocument.URI
@@ -1294,7 +1740,7 @@ func (handler *INOLanguageServer) ino2cppTextDocumentPositionParams(logger strea
 
 	cppTextDocument, err := handler.ino2cppTextDocumentIdentifier(logger, inoTextDocument)
 	if err != nil {
-		logger("%s -> invalid text document: %s", prefix, err)
+		logger.Logf("%s -> invalid text document: %s", prefix, err)
 		return lsp.TextDocumentPositionParams{}, err
 	}
 	cppPosition := inoPosition
@@ -1302,7 +1748,7 @@ func (handler *INOLanguageServer) ino2cppTextDocumentPositionParams(logger strea
 		if cppLine, ok := handler.sketchMapper.InoToCppLineOk(inoURI, inoPosition.Line); ok {
 			cppPosition.Line = cppLine
 		} else {
-			logger("%s -> invalid line requested: %s:%d", prefix, inoURI, inoPosition.Line)
+			logger.Logf("%s -> invalid line requested: %s:%d", prefix, inoURI, inoPosition.Line)
 			return lsp.TextDocumentPositionParams{}, unknownURI(inoURI)
 		}
 	}
@@ -1310,11 +1756,11 @@ func (handler *INOLanguageServer) ino2cppTextDocumentPositionParams(logger strea
 		TextDocument: cppTextDocument,
 		Position:     cppPosition,
 	}
-	logger("%s -> %s", prefix, cppParams)
+	logger.Logf("%s -> %s", prefix, cppParams)
 	return cppParams, nil
 }
 
-func (handler *INOLanguageServer) ino2cppRange(logger streams.PrefixLogger, inoURI lsp.DocumentURI, inoRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
+func (handler *INOLanguageServer) ino2cppRange(logger jsonrpc.FunctionLogger, inoURI lsp.DocumentURI, inoRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
 	cppURI, err := handler.ino2cppDocumentURI(logger, inoURI)
 	if err != nil {
 		return lsp.NilURI, lsp.Range{}, err
@@ -1326,7 +1772,7 @@ func (handler *INOLanguageServer) ino2cppRange(logger streams.PrefixLogger, inoU
 	return cppURI, inoRange, nil
 }
 
-func (handler *INOLanguageServer) ino2cppDocumentRangeFormattingParams(logger streams.PrefixLogger, inoParams *lsp.DocumentRangeFormattingParams) (*lsp.DocumentRangeFormattingParams, error) {
+func (handler *INOLanguageServer) ino2cppDocumentRangeFormattingParams(logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentRangeFormattingParams) (*lsp.DocumentRangeFormattingParams, error) {
 	cppTextDocument, err := handler.ino2cppTextDocumentIdentifier(logger, inoParams.TextDocument)
 	if err != nil {
 		return nil, err
@@ -1340,201 +1786,65 @@ func (handler *INOLanguageServer) ino2cppDocumentRangeFormattingParams(logger st
 	}, err
 }
 
-func (handler *INOLanguageServer) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
-	panic("not implemented")
-	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
-	// if data, ok := handler.data[params.TextDocument.URI]; ok {
-	// 	params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
-	// 	return nil
-	// }
-	return unknownURI(params.TextDocument.URI)
-}
+// func (handler *INOLanguageServer) ino2cppDocumentOnTypeFormattingParams(params *lsp.DocumentOnTypeFormattingParams) error {
+// 	panic("not implemented")
+// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
+// if data, ok := handler.data[params.TextDocument.URI]; ok {
+// 	params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
+// 	return nil
+// }
+// return unknownURI(params.TextDocument.URI)
+// }
 
-func (handler *INOLanguageServer) ino2cppRenameParams(params *lsp.RenameParams) error {
-	panic("not implemented")
-	// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
-	// if data, ok := handler.data[params.TextDocument.URI]; ok {
-	// 	params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
-	// 	return nil
-	// }
-	return unknownURI(params.TextDocument.URI)
-}
+// func (handler *INOLanguageServer) ino2cppRenameParams(params *lsp.RenameParams) error {
+// handler.sketchToBuildPathTextDocumentIdentifier(&params.TextDocument)
+// if data, ok := handler.data[params.TextDocument.URI]; ok {
+// 	params.Position.Line = data.sourceMap.InoToCppLine(data.sourceURI, params.Position.Line)
+// 	return nil
+// }
+// return unknownURI(params.TextDocument.URI)
+// }
 
-func (handler *INOLanguageServer) ino2cppDidChangeWatchedFilesParams(params *lsp.DidChangeWatchedFilesParams) error {
-	panic("not implemented")
-	// for index := range params.Changes {
-	// 	fileEvent := &params.Changes[index]
-	// 	if data, ok := handler.data[fileEvent.URI]; ok {
-	// 		fileEvent.URI = data.targetURI
-	// 	}
-	// }
-	return nil
-}
+// func (handler *INOLanguageServer) ino2cppDidChangeWatchedFilesParams(params *lsp.DidChangeWatchedFilesParams) error {
+// for index := range params.Changes {
+// 	fileEvent := &params.Changes[index]
+// 	if data, ok := handler.data[fileEvent.URI]; ok {
+// 		fileEvent.URI = data.targetURI
+// 	}
+// }
+// return nil
+// }
 
-func (handler *INOLanguageServer) ino2cppExecuteCommand(executeCommand *lsp.ExecuteCommandParams) error {
-	panic("not implemented")
-	// if len(executeCommand.Arguments) == 1 {
-	// 	arg := handler.parseCommandArgument(executeCommand.Arguments[0])
-	// 	if workspaceEdit, ok := arg.(*lsp.WorkspaceEdit); ok {
-	// 		executeCommand.Arguments[0] = handler.ino2cppWorkspaceEdit(workspaceEdit)
-	// 	}
-	// }
-	return nil
-}
+// func (handler *INOLanguageServer) ino2cppExecuteCommand(executeCommand *lsp.ExecuteCommandParams) error {
+// if len(executeCommand.Arguments) == 1 {
+// 	arg := handler.parseCommandArgument(executeCommand.Arguments[0])
+// 	if workspaceEdit, ok := arg.(*lsp.WorkspaceEdit); ok {
+// 		executeCommand.Arguments[0] = handler.ino2cppWorkspaceEdit(workspaceEdit)
+// 	}
+// }
+// return nil
+// }
 
-func (handler *INOLanguageServer) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
-	panic("not implemented")
-	newEdit := lsp.WorkspaceEdit{}
-	// for uri, edit := range origEdit.Changes {
-	// 	if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
-	// 		newValue := make([]lsp.TextEdit, len(edit))
-	// 		for index := range edit {
-	// 			newValue[index] = lsp.TextEdit{
-	// 				NewText: edit[index].NewText,
-	// 				Range:   data.sourceMap.InoToCppLSPRange(data.sourceURI, edit[index].Range),
-	// 			}
-	// 		}
-	// 		newEdit.Changes[string(data.targetURI)] = newValue
-	// 	} else {
-	// 		newEdit.Changes[uri] = edit
-	// 	}
-	// }
-	return &newEdit
-}
+// func (handler *INOLanguageServer) ino2cppWorkspaceEdit(origEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
+// newEdit := lsp.WorkspaceEdit{}
+// for uri, edit := range origEdit.Changes {
+// 	if data, ok := handler.data[lsp.DocumentURI(uri)]; ok {
+// 		newValue := make([]lsp.TextEdit, len(edit))
+// 		for index := range edit {
+// 			newValue[index] = lsp.TextEdit{
+// 				NewText: edit[index].NewText,
+// 				Range:   data.sourceMap.InoToCppLSPRange(data.sourceURI, edit[index].Range),
+// 			}
+// 		}
+// 		newEdit.Changes[string(data.targetURI)] = newValue
+// 	} else {
+// 		newEdit.Changes[uri] = edit
+// 	}
+// }
+// return &newEdit
+// }
 
-func (handler *INOLanguageServer) transformClangdResult(logger streams.PrefixLogger, method string, inoURI, cppURI lsp.DocumentURI, result interface{}) interface{} {
-	cppToIno := inoURI != lsp.NilURI && inoURI.AsPath().EquivalentTo(handler.buildSketchCpp)
-
-	switch r := result.(type) {
-	case *lsp.Hover:
-		// method "textDocument/hover"
-		if len(r.Contents.Value) == 0 {
-			return nil
-		}
-		if cppToIno {
-			_, *r.Range = handler.sketchMapper.CppToInoRange(*r.Range)
-		}
-		logger("<-- hover(%s)", strconv.Quote(r.Contents.Value))
-		return r
-
-	case *lsp.CompletionList:
-		// method "textDocument/completion"
-		newItems := make([]lsp.CompletionItem, 0)
-
-		for _, item := range r.Items {
-			if !strings.HasPrefix(item.InsertText, "_") {
-				if cppToIno && item.TextEdit != nil {
-					_, item.TextEdit.Range = handler.sketchMapper.CppToInoRange(item.TextEdit.Range)
-				}
-				newItems = append(newItems, item)
-			}
-		}
-		r.Items = newItems
-		logger("<-- completion(%d items) cppToIno=%v", len(r.Items), cppToIno)
-		return r
-
-	case []lsp.DocumentSymbol:
-		// method "textDocument/documentSymbol"
-		logger("    <-- documentSymbol(%d document symbols)", len(r))
-		return handler.cpp2inoDocumentSymbols(logger, r, inoURI)
-
-	case []lsp.SymbolInformation:
-		// method "textDocument/documentSymbol"
-		logger("    <-- documentSymbol(%d symbol information)", len(r))
-		return handler.cpp2inoSymbolInformation(r)
-
-	case []lsp.CommandOrCodeAction:
-		// method "textDocument/codeAction"
-		logger("    <-- codeAction(%d elements)", len(r))
-		for i := range r {
-			switch item := r[i].Get().(type) {
-			case lsp.Command:
-				logger("        > Command: %s", item.Title)
-				r[i].Set(handler.Cpp2InoCommand(logger, item))
-			case lsp.CodeAction:
-				logger("        > CodeAction: %s", item.Title)
-				r[i].Set(handler.cpp2inoCodeAction(logger, item, inoURI))
-			}
-		}
-		logger("<-- codeAction(%d elements)", len(r))
-
-	case *[]lsp.TextEdit:
-		// Method: "textDocument/rangeFormatting"
-		// Method: "textDocument/onTypeFormatting"
-		// Method: "textDocument/formatting"
-		logger("    <-- %s %s textEdit(%d elements)", method, cppURI, len(*r))
-		for _, edit := range *r {
-			logger("        > %s -> %s", edit.Range, strconv.Quote(edit.NewText))
-		}
-		sketchEdits, err := handler.cpp2inoTextEdits(logger, cppURI, *r)
-		if err != nil {
-			logger("ERROR converting textEdits: %s", err)
-			return nil
-		}
-
-		inoEdits, ok := sketchEdits[inoURI]
-		if !ok {
-			inoEdits = []lsp.TextEdit{}
-		}
-		logger("<-- %s %s textEdit(%d elements)", method, inoURI, len(inoEdits))
-		for _, edit := range inoEdits {
-			logger("        > %s -> %s", edit.Range, strconv.Quote(edit.NewText))
-		}
-		return &inoEdits
-
-	case *[]lsp.Location:
-		// Method: "textDocument/definition"
-		// Method: "textDocument/typeDefinition"
-		// Method: "textDocument/implementation"
-		// Method: "textDocument/references"
-		inoLocations := []lsp.Location{}
-		for _, cppLocation := range *r {
-			inoLocation, err := handler.cpp2inoLocation(logger, cppLocation)
-			if err != nil {
-				logger("ERROR converting location %s:%s: %s", cppLocation.URI, cppLocation.Range, err)
-				return nil
-			}
-			inoLocations = append(inoLocations, inoLocation)
-		}
-		return &inoLocations
-
-	case *[]lsp.SymbolInformation:
-		// Method: "workspace/symbol"
-
-		inoSymbols := []lsp.SymbolInformation{}
-		for _, cppSymbolInfo := range *r {
-			cppLocation := cppSymbolInfo.Location
-			inoLocation, err := handler.cpp2inoLocation(logger, cppLocation)
-			if err != nil {
-				logger("ERROR converting location %s:%s: %s", cppLocation.URI, cppLocation.Range, err)
-				return nil
-			}
-			inoSymbolInfo := cppSymbolInfo
-			inoSymbolInfo.Location = inoLocation
-			inoSymbols = append(inoSymbols, inoSymbolInfo)
-		}
-		return &inoSymbols
-
-	case *[]lsp.DocumentHighlight:
-		// Method: "textDocument/documentHighlight"
-		res := []lsp.DocumentHighlight{}
-		for _, cppHL := range *r {
-			inoHL, err := handler.cpp2inoDocumentHighlight(logger, &cppHL, cppURI)
-			if err != nil {
-				logger("ERROR converting location %s:%s: %s", cppURI, cppHL.Range, err)
-				return nil
-			}
-			res = append(res, *inoHL)
-		}
-		return &res
-
-	case *lsp.WorkspaceEdit: // "textDocument/rename":
-		return handler.cpp2inoWorkspaceEdit(logger, r)
-	}
-	return result
-}
-
-func (handler *INOLanguageServer) cpp2inoCodeAction(logger streams.PrefixLogger, codeAction lsp.CodeAction, uri lsp.DocumentURI) lsp.CodeAction {
+func (handler *INOLanguageServer) cpp2inoCodeAction(logger jsonrpc.FunctionLogger, codeAction lsp.CodeAction, uri lsp.DocumentURI) lsp.CodeAction {
 	inoCodeAction := lsp.CodeAction{
 		Title:       codeAction.Title,
 		Kind:        codeAction.Kind,
@@ -1542,7 +1852,7 @@ func (handler *INOLanguageServer) cpp2inoCodeAction(logger streams.PrefixLogger,
 		Diagnostics: codeAction.Diagnostics,
 	}
 	if codeAction.Command != nil {
-		inoCommand := handler.Cpp2InoCommand(logger, *codeAction.Command)
+		inoCommand := handler.cpp2inoCommand(logger, *codeAction.Command)
 		inoCodeAction.Command = &inoCommand
 	}
 	if uri.Ext() == ".ino" {
@@ -1553,7 +1863,7 @@ func (handler *INOLanguageServer) cpp2inoCodeAction(logger streams.PrefixLogger,
 	return inoCodeAction
 }
 
-func (handler *INOLanguageServer) Cpp2InoCommand(logger streams.PrefixLogger, command lsp.Command) lsp.Command {
+func (handler *INOLanguageServer) cpp2inoCommand(logger jsonrpc.FunctionLogger, command lsp.Command) lsp.Command {
 	inoCommand := lsp.Command{
 		Title:     command.Title,
 		Command:   command.Command,
@@ -1568,7 +1878,7 @@ func (handler *INOLanguageServer) Cpp2InoCommand(logger streams.PrefixLogger, co
 			}{}
 			if err := json.Unmarshal(command.Arguments[0], &v); err == nil {
 				if v.TweakID == "ExtractVariable" {
-					logger("            > converted clangd ExtractVariable")
+					logger.Logf("            > converted clangd ExtractVariable")
 					if v.File.AsPath().EquivalentTo(handler.buildSketchCpp) {
 						inoFile, inoSelection := handler.sketchMapper.CppToInoRange(v.Selection)
 						v.File = lsp.NewDocumentURI(inoFile)
@@ -1587,7 +1897,7 @@ func (handler *INOLanguageServer) Cpp2InoCommand(logger streams.PrefixLogger, co
 	return inoCommand
 }
 
-func (handler *INOLanguageServer) cpp2inoWorkspaceEdit(logger streams.PrefixLogger, cppWorkspaceEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
+func (handler *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger, cppWorkspaceEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
 	if cppWorkspaceEdit == nil {
 		return nil
 	}
@@ -1606,7 +1916,7 @@ func (handler *INOLanguageServer) cpp2inoWorkspaceEdit(logger streams.PrefixLogg
 		for _, edit := range edits {
 			inoURI, inoRange, err := handler.cpp2inoDocumentURI(logger, editURI, edit.Range)
 			if err != nil {
-				logger("    error converting edit %s:%s: %s", editURI, edit.Range, err)
+				logger.Logf("    error converting edit %s:%s: %s", editURI, edit.Range, err)
 				continue
 			}
 			//inoFile, inoRange := handler.sketchMapper.CppToInoRange(edit.Range)
@@ -1620,11 +1930,11 @@ func (handler *INOLanguageServer) cpp2inoWorkspaceEdit(logger streams.PrefixLogg
 			})
 		}
 	}
-	logger("    done converting workspaceEdit")
+	logger.Logf("    done converting workspaceEdit")
 	return inoWorkspaceEdit
 }
 
-func (handler *INOLanguageServer) cpp2inoLocation(logger streams.PrefixLogger, cppLocation lsp.Location) (lsp.Location, error) {
+func (handler *INOLanguageServer) cpp2inoLocation(logger jsonrpc.FunctionLogger, cppLocation lsp.Location) (lsp.Location, error) {
 	inoURI, inoRange, err := handler.cpp2inoDocumentURI(logger, cppLocation.URI, cppLocation.Range)
 	return lsp.Location{
 		URI:   inoURI,
@@ -1632,53 +1942,59 @@ func (handler *INOLanguageServer) cpp2inoLocation(logger streams.PrefixLogger, c
 	}, err
 }
 
-func (handler *INOLanguageServer) cpp2inoDocumentHighlight(logger streams.PrefixLogger, cppHighlight *lsp.DocumentHighlight, cppURI lsp.DocumentURI) (*lsp.DocumentHighlight, error) {
+func (handler *INOLanguageServer) cpp2inoDocumentHighlight(logger jsonrpc.FunctionLogger, cppHighlight lsp.DocumentHighlight, cppURI lsp.DocumentURI) (lsp.DocumentHighlight, error) {
 	_, inoRange, err := handler.cpp2inoDocumentURI(logger, cppURI, cppHighlight.Range)
 	if err != nil {
-		return nil, err
+		return lsp.DocumentHighlight{}, err
 	}
-	return &lsp.DocumentHighlight{
+	return lsp.DocumentHighlight{
 		Kind:  cppHighlight.Kind,
 		Range: inoRange,
 	}, nil
 }
 
-func (handler *INOLanguageServer) cpp2inoTextEdits(logger streams.PrefixLogger, cppURI lsp.DocumentURI, cppEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {
-	res := map[lsp.DocumentURI][]lsp.TextEdit{}
+func (handler *INOLanguageServer) cpp2inoTextEdits(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {
+	logger.Logf("%s cpp/textEdit (%d elements)", cppURI, len(cppEdits))
+	allInoEdits := map[lsp.DocumentURI][]lsp.TextEdit{}
 	for _, cppEdit := range cppEdits {
+		logger.Logf("        > %s -> %s", cppEdit.Range, strconv.Quote(cppEdit.NewText))
 		inoURI, inoEdit, err := handler.cpp2inoTextEdit(logger, cppURI, cppEdit)
 		if err != nil {
 			return nil, err
 		}
-		inoEdits, ok := res[inoURI]
-		if !ok {
-			inoEdits = []lsp.TextEdit{}
-		}
-		inoEdits = append(inoEdits, inoEdit)
-		res[inoURI] = inoEdits
+		allInoEdits[inoURI] = append(allInoEdits[inoURI], inoEdit)
 	}
-	return res, nil
+
+	logger.Logf("converted to:")
+
+	for inoURI, inoEdits := range allInoEdits {
+		logger.Logf("-> %s ino/textEdit (%d elements)", inoURI, len(inoEdits))
+		for _, inoEdit := range inoEdits {
+			logger.Logf("        > %s -> %s", inoEdit.Range, strconv.Quote(inoEdit.NewText))
+		}
+	}
+	return allInoEdits, nil
 }
 
-func (handler *INOLanguageServer) cpp2inoTextEdit(logger streams.PrefixLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, error) {
+func (handler *INOLanguageServer) cpp2inoTextEdit(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, error) {
 	inoURI, inoRange, err := handler.cpp2inoDocumentURI(logger, cppURI, cppEdit.Range)
 	inoEdit := cppEdit
 	inoEdit.Range = inoRange
 	return inoURI, inoEdit, err
 }
 
-func (handler *INOLanguageServer) cpp2inoDocumentSymbols(logger streams.PrefixLogger, cppSymbols []lsp.DocumentSymbol, inoRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
+func (handler *INOLanguageServer) cpp2inoDocumentSymbols(logger jsonrpc.FunctionLogger, cppSymbols []lsp.DocumentSymbol, inoRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
 	inoRequested := inoRequestedURI.AsPath().String()
-	logger("    filtering for requested ino file: %s", inoRequested)
+	logger.Logf("    filtering for requested ino file: %s", inoRequested)
 	if inoRequestedURI.Ext() != ".ino" || len(cppSymbols) == 0 {
 		return cppSymbols
 	}
 
 	inoSymbols := []lsp.DocumentSymbol{}
 	for _, symbol := range cppSymbols {
-		logger("    > convert %s %s", symbol.Kind, symbol.Range)
+		logger.Logf("    > convert %s %s", symbol.Kind, symbol.Range)
 		if handler.sketchMapper.IsPreprocessedCppLine(symbol.Range.Start.Line) {
-			logger("      symbol is in the preprocessed section of the sketch.ino.cpp")
+			logger.Logf("      symbol is in the preprocessed section of the sketch.ino.cpp")
 			continue
 		}
 
@@ -1686,14 +2002,14 @@ func (handler *INOLanguageServer) cpp2inoDocumentSymbols(logger streams.PrefixLo
 		inoSelectionURI, inoSelectionRange := handler.sketchMapper.CppToInoRange(symbol.SelectionRange)
 
 		if inoFile != inoSelectionURI {
-			logger("      ERROR: symbol range and selection belongs to different URI!")
-			logger("        symbol %s != selection %s", symbol.Range, symbol.SelectionRange)
-			logger("        %s:%s != %s:%s", inoFile, inoRange, inoSelectionURI, inoSelectionRange)
+			logger.Logf("      ERROR: symbol range and selection belongs to different URI!")
+			logger.Logf("        symbol %s != selection %s", symbol.Range, symbol.SelectionRange)
+			logger.Logf("        %s:%s != %s:%s", inoFile, inoRange, inoSelectionURI, inoSelectionRange)
 			continue
 		}
 
 		if inoFile != inoRequested {
-			logger("    skipping symbol related to %s", inoFile)
+			logger.Logf("    skipping symbol related to %s", inoFile)
 			continue
 		}
 
@@ -1736,7 +2052,7 @@ func (handler *INOLanguageServer) cpp2inoSymbolInformation(syms []lsp.SymbolInfo
 	// return symbols
 }
 
-func (handler *INOLanguageServer) cpp2inoDiagnostics(logger streams.PrefixLogger, cppDiags *lsp.PublishDiagnosticsParams) ([]*lsp.PublishDiagnosticsParams, error) {
+func (handler *INOLanguageServer) cpp2inoDiagnostics(logger jsonrpc.FunctionLogger, cppDiags *lsp.PublishDiagnosticsParams) ([]*lsp.PublishDiagnosticsParams, error) {
 	inoDiagsParam := map[lsp.DocumentURI]*lsp.PublishDiagnosticsParams{}
 
 	cppURI := cppDiags.URI
@@ -1794,7 +2110,7 @@ func (handler *INOLanguageServer) cpp2inoDiagnostics(logger streams.PrefixLogger
 					inoDiagCode == "undeclared_var_use" ||
 					inoDiagCode == "ovl_no_viable_function_in_call" ||
 					inoDiagCode == "pp_file_not_found" {
-					handler.buildSketchSymbolsCheck = true
+					handler.queueCheckCppDocumentSymbols()
 				}
 			}
 		}
@@ -1807,164 +2123,52 @@ func (handler *INOLanguageServer) cpp2inoDiagnostics(logger streams.PrefixLogger
 	return inoDiagParams, nil
 }
 
-// HandleRequestFromClangd handles a notification message received from clangd.
-func (handler *INOLanguageServer) HandleNotificationFromClangd(ctx context.Context, logger streams.PrefixLogger, method string, paramsRaw json.RawMessage) {
-	defer streams.CatchAndLogPanic()
+// // HandleRequestFromClangd handles a request message received from clangd.
+// func (handler *INOLanguageServer) HandleRequestFromClangd(ctx context.Context, logger jsonrpc.FunctionLogger,
+// 	method string, paramsRaw json.RawMessage,
+// 	respCallback func(result json.RawMessage, err *jsonrpc.ResponseError),
+// ) {
+// 	// n := atomic.AddInt64(&handler.clangdMessageCount, 1)
+// 	// prefix := fmt.Sprintf("CLG <-- %s %v ", method, n)
+// 	params, err := lsp.DecodeServerRequestParams(method, paramsRaw)
+// 	if err != nil {
+// 		logger.Logf("Error parsing clang message: %v", err)
+// 		respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
+// 		return
+// 	}
+// 	panic("unimplemented")
+// 	// Default to read lock
+// 	handler.readLock(logger, false)
+// 	defer handler.readUnlock(logger)
+// 	switch p := params.(type) {
+// 	case *lsp.ApplyWorkspaceEditParams:
+// 		// "workspace/applyEdit"
+// 		p.Edit = *handler.cpp2inoWorkspaceEdit(logger, &p.Edit)
+// 	}
+// 	if err != nil {
+// 		logger.Logf("From clangd: Method: %s, Error: %v", method, err)
+// 		respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
+// 		return
+// 	}
+// 	// respRaw := lsp.EncodeMessage(params)
+// 	// if params == nil {
+// 	// 	// passthrough
+// 	// 	logger.Logf("passing through message")
+// 	// 	respRaw = paramsRaw
+// 	// }
 
-	params, err := lsp.DecodeServerNotificationParams(method, paramsRaw)
-	if err != nil {
-		logger("error parsing clang message:", err)
-		return
-	}
-	if params == nil {
-		// passthrough
-		logger("IDE <-- LS NOTIF %s: passing through message", method)
-		if err := handler.IDEConn.SendNotification(method, paramsRaw); err != nil {
-			logger("Error sending notification to IDE: " + err.Error())
-		}
-		return
-	}
+// 	// logger.Logf("IDE <-- LS REQ %s", method)
+// 	// resp, respErr, err := handler.IDEConn.SendRequest(ctx, method, respRaw)
+// 	// if err != nil {
+// 	// 	logger.Logf("Error sending request to IDE:", err)
+// 	// 	respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
+// 	// 	return
+// 	// }
+// 	// logger.Logf("IDE --> LS REQ %s", method)
+// 	// respCallback(resp, respErr)
+// }
 
-	// method: "$/progress"
-	if progress, ok := params.(lsp.ProgressParams); ok {
-		var token string
-		if err := json.Unmarshal(progress.Token, &token); err != nil {
-			logger("error decoding progess token: %s", err)
-			return
-		}
-		switch value := progress.TryToDecodeWellKnownValues().(type) {
-		case lsp.WorkDoneProgressBegin:
-			// logger("report %s %v", id, value)
-			handler.progressHandler.Begin(token, &value)
-		case lsp.WorkDoneProgressReport:
-			// logger("report %s %v", id, value)
-			handler.progressHandler.Report(token, &value)
-		case lsp.WorkDoneProgressEnd:
-			// logger("end %s %v", id, value)
-			handler.progressHandler.End(token, &value)
-		default:
-			logger("error unsupported $/progress: " + string(progress.Value))
-		}
-		return
-	}
-
-	// Default to read lock
-	handler.readLock(logger, false)
-	defer handler.readUnlock(logger)
-
-	switch p := params.(type) {
-	case *lsp.PublishDiagnosticsParams:
-		// "textDocument/publishDiagnostics"
-		logger("publishDiagnostics(%s):", p.URI)
-		for _, diag := range p.Diagnostics {
-			logger("> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
-		}
-
-		// the diagnostics on sketch.cpp.ino once mapped into their
-		// .ino counter parts may span over multiple .ino files...
-		inoDiagnostics, err := handler.cpp2inoDiagnostics(logger, p)
-		if err != nil {
-			logger("    Error converting diagnostics to .ino: %s", err)
-			return
-		}
-
-		// Push back to IDE the converted diagnostics
-		for _, inoDiag := range inoDiagnostics {
-			logger("to IDE: publishDiagnostics(%s):", inoDiag.URI)
-			for _, diag := range inoDiag.Diagnostics {
-				logger("> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
-			}
-			method := "textDocument/publishDiagnostics"
-			logger("IDE <-- LS NOTIF %s:", method)
-			if err := handler.IDEConn.SendNotification(method, lsp.EncodeMessage(inoDiag)); err != nil {
-				logger("    Error sending diagnostics to IDE: %s", err)
-				return
-			}
-		}
-		return
-	}
-	if err != nil {
-		logger("From clangd: Method:", method, "Error:", err)
-		return
-	}
-
-	logger("IDE <-- LS NOTIF %s:", method)
-	if err := handler.IDEConn.SendNotification(method, lsp.EncodeMessage(params)); err != nil {
-		logger("Error sending notification to IDE: " + err.Error())
-	}
-}
-
-// HandleRequestFromClangd handles a request message received from clangd.
-func (handler *INOLanguageServer) HandleRequestFromClangd(ctx context.Context, logger streams.PrefixLogger,
-	method string, paramsRaw json.RawMessage,
-	respCallback func(result json.RawMessage, err *jsonrpc.ResponseError),
-) {
-	defer streams.CatchAndLogPanic()
-
-	// n := atomic.AddInt64(&handler.clangdMessageCount, 1)
-	// prefix := fmt.Sprintf("CLG <-- %s %v ", method, n)
-
-	params, err := lsp.DecodeServerRequestParams(method, paramsRaw)
-	if err != nil {
-		logger("Error parsing clang message: %v", err)
-		respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
-		return
-	}
-
-	if method == "window/workDoneProgress/create" {
-		// server initiated progress
-		var createReq lsp.WorkDoneProgressCreateParams
-		if err := json.Unmarshal(paramsRaw, &createReq); err != nil {
-			logger("error decoding window/workDoneProgress/create: %v", err)
-			respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
-			return
-		}
-
-		var token string
-		if err := json.Unmarshal(createReq.Token, &token); err != nil {
-			logger("error decoding progess token: %s", err)
-			respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
-			return
-		}
-		handler.progressHandler.Create(token)
-		respCallback(lsp.EncodeMessage(struct{}{}), nil)
-		return
-	}
-
-	// Default to read lock
-	handler.readLock(logger, false)
-	defer handler.readUnlock(logger)
-
-	switch p := params.(type) {
-	case *lsp.ApplyWorkspaceEditParams:
-		// "workspace/applyEdit"
-		p.Edit = *handler.cpp2inoWorkspaceEdit(logger, &p.Edit)
-	}
-	if err != nil {
-		logger("From clangd: Method: %s, Error: %v", method, err)
-		respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
-		return
-	}
-
-	respRaw := lsp.EncodeMessage(params)
-	if params == nil {
-		// passthrough
-		logger("passing through message")
-		respRaw = paramsRaw
-	}
-
-	logger("IDE <-- LS REQ %s", method)
-	resp, respErr, err := handler.IDEConn.SendRequest(ctx, method, respRaw)
-	if err != nil {
-		logger("Error sending request to IDE:", err)
-		respCallback(nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()})
-		return
-	}
-	logger("IDE --> LS REQ %s", method)
-	respCallback(resp, respErr)
-}
-
-func (handler *INOLanguageServer) createClangdFormatterConfig(logger streams.PrefixLogger, cppuri lsp.DocumentURI) (func(), error) {
+func (handler *INOLanguageServer) createClangdFormatterConfig(logger jsonrpc.FunctionLogger, cppuri lsp.DocumentURI) (func(), error) {
 	// clangd looks for a .clang-format configuration file on the same directory
 	// pointed by the uri passed in the lsp command parameters.
 	// https://github.com/llvm/llvm-project/blob/64d06ed9c9e0389cd27545d2f6e20455a91d89b1/clang-tools-extra/clangd/ClangdLSPServer.cpp#L856-L868
@@ -2119,9 +2323,9 @@ WhitespaceSensitiveMacros: []
 
 	try := func(conf *paths.Path) bool {
 		if c, err := conf.ReadFile(); err != nil {
-			logger("    error reading custom formatter config file %s: %s", conf, err)
+			logger.Logf("    error reading custom formatter config file %s: %s", conf, err)
 		} else {
-			logger("    using custom formatter config file %s", conf)
+			logger.Logf("    using custom formatter config file %s", conf)
 			config = string(c)
 		}
 		return true
@@ -2142,25 +2346,20 @@ WhitespaceSensitiveMacros: []
 	targetFile = targetFile.Join(".clang-format")
 	cleanup := func() {
 		targetFile.Remove()
-		logger("    formatter config cleaned")
+		logger.Logf("    formatter config cleaned")
 	}
-	logger("    writing formatter config in: %s", targetFile)
+	logger.Logf("    writing formatter config in: %s", targetFile)
 	err := targetFile.WriteFile([]byte(config))
 	return cleanup, err
 }
 
-func (handler *INOLanguageServer) showMessage(logger streams.PrefixLogger, msgType lsp.MessageType, message string) {
-	defer streams.CatchAndLogPanic()
-
+func (handler *INOLanguageServer) showMessage(logger jsonrpc.FunctionLogger, msgType lsp.MessageType, message string) {
 	params := lsp.ShowMessageParams{
 		Type:    msgType,
 		Message: message,
 	}
-
-	method := "window/showMessage"
-	logger("IDE <-- LS NOTIF %s:", method)
-	if err := handler.IDEConn.SendNotification(method, lsp.EncodeMessage(params)); err != nil {
-		// TODO: Log?
+	if err := handler.IDEConn.WindowShowMessage(&params); err != nil {
+		logger.Logf("error sending showMessage notification: %s", err)
 	}
 }
 
