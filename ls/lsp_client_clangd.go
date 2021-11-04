@@ -1,4 +1,4 @@
-package handler
+package ls
 
 import (
 	"context"
@@ -15,16 +15,16 @@ import (
 	"go.bug.st/lsp/jsonrpc"
 )
 
-type ClangdClient struct {
-	conn    *lsp.Client
-	handler *INOLanguageServer
+type ClangdLSPClient struct {
+	conn *lsp.Client
+	ls   *INOLanguageServer
 }
 
-func NewClangdClient(logger jsonrpc.FunctionLogger,
+func NewClangdLSPClient(logger jsonrpc.FunctionLogger,
 	buildPath, buildSketchCpp, dataFolder *paths.Path,
 	connectionClosedCB func(),
 	inoLanguageServer *INOLanguageServer,
-) *ClangdClient {
+) *ClangdLSPClient {
 	clangdStdout, clangdStdin, clangdStderr := startClangd(logger, buildPath, buildSketchCpp, dataFolder)
 	clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
 	if enableLogging {
@@ -34,8 +34,8 @@ func NewClangdClient(logger jsonrpc.FunctionLogger,
 		go io.Copy(os.Stderr, clangdStderr)
 	}
 
-	client := &ClangdClient{
-		handler: inoLanguageServer,
+	client := &ClangdLSPClient{
+		ls: inoLanguageServer,
 	}
 	client.conn = lsp.NewClient(clangdStdio, clangdStdio, client)
 	client.conn.SetLogger(&LSPLogger{IncomingPrefix: "IDE     LS <-- Clangd", OutgoingPrefix: "IDE     LS --> Clangd"})
@@ -74,68 +74,68 @@ func startClangd(logger jsonrpc.FunctionLogger, compileCommandsDir, sketchCpp, d
 	}
 }
 
-func (client *ClangdClient) Close() {
+func (client *ClangdLSPClient) Close() {
 	panic("unimplemented")
 }
 
 // The following are events incoming from Clangd
 
-func (client *ClangdClient) WindowShowMessageRequest(context.Context, jsonrpc.FunctionLogger, *lsp.ShowMessageRequestParams) (*lsp.MessageActionItem, *jsonrpc.ResponseError) {
+func (client *ClangdLSPClient) WindowShowMessageRequest(context.Context, jsonrpc.FunctionLogger, *lsp.ShowMessageRequestParams) (*lsp.MessageActionItem, *jsonrpc.ResponseError) {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) WindowShowDocument(context.Context, jsonrpc.FunctionLogger, *lsp.ShowDocumentParams) (*lsp.ShowDocumentResult, *jsonrpc.ResponseError) {
+func (client *ClangdLSPClient) WindowShowDocument(context.Context, jsonrpc.FunctionLogger, *lsp.ShowDocumentParams) (*lsp.ShowDocumentResult, *jsonrpc.ResponseError) {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) WindowWorkDoneProgressCreate(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
-	return client.handler.WindowWorkDoneProgressCreateFromClangd(ctx, logger, params)
+func (client *ClangdLSPClient) WindowWorkDoneProgressCreate(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
+	return client.ls.WindowWorkDoneProgressCreateFromClangd(ctx, logger, params)
 }
 
-func (client *ClangdClient) ClientRegisterCapability(context.Context, jsonrpc.FunctionLogger, *lsp.RegistrationParams) *jsonrpc.ResponseError {
+func (client *ClangdLSPClient) ClientRegisterCapability(context.Context, jsonrpc.FunctionLogger, *lsp.RegistrationParams) *jsonrpc.ResponseError {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) ClientUnregisterCapability(context.Context, jsonrpc.FunctionLogger, *lsp.UnregistrationParams) *jsonrpc.ResponseError {
+func (client *ClangdLSPClient) ClientUnregisterCapability(context.Context, jsonrpc.FunctionLogger, *lsp.UnregistrationParams) *jsonrpc.ResponseError {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) WorkspaceWorkspaceFolders(context.Context, jsonrpc.FunctionLogger) ([]lsp.WorkspaceFolder, *jsonrpc.ResponseError) {
+func (client *ClangdLSPClient) WorkspaceWorkspaceFolders(context.Context, jsonrpc.FunctionLogger) ([]lsp.WorkspaceFolder, *jsonrpc.ResponseError) {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) WorkspaceConfiguration(context.Context, jsonrpc.FunctionLogger, *lsp.ConfigurationParams) ([]json.RawMessage, *jsonrpc.ResponseError) {
+func (client *ClangdLSPClient) WorkspaceConfiguration(context.Context, jsonrpc.FunctionLogger, *lsp.ConfigurationParams) ([]json.RawMessage, *jsonrpc.ResponseError) {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) WorkspaceApplyEdit(context.Context, jsonrpc.FunctionLogger, *lsp.ApplyWorkspaceEditParams) (*lsp.ApplyWorkspaceEditResult, *jsonrpc.ResponseError) {
+func (client *ClangdLSPClient) WorkspaceApplyEdit(context.Context, jsonrpc.FunctionLogger, *lsp.ApplyWorkspaceEditParams) (*lsp.ApplyWorkspaceEditResult, *jsonrpc.ResponseError) {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) WorkspaceCodeLensRefresh(context.Context, jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
+func (client *ClangdLSPClient) WorkspaceCodeLensRefresh(context.Context, jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) Progress(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
-	client.handler.ProgressFromClangd(logger, progress)
+func (client *ClangdLSPClient) Progress(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
+	client.ls.ProgressFromClangd(logger, progress)
 }
 
-func (client *ClangdClient) LogTrace(jsonrpc.FunctionLogger, *lsp.LogTraceParams) {
+func (client *ClangdLSPClient) LogTrace(jsonrpc.FunctionLogger, *lsp.LogTraceParams) {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) WindowShowMessage(jsonrpc.FunctionLogger, *lsp.ShowMessageParams) {
+func (client *ClangdLSPClient) WindowShowMessage(jsonrpc.FunctionLogger, *lsp.ShowMessageParams) {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) WindowLogMessage(jsonrpc.FunctionLogger, *lsp.LogMessageParams) {
+func (client *ClangdLSPClient) WindowLogMessage(jsonrpc.FunctionLogger, *lsp.LogMessageParams) {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) TelemetryEvent(jsonrpc.FunctionLogger, json.RawMessage) {
+func (client *ClangdLSPClient) TelemetryEvent(jsonrpc.FunctionLogger, json.RawMessage) {
 	panic("unimplemented")
 }
 
-func (client *ClangdClient) TextDocumentPublishDiagnostics(logger jsonrpc.FunctionLogger, params *lsp.PublishDiagnosticsParams) {
-	client.handler.PublishDiagnosticsFromClangd(logger, params)
+func (client *ClangdLSPClient) TextDocumentPublishDiagnostics(logger jsonrpc.FunctionLogger, params *lsp.PublishDiagnosticsParams) {
+	client.ls.PublishDiagnosticsFromClangd(logger, params)
 }

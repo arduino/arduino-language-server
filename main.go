@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/arduino/arduino-language-server/handler"
+	"github.com/arduino/arduino-language-server/ls"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
 )
@@ -52,15 +52,15 @@ func main() {
 		log.Fatal("Path to ArduinoCLI config file must be set.")
 	}
 
-	handler.Setup(cliPath, cliConfigPath, clangdPath, formatFilePath, enableLogging)
-	initialBoard := handler.Board{Fqbn: initialFqbn, Name: initialBoardName}
+	ls.Setup(cliPath, cliConfigPath, clangdPath, formatFilePath, enableLogging)
+	initialBoard := ls.Board{Fqbn: initialFqbn, Name: initialBoardName}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
 	if enableLogging {
 		stdio = streams.LogReadWriteCloserAs(stdio, "inols.log")
 	}
 
-	inoHandler := handler.NewINOLanguageServer(stdio, stdio, initialBoard)
+	inoHandler := ls.NewINOLanguageServer(stdio, stdio, initialBoard)
 
 	// Intercept kill signal
 	c := make(chan os.Signal, 2)

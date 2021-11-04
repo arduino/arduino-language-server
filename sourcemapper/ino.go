@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/arduino/arduino-language-server/handler/textutils"
+	"github.com/arduino/arduino-language-server/textutils"
 	"github.com/arduino/go-paths-helper"
 	"github.com/pkg/errors"
 	"go.bug.st/lsp"
