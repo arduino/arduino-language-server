@@ -972,13 +972,13 @@ func (ls *INOLanguageServer) ProgressNotifFromClangd(logger jsonrpc.FunctionLogg
 	}
 	switch value := progress.TryToDecodeWellKnownValues().(type) {
 	case lsp.WorkDoneProgressBegin:
-		logger.Logf("begin %s %v", token, value)
+		logger.Logf("%s %s", token, value)
 		ls.progressHandler.Begin(token, &value)
 	case lsp.WorkDoneProgressReport:
-		logger.Logf("report %s %v", token, value)
+		logger.Logf("%s %s", token, value)
 		ls.progressHandler.Report(token, &value)
 	case lsp.WorkDoneProgressEnd:
-		logger.Logf("end %s %v", token, value)
+		logger.Logf("%s %s", token, value)
 		ls.progressHandler.End(token, &value)
 	default:
 		logger.Logf("error unsupported $/progress: " + string(progress.Value))
