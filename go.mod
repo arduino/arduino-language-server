@@ -11,7 +11,6 @@ require (
 	github.com/arduino/go-paths-helper v1.6.1
 	github.com/fatih/color v1.7.0
 	github.com/pkg/errors v0.9.1
-	github.com/sourcegraph/jsonrpc2 v0.0.0-20200429184054-15c2290dcb37
 	github.com/stretchr/testify v1.6.1
 	go.bug.st/json v1.0.0
 	go.bug.st/lsp v0.0.0-00010101000000-000000000000
