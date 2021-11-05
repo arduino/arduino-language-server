@@ -845,6 +845,9 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 			logger.Logf("Clang already notified, do not notify it anymore")
 			return
 		}
+
+		// Queue a load of ino.cpp document symbols
+		ls.queueLoadCppDocumentSymbols()
 	}
 
 	if cppItem, err := ls.ino2cppTextDocumentItem(logger, inoTextDocItem); err != nil {
@@ -1111,7 +1114,6 @@ func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, 
 		}
 	}
 
-	ls.queueLoadCppDocumentSymbols()
 	return nil
 }
 
