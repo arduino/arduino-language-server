@@ -56,7 +56,6 @@ type INOLanguageServer struct {
 	buildPath                  *paths.Path
 	buildSketchRoot            *paths.Path
 	buildSketchCpp             *paths.Path
-	buildSketchCppVersion      int
 	buildSketchSymbols         []lsp.DocumentSymbol
 	buildSketchIncludesCanary  string
 	buildSketchSymbolsCanary   string
@@ -68,7 +67,7 @@ type INOLanguageServer struct {
 	sketchName                 string
 	sketchMapper               *sourcemapper.InoMapper
 	sketchTrackedFilesCount    int
-	docs                       map[string]lsp.TextDocumentItem
+	trackedInoDocs             map[string]lsp.TextDocumentItem
 	inoDocsWithDiagnostics     map[lsp.DocumentURI]bool
 
 	config BoardConfig
@@ -147,7 +146,7 @@ func (ls *INOLanguageServer) waitClangdStart(logger jsonrpc.FunctionLogger) erro
 func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLanguageServer {
 	logger := NewLSPFunctionLogger(color.HiWhiteString, "LS: ")
 	ls := &INOLanguageServer{
-		docs:                    map[string]lsp.TextDocumentItem{},
+		trackedInoDocs:          map[string]lsp.TextDocumentItem{},
 		inoDocsWithDiagnostics:  map[lsp.DocumentURI]bool{},
 		closing:                 make(chan bool),
 		buildSketchSymbolsLoad:  make(chan bool, 1),
@@ -833,7 +832,7 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 
 	// Add the TextDocumentItem in the tracked files list
 	inoTextDocItem := inoParam.TextDocument
-	ls.docs[inoTextDocItem.URI.AsPath().String()] = inoTextDocItem
+	ls.trackedInoDocs[inoTextDocItem.URI.AsPath().String()] = inoTextDocItem
 
 	// If we are tracking a .ino...
 	if inoTextDocItem.URI.Ext() == ".ino" {
@@ -1044,7 +1043,6 @@ func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, 
 		return err
 	}
 	ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
-	ls.buildSketchCppVersion = 1
 	ls.lspInitializeParams.RootPath = ls.buildSketchRoot.String()
 	ls.lspInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
 
@@ -1255,8 +1253,8 @@ func canonicalizeCompileCommandsJSON(compileCommandsDir *paths.Path) map[string]
 
 func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
 	inoIdentifier := inoDidClose.TextDocument
-	if _, exist := ls.docs[inoIdentifier.URI.AsPath().String()]; exist {
-		delete(ls.docs, inoIdentifier.URI.AsPath().String())
+	if _, exist := ls.trackedInoDocs[inoIdentifier.URI.AsPath().String()]; exist {
+		delete(ls.trackedInoDocs, inoIdentifier.URI.AsPath().String())
 	} else {
 		logger.Logf("    didClose of untracked document: %s", inoIdentifier.URI)
 		return nil, unknownURI(inoIdentifier.URI)
@@ -1293,89 +1291,90 @@ func (ls *INOLanguageServer) ino2cppTextDocumentItem(logger jsonrpc.FunctionLogg
 	} else {
 		cppItem.LanguageID = inoItem.LanguageID
 		inoPath := inoItem.URI.AsPath().String()
-		cppItem.Text = ls.docs[inoPath].Text
-		cppItem.Version = ls.docs[inoPath].Version
+		cppItem.Text = ls.trackedInoDocs[inoPath].Text
+		cppItem.Version = ls.trackedInoDocs[inoPath].Version
 	}
 
 	return cppItem, nil
 }
 
-func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, req *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
-	doc := req.TextDocument
+func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChangeParams *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
+	inoDoc := inoDidChangeParams.TextDocument
 
-	trackedDoc, ok := ls.docs[doc.URI.AsPath().String()]
+	// Apply the change to the tracked sketch file.
+	trackedInoID := inoDoc.URI.AsPath().String()
+	trackedInoDoc, ok := ls.trackedInoDocs[trackedInoID]
 	if !ok {
-		return nil, unknownURI(doc.URI)
+		return nil, unknownURI(inoDoc.URI)
 	}
-	textutils.ApplyLSPTextDocumentContentChangeEvent(&trackedDoc, req.ContentChanges, doc.Version)
+	if updatedTrackedInoDoc, err := textutils.ApplyLSPTextDocumentContentChangeEvent(trackedInoDoc, inoDidChangeParams.ContentChanges, inoDoc.Version); err != nil {
+		return nil, err
+	} else {
+		ls.trackedInoDocs[trackedInoID] = updatedTrackedInoDoc
+	}
+
+	logger.Logf("Tracked SKETCH file:----------+\n" + ls.trackedInoDocs[trackedInoID].Text + "\n----------------------")
+
+	// If the file is not part of a .ino flie forward the change as-is to clangd
+	if inoDoc.URI.Ext() != ".ino" {
+		if cppDoc, err := ls.ino2cppVersionedTextDocumentIdentifier(logger, inoDidChangeParams.TextDocument); err != nil {
+			return nil, err
+		} else {
+			cppDidChangeParams := *inoDidChangeParams
+			cppDidChangeParams.TextDocument = cppDoc
+			return &cppDidChangeParams, nil
+		}
+	}
 
 	// If changes are applied to a .ino file we increment the global .ino.cpp versioning
 	// for each increment of the single .ino file.
-	if doc.URI.Ext() == ".ino" {
 
-		cppChanges := []lsp.TextDocumentContentChangeEvent{}
-		for _, inoChange := range req.ContentChanges {
-			cppRange, ok := ls.sketchMapper.InoToCppLSPRangeOk(doc.URI, inoChange.Range)
-			if !ok {
-				return nil, errors.Errorf("invalid change range %s:%s", doc.URI, inoChange.Range)
-			}
+	cppChanges := []lsp.TextDocumentContentChangeEvent{}
+	for _, inoChange := range inoDidChangeParams.ContentChanges {
+		cppChangeRange, ok := ls.sketchMapper.InoToCppLSPRangeOk(inoDoc.URI, inoChange.Range)
+		if !ok {
+			return nil, errors.Errorf("invalid change range %s:%s", inoDoc.URI, inoChange.Range)
+		}
 
-			// Detect changes in critical lines (for example function definitions)
-			// and trigger arduino-preprocessing + clangd restart.
-			dirty := false
-			for _, sym := range ls.buildSketchSymbols {
-				if sym.SelectionRange.Overlaps(cppRange) {
-					dirty = true
-					logger.Logf("--! DIRTY CHANGE detected using symbol tables, force sketch rebuild!")
-					break
-				}
-			}
-			if ls.sketchMapper.ApplyTextChange(doc.URI, inoChange) {
+		// Detect changes in critical lines (for example function definitions)
+		// and trigger arduino-preprocessing + clangd restart.
+		dirty := false
+		for _, sym := range ls.buildSketchSymbols {
+			if sym.SelectionRange.Overlaps(cppChangeRange) {
 				dirty = true
-				logger.Logf("--! DIRTY CHANGE detected with sketch mapper, force sketch rebuild!")
+				logger.Logf("--! DIRTY CHANGE detected using symbol tables, force sketch rebuild!")
+				break
 			}
-			if dirty {
-				ls.scheduleRebuildEnvironment()
-			}
-
-			// logger.Logf("New version:----------")
-			// logger.Logf(ls.sketchMapper.CppText.Text)
-			// logger.Logf("----------------------")
-
-			cppChange := lsp.TextDocumentContentChangeEvent{
-				Range:       cppRange,
-				RangeLength: inoChange.RangeLength,
-				Text:        inoChange.Text,
-			}
-			cppChanges = append(cppChanges, cppChange)
+		}
+		if ls.sketchMapper.ApplyTextChange(inoDoc.URI, inoChange) {
+			dirty = true
+			logger.Logf("--! DIRTY CHANGE detected with sketch mapper, force sketch rebuild!")
+		}
+		if dirty {
+			ls.scheduleRebuildEnvironment()
 		}
 
-		ls.CheckCppIncludesChanges()
+		logger.Logf("New version:----------+\n" + ls.sketchMapper.CppText.Text + "\n----------------------")
 
-		// build a cpp equivalent didChange request
-		cppReq := &lsp.DidChangeTextDocumentParams{
-			ContentChanges: cppChanges,
-			TextDocument: lsp.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: lsp.TextDocumentIdentifier{
-					URI: lsp.NewDocumentURIFromPath(ls.buildSketchCpp),
-				},
-				Version: ls.sketchMapper.CppText.Version,
+		cppChanges = append(cppChanges, lsp.TextDocumentContentChangeEvent{
+			Range:       cppChangeRange,
+			RangeLength: inoChange.RangeLength,
+			Text:        inoChange.Text,
+		})
+	}
+
+	ls.CheckCppIncludesChanges()
+
+	// build a cpp equivalent didChange request
+	return &lsp.DidChangeTextDocumentParams{
+		ContentChanges: cppChanges,
+		TextDocument: lsp.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: lsp.TextDocumentIdentifier{
+				URI: lsp.NewDocumentURIFromPath(ls.buildSketchCpp),
 			},
-		}
-
-		return cppReq, nil
-	}
-
-	// If changes are applied to other files pass them by converting just the URI
-	cppDoc, err := ls.ino2cppVersionedTextDocumentIdentifier(logger, req.TextDocument)
-	if err != nil {
-		return nil, err
-	}
-	cppReq := &lsp.DidChangeTextDocumentParams{
-		TextDocument:   cppDoc,
-		ContentChanges: req.ContentChanges,
-	}
-	return cppReq, err
+			Version: ls.sketchMapper.CppText.Version,
+		},
+	}, nil
 }
 
 func (ls *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger jsonrpc.FunctionLogger, doc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
@@ -1429,11 +1428,11 @@ func (ls *INOLanguageServer) inoDocumentURIFromInoPath(logger jsonrpc.FunctionLo
 	if inoPath == sourcemapper.NotIno.File {
 		return sourcemapper.NotInoURI, nil
 	}
-	doc, ok := ls.docs[inoPath]
+	doc, ok := ls.trackedInoDocs[inoPath]
 	if !ok {
 		logger.Logf("    !!! Unresolved .ino path: %s", inoPath)
 		logger.Logf("    !!! Known doc paths are:")
-		for p := range ls.docs {
+		for p := range ls.trackedInoDocs {
 			logger.Logf("    !!! > %s", p)
 		}
 		uri := lsp.NewDocumentURI(inoPath)

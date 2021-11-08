@@ -94,7 +94,7 @@ func (handler *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.Functi
 		Overrides map[string]string `json:"overrides"`
 	}
 	data := overridesFile{Overrides: map[string]string{}}
-	for uri, trackedFile := range handler.docs {
+	for uri, trackedFile := range handler.trackedInoDocs {
 		rel, err := paths.New(uri).RelFrom(handler.sketchRoot)
 		if err != nil {
 			return errors.WithMessage(err, "dumping tracked files")
@@ -107,6 +107,7 @@ func (handler *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.Functi
 	} else if tmpFile, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
 		return errors.WithMessage(err, "dumping tracked files")
 	} else {
+		// logger.Logf("Dumped overrides: %s", string(jsonBytes))
 		overridesJSON = tmpFile
 		defer tmpFile.Remove()
 	}
