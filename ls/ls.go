@@ -892,12 +892,12 @@ func (ls *INOLanguageServer) TextDocumentDidSaveNotifFromIDE(logger jsonrpc.Func
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
-	logger.Logf("didSave(%s)", inoParams.TextDocument)
+	logger.Logf("didSave(%s) hasText=%v", inoParams.TextDocument, inoParams.Text != "")
 	if cppTextDocument, err := ls.ino2cppTextDocumentIdentifier(logger, inoParams.TextDocument); err != nil {
 		logger.Logf("--E Error: %s", err)
 	} else if cppTextDocument.URI.AsPath().EquivalentTo(ls.buildSketchCpp) {
 		logger.Logf("    didSave(%s) equals %s", cppTextDocument, ls.buildSketchCpp)
-		logger.Logf("--| didSave not forwarded to clangd")
+		logger.Logf("    the notification will be not forwarded to clangd")
 	} else {
 		logger.Logf("LS --> CL NOTIF didSave(%s)", cppTextDocument)
 		if err := ls.Clangd.conn.TextDocumentDidSave(&lsp.DidSaveTextDocumentParams{
@@ -938,7 +938,7 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 	ls.readLock(logger, false)
 	defer ls.readUnlock(logger)
 
-	logger.Logf("publishDiagnostics(%s):", cppParams.URI)
+	logger.Logf("from clang %s (%d diagnostics):", cppParams.URI, cppParams.Diagnostics)
 	for _, diag := range cppParams.Diagnostics {
 		logger.Logf("> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
 	}
@@ -953,12 +953,10 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 
 	// Push back to IDE the converted diagnostics
 	for _, inoParams := range allInoParams {
-		logger.Logf("to IDE: publishDiagnostics(%s):", inoParams.URI)
+		logger.Logf("to IDE: %s (%d diagnostics):", inoParams.URI, len(inoParams.Diagnostics))
 		for _, diag := range inoParams.Diagnostics {
-			logger.Logf("> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+			logger.Logf("        > %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
 		}
-		logger.Logf("IDE <-- LS NOTIF textDocument/publishDiagnostics:")
-
 		if err := ls.IDE.conn.TextDocumentPublishDiagnostics(inoParams); err != nil {
 			logger.Logf("    Error sending diagnostics to IDE: %s", err)
 			return
@@ -1265,7 +1263,7 @@ func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose
 		ls.sketchTrackedFilesCount--
 		logger.Logf("    decreasing .ino tracked files count: %d", ls.sketchTrackedFilesCount)
 
-		// notify clang that sketchCpp has been close only once all .ino are closed
+		// notify clang that sketch.cpp.ino has been closed only once all .ino are closed
 		if ls.sketchTrackedFilesCount != 0 {
 			return nil, nil
 		}
@@ -1753,31 +1751,50 @@ func (ls *INOLanguageServer) cpp2inoSymbolInformation(syms []lsp.SymbolInformati
 	panic("not implemented")
 }
 
-func (ls *INOLanguageServer) cpp2inoDiagnostics(logger jsonrpc.FunctionLogger, cppDiags *lsp.PublishDiagnosticsParams) ([]*lsp.PublishDiagnosticsParams, error) {
-	inoDiagsParam := map[lsp.DocumentURI]*lsp.PublishDiagnosticsParams{}
+func (ls *INOLanguageServer) cpp2inoDiagnostics(logger jsonrpc.FunctionLogger, cppDiagsParams *lsp.PublishDiagnosticsParams) ([]*lsp.PublishDiagnosticsParams, error) {
 
-	cppURI := cppDiags.URI
+	cppURI := cppDiagsParams.URI
 	isSketch := cppURI.AsPath().EquivalentTo(ls.buildSketchCpp)
-	if isSketch {
-		for inoURI := range ls.inoDocsWithDiagnostics {
-			inoDiagsParam[inoURI] = &lsp.PublishDiagnosticsParams{
-				URI:         inoURI,
-				Diagnostics: []lsp.Diagnostic{},
-			}
-		}
-		ls.inoDocsWithDiagnostics = map[lsp.DocumentURI]bool{}
-	} else {
+
+	if !isSketch {
 		inoURI, _, err := ls.cpp2inoDocumentURI(logger, cppURI, lsp.NilRange)
 		if err != nil {
 			return nil, err
 		}
-		inoDiagsParam[inoURI] = &lsp.PublishDiagnosticsParams{
+		inoDiags := []lsp.Diagnostic{}
+		for _, cppDiag := range cppDiagsParams.Diagnostics {
+			inoURIofConvertedRange, inoRange, err := ls.cpp2inoDocumentURI(logger, cppURI, cppDiag.Range)
+			if err != nil {
+				return nil, err
+			}
+			if inoURIofConvertedRange.String() == sourcemapper.NotInoURI.String() {
+				continue
+			}
+			if inoURIofConvertedRange.String() != inoURI.String() {
+				return nil, fmt.Errorf("unexpected inoURI %s: it should be %s", inoURIofConvertedRange, inoURI)
+			}
+			inoDiag := cppDiag
+			inoDiag.Range = inoRange
+			inoDiags = append(inoDiags, inoDiag)
+		}
+		return []*lsp.PublishDiagnosticsParams{
+			{
+				URI:         inoURI,
+				Diagnostics: inoDiags,
+			},
+		}, nil
+	}
+
+	allInoDiagsParams := map[lsp.DocumentURI]*lsp.PublishDiagnosticsParams{}
+	for inoURI := range ls.inoDocsWithDiagnostics {
+		allInoDiagsParams[inoURI] = &lsp.PublishDiagnosticsParams{
 			URI:         inoURI,
 			Diagnostics: []lsp.Diagnostic{},
 		}
 	}
+	ls.inoDocsWithDiagnostics = map[lsp.DocumentURI]bool{}
 
-	for _, cppDiag := range cppDiags.Diagnostics {
+	for _, cppDiag := range cppDiagsParams.Diagnostics {
 		inoURI, inoRange, err := ls.cpp2inoDocumentURI(logger, cppURI, cppDiag.Range)
 		if err != nil {
 			return nil, err
@@ -1786,39 +1803,37 @@ func (ls *INOLanguageServer) cpp2inoDiagnostics(logger jsonrpc.FunctionLogger, c
 			continue
 		}
 
-		inoDiagParam, created := inoDiagsParam[inoURI]
-		if !created {
-			inoDiagParam = &lsp.PublishDiagnosticsParams{
+		inoDiagsParams, ok := allInoDiagsParams[inoURI]
+		if !ok {
+			inoDiagsParams = &lsp.PublishDiagnosticsParams{
 				URI:         inoURI,
 				Diagnostics: []lsp.Diagnostic{},
 			}
-			inoDiagsParam[inoURI] = inoDiagParam
+			allInoDiagsParams[inoURI] = inoDiagsParams
 		}
 
 		inoDiag := cppDiag
 		inoDiag.Range = inoRange
-		inoDiagParam.Diagnostics = append(inoDiagParam.Diagnostics, inoDiag)
+		inoDiagsParams.Diagnostics = append(inoDiagsParams.Diagnostics, inoDiag)
 
-		if isSketch {
-			ls.inoDocsWithDiagnostics[inoURI] = true
+		ls.inoDocsWithDiagnostics[inoURI] = true
 
-			// If we have an "undefined reference" in the .ino code trigger a
-			// check for newly created symbols (that in turn may trigger a
-			// new arduino-preprocessing of the sketch).
-			var inoDiagCode string
-			if err := json.Unmarshal(inoDiag.Code, &inoDiagCode); err != nil {
-				if inoDiagCode == "undeclared_var_use_suggest" ||
-					inoDiagCode == "undeclared_var_use" ||
-					inoDiagCode == "ovl_no_viable_function_in_call" ||
-					inoDiagCode == "pp_file_not_found" {
-					ls.queueCheckCppDocumentSymbols()
-				}
+		// If we have an "undefined reference" in the .ino code trigger a
+		// check for newly created symbols (that in turn may trigger a
+		// new arduino-preprocessing of the sketch).
+		var inoDiagCode string
+		if err := json.Unmarshal(inoDiag.Code, &inoDiagCode); err != nil {
+			if inoDiagCode == "undeclared_var_use_suggest" ||
+				inoDiagCode == "undeclared_var_use" ||
+				inoDiagCode == "ovl_no_viable_function_in_call" ||
+				inoDiagCode == "pp_file_not_found" {
+				ls.queueCheckCppDocumentSymbols()
 			}
 		}
 	}
 
 	inoDiagParams := []*lsp.PublishDiagnosticsParams{}
-	for _, v := range inoDiagsParam {
+	for _, v := range allInoDiagsParams {
 		inoDiagParams = append(inoDiagParams, v)
 	}
 	return inoDiagParams, nil
