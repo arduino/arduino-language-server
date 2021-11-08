@@ -1056,20 +1056,13 @@ func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, 
 	if params == nil {
 		// If we are restarting re-synchronize clangd
 		cppURI := lsp.NewDocumentURIFromPath(ls.buildSketchCpp)
-		cppTextDocumentIdentifier := lsp.TextDocumentIdentifier{URI: cppURI}
 
-		syncEvent := &lsp.DidChangeTextDocumentParams{
-			TextDocument: lsp.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: cppTextDocumentIdentifier,
-				Version:                ls.sketchMapper.CppText.Version,
-			},
-			ContentChanges: []lsp.TextDocumentContentChangeEvent{
-				{Text: ls.sketchMapper.CppText.Text}, // Full text change
-			},
+		logger.Logf("LS --> CL NOTIF textDocument/didSave:")
+		didSaveParams := &lsp.DidSaveTextDocumentParams{
+			TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
+			Text:         ls.sketchMapper.CppText.Text,
 		}
-
-		logger.Logf("LS --> CL NOTIF textDocument/didChange:")
-		if err := ls.Clangd.conn.TextDocumentDidChange(syncEvent); err != nil {
+		if err := ls.Clangd.conn.TextDocumentDidSave(didSaveParams); err != nil {
 			logger.Logf("    error reinitilizing clangd:", err)
 			return err
 		}
