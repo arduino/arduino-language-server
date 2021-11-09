@@ -1091,7 +1091,6 @@ func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, 
 
 		didSaveParams := &lsp.DidSaveTextDocumentParams{
 			TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
-			Text:         ls.sketchMapper.CppText.Text,
 		}
 		if err := ls.Clangd.conn.TextDocumentDidSave(didSaveParams); err != nil {
 			logger.Logf("    error reinitilizing clangd:", err)
