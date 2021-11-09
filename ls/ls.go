@@ -279,28 +279,61 @@ func (handler *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logg
 					IncludeText: true,
 				},
 			},
-			HoverProvider: &lsp.HoverOptions{}, // true,
 			CompletionProvider: &lsp.CompletionOptions{
-				TriggerCharacters: []string{".", "\u003e", ":"},
+				AllCommitCharacters: []string{
+					" ", "\t", "(", ")", "[", "]", "{", "}", "<", ">",
+					":", ";", ",", "+", "-", "/", "*", "%", "^", "&",
+					"#", "?", ".", "=", "\"", "'", "|"},
+				ResolveProvider: false,
+				TriggerCharacters: []string{ //".", "\u003e", ":"
+					".", "<", ">", ":", "\"", "/"},
 			},
 			SignatureHelpProvider: &lsp.SignatureHelpOptions{
 				TriggerCharacters: []string{"(", ","},
 			},
-			DefinitionProvider: &lsp.DefinitionOptions{}, // true,
-			// ReferencesProvider:              &lsp.ReferenceOptions{},  // TODO: true
-			DocumentHighlightProvider:       &lsp.DocumentHighlightOptions{}, //true,
-			DocumentSymbolProvider:          &lsp.DocumentSymbolOptions{},    //true,
-			WorkspaceSymbolProvider:         &lsp.WorkspaceSymbolOptions{},   //true,
+			// ReferencesProvider:              &lsp.ReferenceOptions{},
+			// DeclarationProvider:             &lsp.DeclarationRegistrationOptions{},
+			// DocumentLinkProvider:            &lsp.DocumentLinkOptions{ResolveProvider: false},
+			// ImplementationProvider:          &lsp.ImplementationRegistrationOptions{},
+			// SelectionRangeProvider:          &lsp.SelectionRangeRegistrationOptions{},
+			DefinitionProvider:              &lsp.DefinitionOptions{},
+			DocumentHighlightProvider:       &lsp.DocumentHighlightOptions{},
+			DocumentSymbolProvider:          &lsp.DocumentSymbolOptions{},
+			WorkspaceSymbolProvider:         &lsp.WorkspaceSymbolOptions{},
 			CodeActionProvider:              &lsp.CodeActionOptions{ResolveProvider: true},
-			DocumentFormattingProvider:      &lsp.DocumentFormattingOptions{},      //true,
-			DocumentRangeFormattingProvider: &lsp.DocumentRangeFormattingOptions{}, //true,
+			DocumentFormattingProvider:      &lsp.DocumentFormattingOptions{},
+			DocumentRangeFormattingProvider: &lsp.DocumentRangeFormattingOptions{},
+			HoverProvider:                   &lsp.HoverOptions{},
 			DocumentOnTypeFormattingProvider: &lsp.DocumentOnTypeFormattingOptions{
 				FirstTriggerCharacter: "\n",
+				MoreTriggerCharacter:  []string{},
 			},
-			RenameProvider: &lsp.RenameOptions{PrepareProvider: false}, // TODO: true
+			RenameProvider: &lsp.RenameOptions{
+				// PrepareProvider: true,
+			},
 			ExecuteCommandProvider: &lsp.ExecuteCommandOptions{
 				Commands: []string{"clangd.applyFix", "clangd.applyTweak"},
 			},
+			// SemanticTokensProvider: &lsp.SemanticTokensRegistrationOptions{
+			// 	SemanticTokensOptions: &lsp.SemanticTokensOptions{
+			// 		Full: &lsp.SemantiTokenFullOptions{
+			// 			Delta: true,
+			// 		},
+			// 		Legend: lsp.SemanticTokensLegend{
+			// 			TokenModifiers: []string{},
+			// 			TokenTypes: []string{
+			// 				"variable", "variable", "parameter", "function", "method", "function", "property", "variable",
+			// 				"class", "enum", "enumMember", "type", "dependent", "dependent", "namespace", "typeParameter",
+			// 				"concept", "type", "macro", "comment",
+			// 			},
+			// 		},
+			// 		Range: false,
+			// 	},
+			// },
+		},
+		ServerInfo: &lsp.InitializeResultServerInfo{
+			Name:    "arduino-language-server",
+			Version: "0.5.0-beta",
 		},
 	}
 	logger.Logf("initialization parameters: %s", string(lsp.EncodeMessage(resp)))
