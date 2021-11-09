@@ -24,7 +24,9 @@ func NewIDELSPServer(logger jsonrpc.FunctionLogger, in io.Reader, out io.Writer,
 		IncomingPrefix: "IDE --> LS",
 		OutgoingPrefix: "IDE <-- LS",
 		HiColor:        color.HiGreenString,
-		LoColor:        color.GreenString})
+		LoColor:        color.GreenString,
+		ErrorColor:     color.New(color.BgHiMagenta, color.FgHiWhite, color.BlinkSlow).Sprintf,
+	})
 	return server
 }
 

@@ -12,6 +12,7 @@ import (
 type LSPLogger struct {
 	IncomingPrefix, OutgoingPrefix string
 	HiColor, LoColor               func(format string, a ...interface{}) string
+	ErrorColor                     func(format string, a ...interface{}) string
 }
 
 func (l *LSPLogger) LogOutgoingRequest(id string, method string, params json.RawMessage) {
@@ -21,7 +22,11 @@ func (l *LSPLogger) LogOutgoingCancelRequest(id string) {
 	log.Print(l.LoColor("%s CANCEL %s", l.OutgoingPrefix, id))
 }
 func (l *LSPLogger) LogIncomingResponse(id string, method string, resp json.RawMessage, respErr *jsonrpc.ResponseError) {
-	log.Print(l.LoColor("%s RESP %s %s", l.IncomingPrefix, method, id))
+	e := ""
+	if respErr != nil {
+		e = l.ErrorColor(" ERROR: %s", respErr.AsError())
+	}
+	log.Print(l.LoColor("%s RESP %s %s%s", l.IncomingPrefix, method, id, e))
 }
 func (l *LSPLogger) LogOutgoingNotification(method string, params json.RawMessage) {
 	log.Print(l.HiColor("%s NOTIF %s", l.OutgoingPrefix, method))
@@ -39,7 +44,11 @@ func (l *LSPLogger) LogIncomingCancelRequest(id string) {
 	log.Print(l.LoColor("%s CANCEL %s", l.IncomingPrefix, id))
 }
 func (l *LSPLogger) LogOutgoingResponse(id string, method string, resp json.RawMessage, respErr *jsonrpc.ResponseError) {
-	log.Print(l.LoColor("%s RESP %s %s", l.OutgoingPrefix, method, id))
+	e := ""
+	if respErr != nil {
+		e = l.ErrorColor(" ERROR: %s", respErr.AsError())
+	}
+	log.Print(l.LoColor("%s RESP %s %s%s", l.OutgoingPrefix, method, id, e))
 }
 func (l *LSPLogger) LogIncomingNotification(method string, params json.RawMessage) jsonrpc.FunctionLogger {
 	spaces := "                                               "

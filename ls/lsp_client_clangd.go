@@ -43,7 +43,9 @@ func NewClangdLSPClient(
 		IncomingPrefix: "IDE     LS <-- Clangd",
 		OutgoingPrefix: "IDE     LS --> Clangd",
 		HiColor:        color.HiRedString,
-		LoColor:        color.RedString})
+		LoColor:        color.RedString,
+		ErrorColor:     color.New(color.BgHiMagenta, color.FgHiWhite, color.BlinkSlow).Sprintf,
+	})
 	return client
 }
 
