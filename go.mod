@@ -2,16 +2,12 @@ module github.com/arduino/arduino-language-server
 
 go 1.12
 
-replace go.bug.st/lsp => ../lsp
-
-replace go.bug.st/json => ../go-json
-
 require (
-	github.com/arduino/arduino-cli v0.0.0-20201215104024-6a177ebf56f2
+	github.com/arduino/arduino-cli v0.0.0-20211105112240-8cae8809aad9
 	github.com/arduino/go-paths-helper v1.6.1
-	github.com/fatih/color v1.7.0
+	github.com/fatih/color v1.13.0
 	github.com/pkg/errors v0.9.1
-	github.com/stretchr/testify v1.6.1
-	go.bug.st/json v1.0.0
-	go.bug.st/lsp v0.0.0-00010101000000-000000000000
+	github.com/stretchr/testify v1.7.0
+	go.bug.st/json v1.15.6
+	go.bug.st/lsp v0.0.0-20211109230950-26242be380a2
 )
