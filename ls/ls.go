@@ -65,7 +65,7 @@ type INOLanguageServer struct {
 	rebuildSketchDeadlineMutex sync.Mutex
 	sketchRoot                 *paths.Path
 	sketchName                 string
-	sketchMapper               *sourcemapper.InoMapper
+	sketchMapper               *sourcemapper.SketchMapper
 	sketchTrackedFilesCount    int
 	trackedInoDocs             map[string]lsp.TextDocumentItem
 	inoDocsWithDiagnostics     map[lsp.DocumentURI]bool
