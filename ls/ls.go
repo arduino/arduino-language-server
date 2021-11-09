@@ -1099,6 +1099,19 @@ func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, 
 			logger.Logf("    error reinitilizing clangd:", err)
 			return err
 		}
+		didChangeParams := &lsp.DidChangeTextDocumentParams{
+			TextDocument: lsp.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: cppURI},
+				Version:                ls.sketchMapper.CppText.Version,
+			},
+			ContentChanges: []lsp.TextDocumentContentChangeEvent{
+				{Text: ls.sketchMapper.CppText.Text},
+			},
+		}
+		if err := ls.Clangd.conn.TextDocumentDidChange(didChangeParams); err != nil {
+			logger.Logf("    error reinitilizing clangd:", err)
+			return err
+		}
 	} else {
 		// Otherwise start clangd!
 		dataFolder, err := extractDataFolderFromArduinoCLI(logger)
