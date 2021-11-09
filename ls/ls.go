@@ -452,7 +452,7 @@ func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Con
 
 	logger.Logf("%s", inoTextDocumentPosition)
 	cppTextDocumentPosition, err := ls.ino2cppTextDocumentPositionParams(logger, inoTextDocumentPosition)
-	if err == nil {
+	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
