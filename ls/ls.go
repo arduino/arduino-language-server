@@ -244,76 +244,74 @@ func (handler *INOLanguageServer) CheckCppDocumentSymbols() error {
 	return nil
 }
 
-func (ls *INOLanguageServer) startClangd(inoParams *lsp.InitializeParams) error {
-	logger := NewLSPFunctionLogger(color.HiCyanString, "INIT --- ")
-	logger.Logf("initializing workbench: %s", inoParams.RootURI)
-
-	// Start clangd asynchronously
-	ls.writeLock(logger, false) // do not wait for clangd... we are starting it :-)
-	defer ls.writeUnlock(logger)
-
-	ls.sketchRoot = inoParams.RootURI.AsPath()
-	ls.sketchName = ls.sketchRoot.Base()
-	ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
-
-	if err := ls.generateBuildEnvironment(logger); err != nil {
-		return err
-	}
-
-	if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
-		ls.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
-		ls.sketchMapper.CppText.Version = 1
-	} else {
-		return errors.WithMessage(err, "reading generated cpp file from sketch")
-	}
-
-	// Let's start clangd!
-	dataFolder, err := extractDataFolderFromArduinoCLI(logger)
-	if err != nil {
-		logger.Logf("error: %s", err)
-	}
-
-	// Start clangd
-	ls.Clangd = NewClangdLSPClient(logger, ls.buildPath, ls.buildSketchCpp, dataFolder, ls)
+func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
+	ls.writeLock(logger, false /* do not wait for clangd... we are going to start it! */)
 	go func() {
 		defer streams.CatchAndLogPanic()
-		ls.Clangd.Run()
-		logger.Logf("Lost connection with clangd!")
-		ls.Close()
-	}()
+		// the lock is "moved" into the goroutine
+		defer ls.writeUnlock(logger)
 
-	// Send initialization command to clangd (1 sec. timeout)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	cppInitializeParams := *inoParams
-	cppInitializeParams.RootPath = ls.buildSketchRoot.String()
-	cppInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
-	if initRes, clangErr, err := ls.Clangd.conn.Initialize(ctx, &cppInitializeParams); err != nil {
-		logger.Logf("error initilizing clangd: %v", err)
-		return err
-	} else if clangErr != nil {
-		logger.Logf("error initilizing clangd: %v", clangErr.AsError())
-		return clangErr.AsError()
-	} else {
-		logger.Logf("clangd successfully started: %s", string(lsp.EncodeMessage(initRes)))
-	}
+		logger := NewLSPFunctionLogger(color.HiCyanString, "INIT --- ")
+		logger.Logf("initializing workbench: %s", inoParams.RootURI)
 
-	if err := ls.Clangd.conn.Initialized(&lsp.InitializedParams{}); err != nil {
-		logger.Logf("error sending initialized notification to clangd: %v", err)
-		return err
-	}
+		ls.sketchRoot = inoParams.RootURI.AsPath()
+		ls.sketchName = ls.sketchRoot.Base()
+		ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
 
-	// signal that clangd is running now...
-	ls.clangdStarted.Broadcast()
+		if err := ls.generateBuildEnvironment(logger); err != nil {
+			logger.Logf("error starting clang: %s", err)
+			return
+		}
 
-	logger.Logf("Done initializing workbench")
-	return nil
-}
+		if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
+			ls.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
+			ls.sketchMapper.CppText.Version = 1
+		} else {
+			logger.Logf("error starting clang: reading generated cpp file from sketch: %s", err)
+			return
+		}
 
-func (handler *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
-	go func() {
-		defer streams.CatchAndLogPanic()
-		handler.startClangd(inoParams)
+		// Retrieve data folder
+		dataFolder, err := extractDataFolderFromArduinoCLI(logger)
+		if err != nil {
+			logger.Logf("error retrieving data folder from arduino-cli: %s", err)
+			return
+		}
+
+		// Start clangd
+		ls.Clangd = NewClangdLSPClient(logger, ls.buildPath, ls.buildSketchCpp, dataFolder, ls)
+		go func() {
+			defer streams.CatchAndLogPanic()
+			ls.Clangd.Run()
+			logger.Logf("Lost connection with clangd!")
+			ls.Close()
+		}()
+
+		// Send initialization command to clangd (1 sec. timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		cppInitializeParams := *inoParams
+		cppInitializeParams.RootPath = ls.buildSketchRoot.String()
+		cppInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
+		if initRes, clangErr, err := ls.Clangd.conn.Initialize(ctx, &cppInitializeParams); err != nil {
+			logger.Logf("error initilizing clangd: %v", err)
+			return
+		} else if clangErr != nil {
+			logger.Logf("error initilizing clangd: %v", clangErr.AsError())
+			return
+		} else {
+			logger.Logf("clangd successfully started: %s", string(lsp.EncodeMessage(initRes)))
+		}
+
+		if err := ls.Clangd.conn.Initialized(&lsp.InitializedParams{}); err != nil {
+			logger.Logf("error sending initialized notification to clangd: %v", err)
+			return
+		}
+
+		// signal that clangd is running now...
+		ls.clangdStarted.Broadcast()
+
+		logger.Logf("Done initializing workbench")
 	}()
 
 	resp := &lsp.InitializeResult{
