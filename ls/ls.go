@@ -50,7 +50,6 @@ type INOLanguageServer struct {
 	closing                    chan bool
 	clangdStarted              *sync.Cond
 	dataMux                    sync.RWMutex
-	lspInitializeParams        *lsp.InitializeParams
 	buildPath                  *paths.Path
 	buildSketchRoot            *paths.Path
 	buildSketchCpp             *paths.Path
@@ -245,21 +244,70 @@ func (handler *INOLanguageServer) CheckCppDocumentSymbols() error {
 	return nil
 }
 
-func (handler *INOLanguageServer) startClangd(inoParams *lsp.InitializeParams) {
+func (ls *INOLanguageServer) startClangd(inoParams *lsp.InitializeParams) error {
 	logger := NewLSPFunctionLogger(color.HiCyanString, "INIT --- ")
-	logger.Logf("initializing workbench")
+	logger.Logf("initializing workbench: %s", inoParams.RootURI)
 
 	// Start clangd asynchronously
-	handler.writeLock(logger, false) // do not wait for clangd... we are starting it :-)
-	defer handler.writeUnlock(logger)
+	ls.writeLock(logger, false) // do not wait for clangd... we are starting it :-)
+	defer ls.writeUnlock(logger)
 
-	// TODO: Inline this function
-	handler.initializeWorkbench(logger, inoParams)
+	ls.sketchRoot = inoParams.RootURI.AsPath()
+	ls.sketchName = ls.sketchRoot.Base()
+	ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
+
+	if err := ls.generateBuildEnvironment(logger); err != nil {
+		return err
+	}
+
+	if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
+		ls.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
+		ls.sketchMapper.CppText.Version = 1
+	} else {
+		return errors.WithMessage(err, "reading generated cpp file from sketch")
+	}
+
+	// Let's start clangd!
+	dataFolder, err := extractDataFolderFromArduinoCLI(logger)
+	if err != nil {
+		logger.Logf("error: %s", err)
+	}
+
+	// Start clangd
+	ls.Clangd = NewClangdLSPClient(logger, ls.buildPath, ls.buildSketchCpp, dataFolder, ls)
+	go func() {
+		defer streams.CatchAndLogPanic()
+		ls.Clangd.Run()
+		logger.Logf("Lost connection with clangd!")
+		ls.Close()
+	}()
+
+	// Send initialization command to clangd (1 sec. timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	cppInitializeParams := *inoParams
+	cppInitializeParams.RootPath = ls.buildSketchRoot.String()
+	cppInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
+	if initRes, clangErr, err := ls.Clangd.conn.Initialize(ctx, &cppInitializeParams); err != nil {
+		logger.Logf("error initilizing clangd: %v", err)
+		return err
+	} else if clangErr != nil {
+		logger.Logf("error initilizing clangd: %v", clangErr.AsError())
+		return clangErr.AsError()
+	} else {
+		logger.Logf("clangd successfully started: %s", string(lsp.EncodeMessage(initRes)))
+	}
+
+	if err := ls.Clangd.conn.Initialized(&lsp.InitializedParams{}); err != nil {
+		logger.Logf("error sending initialized notification to clangd: %v", err)
+		return err
+	}
 
 	// signal that clangd is running now...
-	handler.clangdStarted.Broadcast()
+	ls.clangdStarted.Broadcast()
 
 	logger.Logf("Done initializing workbench")
+	return nil
 }
 
 func (handler *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
@@ -1051,26 +1099,9 @@ func (ls *INOLanguageServer) CleanUp() {
 	}
 }
 
-func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, params *lsp.InitializeParams) error {
-	// TODO: This function must be split into two
-	// -> start clang (when params != nil)
-	// -> reser clang status (when params == nil)
-	// the two flows shares very little
-
-	currCppTextVersion := 0
-	if params != nil {
-		logger.Logf("    --> initialize(%s)", params.RootURI)
-		ls.sketchRoot = params.RootURI.AsPath()
-		ls.sketchName = ls.sketchRoot.Base()
-		ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
-
-		ls.lspInitializeParams = params
-		ls.lspInitializeParams.RootPath = ls.buildSketchRoot.String()
-		ls.lspInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
-	} else {
-		logger.Logf("    --> RE-initialize()")
-		currCppTextVersion = ls.sketchMapper.CppText.Version
-	}
+func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger) error {
+	logger.Logf("--> RE-initialize()")
+	currCppTextVersion := ls.sketchMapper.CppText.Version
 
 	if err := ls.generateBuildEnvironment(logger); err != nil {
 		return err
@@ -1083,69 +1114,31 @@ func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, 
 		return errors.WithMessage(err, "reading generated cpp file from sketch")
 	}
 
-	if params == nil {
-		// If we are restarting re-synchronize clangd
-		cppURI := lsp.NewDocumentURIFromPath(ls.buildSketchCpp)
+	// Send didSave to notify clang that the source cpp is changed
+	logger.Logf("Sending 'didSave' notification to Clangd")
+	cppURI := lsp.NewDocumentURIFromPath(ls.buildSketchCpp)
+	didSaveParams := &lsp.DidSaveTextDocumentParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
+	}
+	if err := ls.Clangd.conn.TextDocumentDidSave(didSaveParams); err != nil {
+		logger.Logf("error reinitilizing clangd:", err)
+		return err
+	}
 
-		logger.Logf("Sending 'didSave' notification to Clangd")
-
-		didSaveParams := &lsp.DidSaveTextDocumentParams{
-			TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
-		}
-		if err := ls.Clangd.conn.TextDocumentDidSave(didSaveParams); err != nil {
-			logger.Logf("    error reinitilizing clangd:", err)
-			return err
-		}
-
-		logger.Logf("Sending 'didChange' notification to Clangd")
-		didChangeParams := &lsp.DidChangeTextDocumentParams{
-			TextDocument: lsp.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: cppURI},
-				Version:                ls.sketchMapper.CppText.Version,
-			},
-			ContentChanges: []lsp.TextDocumentContentChangeEvent{
-				{Text: ls.sketchMapper.CppText.Text},
-			},
-		}
-		if err := ls.Clangd.conn.TextDocumentDidChange(didChangeParams); err != nil {
-			logger.Logf("    error reinitilizing clangd:", err)
-			return err
-		}
-	} else {
-		// Otherwise start clangd!
-		dataFolder, err := extractDataFolderFromArduinoCLI(logger)
-		if err != nil {
-			logger.Logf("    error: %s", err)
-		}
-
-		// Start clangd
-		ls.Clangd = NewClangdLSPClient(logger, ls.buildPath, ls.buildSketchCpp, dataFolder, ls)
-		go func() {
-			defer streams.CatchAndLogPanic()
-			ls.Clangd.Run()
-			logger.Logf("Lost connection with clangd!")
-			ls.Close()
-		}()
-
-		// Send initialization command to clangd
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		initRes, clangErr, err := ls.Clangd.conn.Initialize(ctx, ls.lspInitializeParams)
-		if err != nil {
-			logger.Logf("    error initilizing clangd: %v", err)
-			return err
-		}
-		if clangErr != nil {
-			logger.Logf("    error initilizing clangd: %v", clangErr.AsError())
-			return clangErr.AsError()
-		} else {
-			logger.Logf("clangd successfully started: %s", string(lsp.EncodeMessage(initRes)))
-		}
-
-		if err := ls.Clangd.conn.Initialized(&lsp.InitializedParams{}); err != nil {
-			logger.Logf("    error sending initialized notification to clangd: %v", err)
-			return err
-		}
+	// Send the full text to clang
+	logger.Logf("Sending full-text 'didChange' notification to Clangd")
+	didChangeParams := &lsp.DidChangeTextDocumentParams{
+		TextDocument: lsp.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: cppURI},
+			Version:                ls.sketchMapper.CppText.Version,
+		},
+		ContentChanges: []lsp.TextDocumentContentChangeEvent{
+			{Text: ls.sketchMapper.CppText.Text},
+		},
+	}
+	if err := ls.Clangd.conn.TextDocumentDidChange(didChangeParams); err != nil {
+		logger.Logf("error reinitilizing clangd:", err)
+		return err
 	}
 
 	return nil
@@ -1359,6 +1352,7 @@ func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChan
 		if dirty {
 			ls.scheduleRebuildEnvironment()
 		}
+		ls.sketchMapper.DebugLogAll()
 
 		logger.Logf("New version:----------+\n" + ls.sketchMapper.CppText.Text + "\n----------------------")
 

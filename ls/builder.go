@@ -79,8 +79,8 @@ func (handler *INOLanguageServer) rebuildEnvironmentLoop() {
 			}
 		}()
 
-		handler.writeLock(logger, false)
-		handler.initializeWorkbench(logger, nil)
+		handler.writeLock(logger, true)
+		handler.initializeWorkbench(logger)
 		handler.writeUnlock(logger)
 		done <- true
 		close(done)
