@@ -210,7 +210,7 @@ func unquoteCppString(str string) string {
 // It returns true if the change is "dirty", this happens when the change alters preprocessed lines
 // and a new preprocessing may be probably required.
 func (s *SketchMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDocumentContentChangeEvent) (dirty bool) {
-	inoRange := inoChange.Range
+	inoRange := *inoChange.Range
 	cppRange, ok := s.InoToCppLSPRangeOk(inoURI, inoRange)
 	if !ok {
 		panic("Invalid sketch range " + inoURI.String() + ":" + inoRange.String())

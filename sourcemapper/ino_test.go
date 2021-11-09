@@ -58,7 +58,7 @@ func TestCreateSourceMaps(t *testing.T) {
 	sourceMap.DebugLogAll()
 
 	sourceMap.ApplyTextChange(lsp.NewDocumentURIFromPath(sketch), lsp.TextDocumentContentChangeEvent{
-		Range: lsp.Range{
+		Range: &lsp.Range{
 			Start: lsp.Position{Line: 3, Character: 0},
 			End:   lsp.Position{Line: 3, Character: 0},
 		},

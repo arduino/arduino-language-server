@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/arduino/arduino-cli/arduino/builder"
 	"github.com/arduino/arduino-cli/executils"
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
@@ -1062,20 +1060,21 @@ func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, 
 	currCppTextVersion := 0
 	if params != nil {
 		logger.Logf("    --> initialize(%s)", params.RootURI)
-		ls.lspInitializeParams = params
 		ls.sketchRoot = params.RootURI.AsPath()
 		ls.sketchName = ls.sketchRoot.Base()
+		ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
+
+		ls.lspInitializeParams = params
+		ls.lspInitializeParams.RootPath = ls.buildSketchRoot.String()
+		ls.lspInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
 	} else {
 		logger.Logf("    --> RE-initialize()")
 		currCppTextVersion = ls.sketchMapper.CppText.Version
 	}
 
-	if err := ls.generateBuildEnvironment(logger, ls.buildPath); err != nil {
+	if err := ls.generateBuildEnvironment(logger); err != nil {
 		return err
 	}
-	ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
-	ls.lspInitializeParams.RootPath = ls.buildSketchRoot.String()
-	ls.lspInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
 
 	if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
 		ls.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
@@ -1084,13 +1083,12 @@ func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, 
 		return errors.WithMessage(err, "reading generated cpp file from sketch")
 	}
 
-	canonicalizeCompileCommandsJSON(ls.buildPath)
-
 	if params == nil {
 		// If we are restarting re-synchronize clangd
 		cppURI := lsp.NewDocumentURIFromPath(ls.buildSketchCpp)
 
-		logger.Logf("LS --> CL NOTIF textDocument/didSave:")
+		logger.Logf("Sending 'didSave' notification to Clangd")
+
 		didSaveParams := &lsp.DidSaveTextDocumentParams{
 			TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
 			Text:         ls.sketchMapper.CppText.Text,
@@ -1099,6 +1097,8 @@ func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger, 
 			logger.Logf("    error reinitilizing clangd:", err)
 			return err
 		}
+
+		logger.Logf("Sending 'didChange' notification to Clangd")
 		didChangeParams := &lsp.DidChangeTextDocumentParams{
 			TextDocument: lsp.VersionedTextDocumentIdentifier{
 				TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: cppURI},
@@ -1258,36 +1258,6 @@ func (ls *INOLanguageServer) CheckCppIncludesChanges() {
 	}
 }
 
-func canonicalizeCompileCommandsJSON(compileCommandsDir *paths.Path) map[string]bool {
-	// Open compile_commands.json and find the main cross-compiler executable
-	compileCommandsJSONPath := compileCommandsDir.Join("compile_commands.json")
-	compileCommands, err := builder.LoadCompilationDatabase(compileCommandsJSONPath)
-	if err != nil {
-		panic("could not find compile_commands.json")
-	}
-	compilers := map[string]bool{}
-	for i, cmd := range compileCommands.Contents {
-		if len(cmd.Arguments) == 0 {
-			panic("invalid empty argument field in compile_commands.json")
-		}
-
-		// clangd requires full path to compiler (including extension .exe on Windows!)
-		compilerPath := paths.New(cmd.Arguments[0]).Canonical()
-		compiler := compilerPath.String()
-		if runtime.GOOS == "windows" && strings.ToLower(compilerPath.Ext()) != ".exe" {
-			compiler += ".exe"
-		}
-		compileCommands.Contents[i].Arguments[0] = compiler
-
-		compilers[compiler] = true
-	}
-
-	// Save back compile_commands.json with OS native file separator and extension
-	compileCommands.SaveToFile()
-
-	return compilers
-}
-
 func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
 	inoIdentifier := inoDidClose.TextDocument
 	if _, exist := ls.trackedInoDocs[inoIdentifier.URI.AsPath().String()]; exist {
@@ -1368,7 +1338,7 @@ func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChan
 
 	cppChanges := []lsp.TextDocumentContentChangeEvent{}
 	for _, inoChange := range inoDidChangeParams.ContentChanges {
-		cppChangeRange, ok := ls.sketchMapper.InoToCppLSPRangeOk(inoDoc.URI, inoChange.Range)
+		cppChangeRange, ok := ls.sketchMapper.InoToCppLSPRangeOk(inoDoc.URI, *inoChange.Range)
 		if !ok {
 			return nil, errors.Errorf("invalid change range %s:%s", inoDoc.URI, inoChange.Range)
 		}
@@ -1394,7 +1364,7 @@ func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChan
 		logger.Logf("New version:----------+\n" + ls.sketchMapper.CppText.Text + "\n----------------------")
 
 		cppChanges = append(cppChanges, lsp.TextDocumentContentChangeEvent{
-			Range:       cppChangeRange,
+			Range:       &cppChangeRange,
 			RangeLength: inoChange.RangeLength,
 			Text:        inoChange.Text,
 		})

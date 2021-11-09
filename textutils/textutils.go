@@ -9,7 +9,7 @@ import (
 // ApplyLSPTextDocumentContentChangeEvent applies the LSP change in the given text
 func ApplyLSPTextDocumentContentChangeEvent(textDoc lsp.TextDocumentItem, changes []lsp.TextDocumentContentChangeEvent, version int) (lsp.TextDocumentItem, error) {
 	for _, change := range changes {
-		if t, err := ApplyTextChange(textDoc.Text, change.Range, change.Text); err == nil {
+		if t, err := ApplyTextChange(textDoc.Text, *change.Range, change.Text); err == nil {
 			textDoc.Text = t
 		} else {
 			return lsp.TextDocumentItem{}, err

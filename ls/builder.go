@@ -2,9 +2,11 @@ package ls
 
 import (
 	"bytes"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/arduino/arduino-cli/arduino/builder"
 	"github.com/arduino/arduino-cli/arduino/libraries"
 	"github.com/arduino/arduino-cli/executils"
 	"github.com/arduino/arduino-language-server/streams"
@@ -85,17 +87,17 @@ func (handler *INOLanguageServer) rebuildEnvironmentLoop() {
 	}
 }
 
-func (handler *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.FunctionLogger, buildPath *paths.Path) error {
-	sketchDir := handler.sketchRoot
-	fqbn := handler.config.SelectedBoard.Fqbn
+func (ls *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.FunctionLogger) error {
+	sketchDir := ls.sketchRoot
+	fqbn := ls.config.SelectedBoard.Fqbn
 
 	// Export temporary files
 	type overridesFile struct {
 		Overrides map[string]string `json:"overrides"`
 	}
 	data := overridesFile{Overrides: map[string]string{}}
-	for uri, trackedFile := range handler.trackedInoDocs {
-		rel, err := paths.New(uri).RelFrom(handler.sketchRoot)
+	for uri, trackedFile := range ls.trackedInoDocs {
+		rel, err := paths.New(uri).RelFrom(ls.sketchRoot)
 		if err != nil {
 			return errors.WithMessage(err, "dumping tracked files")
 		}
@@ -104,12 +106,12 @@ func (handler *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.Functi
 	var overridesJSON *paths.Path
 	if jsonBytes, err := json.MarshalIndent(data, "", "  "); err != nil {
 		return errors.WithMessage(err, "dumping tracked files")
-	} else if tmpFile, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
+	} else if tmp, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
 		return errors.WithMessage(err, "dumping tracked files")
 	} else {
-		// logger.Logf("Dumped overrides: %s", string(jsonBytes))
-		overridesJSON = tmpFile
-		defer tmpFile.Remove()
+		logger.Logf("Dumped overrides: %s", string(jsonBytes))
+		overridesJSON = tmp
+		defer tmp.Remove()
 	}
 
 	// XXX: do this from IDE or via gRPC
@@ -120,7 +122,7 @@ func (handler *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.Functi
 		"--only-compilation-database",
 		"--clean",
 		"--source-override", overridesJSON.String(),
-		"--build-path", buildPath.String(),
+		"--build-path", ls.buildPath.String(),
 		"--format", "json",
 		sketchDir.String(),
 	}
@@ -153,5 +155,32 @@ func (handler *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.Functi
 	}
 	logger.Logf("arduino-cli output: %s", cmdOutput)
 
+	// TODO: do canonicalization directly in `arduino-cli`
+	canonicalizeCompileCommandsJSON(ls.buildPath)
+
 	return nil
+}
+
+func canonicalizeCompileCommandsJSON(compileCommandsDir *paths.Path) {
+	compileCommandsJSONPath := compileCommandsDir.Join("compile_commands.json")
+	compileCommands, err := builder.LoadCompilationDatabase(compileCommandsJSONPath)
+	if err != nil {
+		panic("could not find compile_commands.json")
+	}
+	for i, cmd := range compileCommands.Contents {
+		if len(cmd.Arguments) == 0 {
+			panic("invalid empty argument field in compile_commands.json")
+		}
+
+		// clangd requires full path to compiler (including extension .exe on Windows!)
+		compilerPath := paths.New(cmd.Arguments[0]).Canonical()
+		compiler := compilerPath.String()
+		if runtime.GOOS == "windows" && strings.ToLower(compilerPath.Ext()) != ".exe" {
+			compiler += ".exe"
+		}
+		compileCommands.Contents[i].Arguments[0] = compiler
+	}
+
+	// Save back compile_commands.json with OS native file separator and extension
+	compileCommands.SaveToFile()
 }
