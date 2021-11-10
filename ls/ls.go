@@ -1296,6 +1296,14 @@ func (ls *INOLanguageServer) ino2cppTextDocumentItem(logger jsonrpc.FunctionLogg
 }
 
 func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChangeParams *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
+	// Clear all RangeLengths: it's a deprecated field and if the byte count is wrong the
+	// source text file will be unloaded from clangd without notice, leading to a "non-added
+	// docuemtn" error for all subsequent requests.
+	// https://github.com/clangd/clangd/issues/717#issuecomment-793220007
+	for i := range inoDidChangeParams.ContentChanges {
+		inoDidChangeParams.ContentChanges[i].RangeLength = nil
+	}
+
 	inoDoc := inoDidChangeParams.TextDocument
 
 	// Apply the change to the tracked sketch file.
