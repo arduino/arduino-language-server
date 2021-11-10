@@ -103,13 +103,17 @@ func (ls *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.FunctionLog
 		}
 		data.Overrides[rel.String()] = trackedFile.Text
 	}
+
+	for filename, override := range data.Overrides {
+		logger.Logf("Dumped %s override:\n%s", filename, override)
+	}
+
 	var overridesJSON *paths.Path
 	if jsonBytes, err := json.MarshalIndent(data, "", "  "); err != nil {
 		return errors.WithMessage(err, "dumping tracked files")
 	} else if tmp, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
 		return errors.WithMessage(err, "dumping tracked files")
 	} else {
-		logger.Logf("Dumped overrides: %s", string(jsonBytes))
 		overridesJSON = tmp
 		defer tmp.Remove()
 	}

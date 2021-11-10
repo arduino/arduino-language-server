@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/arduino/arduino-language-server/textutils"
 	"github.com/arduino/go-paths-helper"
 	"github.com/pkg/errors"
 	"go.bug.st/lsp"
+	"go.bug.st/lsp/textedits"
 )
 
 // SketchMapper is a mapping between the .ino sketch and the preprocessed .cpp file
@@ -219,7 +219,7 @@ func (s *SketchMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.Tex
 	deletedLines := inoRange.End.Line - inoRange.Start.Line
 
 	// Apply text changes
-	newText, err := textutils.ApplyTextChange(s.CppText.Text, cppRange, inoChange.Text)
+	newText, err := textedits.ApplyTextChange(s.CppText.Text, cppRange, inoChange.Text)
 	if err != nil {
 		panic("error replacing text: " + err.Error())
 	}

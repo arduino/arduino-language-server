@@ -14,13 +14,13 @@ import (
 	"github.com/arduino/arduino-cli/executils"
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
-	"github.com/arduino/arduino-language-server/textutils"
 	"github.com/arduino/go-paths-helper"
 	"github.com/fatih/color"
 	"github.com/pkg/errors"
 	"go.bug.st/json"
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
+	"go.bug.st/lsp/textedits"
 )
 
 var globalCliPath string
@@ -944,17 +944,17 @@ func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.Fu
 
 	logger.Logf("didChange(%s)", inoParams.TextDocument)
 	for _, change := range inoParams.ContentChanges {
-		logger.Logf("> %s", change)
+		logger.Logf("  > %s", change)
 	}
 
 	if cppParams, err := ls.didChange(logger, inoParams); err != nil {
-		logger.Logf("--E Error: %s", err)
+		logger.Logf("Error: %s", err)
 	} else if cppParams == nil {
-		logger.Logf("--X Notification is not propagated to clangd")
+		logger.Logf("Notification is not propagated to clangd")
 	} else {
-		logger.Logf("LS --> CL NOTIF didChange(%s@%d)", cppParams.TextDocument)
+		logger.Logf("to Clang: didChange(%s@%d)", cppParams.TextDocument)
 		for _, change := range cppParams.ContentChanges {
-			logger.Logf("                > %s", change)
+			logger.Logf("            > %s", change)
 		}
 		if err := ls.Clangd.conn.TextDocumentDidChange(cppParams); err != nil {
 			// Exit the process and trigger a restart by the client in case of a severe error
@@ -1015,27 +1015,28 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 	ls.readLock(logger, false)
 	defer ls.readUnlock(logger)
 
-	logger.Logf("from clang %s (%d diagnostics):", cppParams.URI, cppParams.Diagnostics)
+	logger.Logf("%s (%d diagnostics):", cppParams.URI, len(cppParams.Diagnostics))
 	for _, diag := range cppParams.Diagnostics {
-		logger.Logf("> %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+		logger.Logf("  > %s - %s: %s", diag.Range.Start, diag.Severity, string(diag.Code))
 	}
 
 	// the diagnostics on sketch.cpp.ino once mapped into their
 	// .ino counter parts may span over multiple .ino files...
 	allInoParams, err := ls.cpp2inoDiagnostics(logger, cppParams)
 	if err != nil {
-		logger.Logf("    Error converting diagnostics to .ino: %s", err)
+		logger.Logf("Error converting diagnostics to .ino: %s", err)
 		return
 	}
 
 	// Push back to IDE the converted diagnostics
+	logger.Logf("diagnostics to IDE:")
 	for _, inoParams := range allInoParams {
-		logger.Logf("to IDE: %s (%d diagnostics):", inoParams.URI, len(inoParams.Diagnostics))
+		logger.Logf("  - %s (%d diagnostics):", inoParams.URI, len(inoParams.Diagnostics))
 		for _, diag := range inoParams.Diagnostics {
-			logger.Logf("        > %d:%d - %v: %s", diag.Range.Start.Line, diag.Range.Start.Character, diag.Severity, diag.Code)
+			logger.Logf("    > %s - %s: %s", diag.Range.Start, diag.Severity, diag.Code)
 		}
 		if err := ls.IDE.conn.TextDocumentPublishDiagnostics(inoParams); err != nil {
-			logger.Logf("    Error sending diagnostics to IDE: %s", err)
+			logger.Logf("Error sending diagnostics to IDE: %s", err)
 			return
 		}
 	}
@@ -1216,7 +1217,7 @@ func (ls *INOLanguageServer) refreshCppDocumentSymbols(logger jsonrpc.FunctionLo
 	symbolsCanary := ""
 	for _, symbol := range cppDocumentSymbols {
 		logger.Logf("   symbol: %s %s %s", symbol.Kind, symbol.Name, symbol.Range)
-		if symbolText, err := textutils.ExtractRange(ls.sketchMapper.CppText.Text, symbol.Range); err != nil {
+		if symbolText, err := textedits.ExtractRange(ls.sketchMapper.CppText.Text, symbol.Range); err != nil {
 			logger.Logf("     > invalid range: %s", err)
 			symbolsCanary += "/"
 		} else if end := strings.Index(symbolText, "{"); end != -1 {
@@ -1298,7 +1299,7 @@ func (ls *INOLanguageServer) ino2cppTextDocumentItem(logger jsonrpc.FunctionLogg
 func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChangeParams *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
 	// Clear all RangeLengths: it's a deprecated field and if the byte count is wrong the
 	// source text file will be unloaded from clangd without notice, leading to a "non-added
-	// docuemtn" error for all subsequent requests.
+	// document" error for all subsequent requests.
 	// https://github.com/clangd/clangd/issues/717#issuecomment-793220007
 	for i := range inoDidChangeParams.ContentChanges {
 		inoDidChangeParams.ContentChanges[i].RangeLength = nil
@@ -1308,14 +1309,12 @@ func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChan
 
 	// Apply the change to the tracked sketch file.
 	trackedInoID := inoDoc.URI.AsPath().String()
-	trackedInoDoc, ok := ls.trackedInoDocs[trackedInoID]
-	if !ok {
+	if doc, ok := ls.trackedInoDocs[trackedInoID]; !ok {
 		return nil, unknownURI(inoDoc.URI)
-	}
-	if updatedTrackedInoDoc, err := textutils.ApplyLSPTextDocumentContentChangeEvent(trackedInoDoc, inoDidChangeParams.ContentChanges, inoDoc.Version); err != nil {
+	} else if updatedDoc, err := textedits.ApplyLSPTextDocumentContentChangeEvent(doc, inoDidChangeParams); err != nil {
 		return nil, err
 	} else {
-		ls.trackedInoDocs[trackedInoID] = updatedTrackedInoDoc
+		ls.trackedInoDocs[trackedInoID] = updatedDoc
 	}
 
 	logger.Logf("Tracked SKETCH file:----------+\n" + ls.trackedInoDocs[trackedInoID].Text + "\n----------------------")
