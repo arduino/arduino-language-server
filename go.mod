@@ -2,6 +2,8 @@ module github.com/arduino/arduino-language-server
 
 go 1.12
 
+replace go.bug.st/lsp => ../go-lsp
+
 require (
 	github.com/arduino/arduino-cli v0.0.0-20211105112240-8cae8809aad9
 	github.com/arduino/go-paths-helper v1.6.1
