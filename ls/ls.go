@@ -47,25 +47,20 @@ type INOLanguageServer struct {
 
 	progressHandler *ProgressProxyHandler
 
-	closing                    chan bool
-	clangdStarted              *sync.Cond
-	dataMux                    sync.RWMutex
-	buildPath                  *paths.Path
-	buildSketchRoot            *paths.Path
-	buildSketchCpp             *paths.Path
-	buildSketchSymbols         []lsp.DocumentSymbol
-	buildSketchIncludesCanary  string
-	buildSketchSymbolsCanary   string
-	buildSketchSymbolsLoad     chan bool
-	buildSketchSymbolsCheck    chan bool
-	rebuildSketchDeadline      *time.Time
-	rebuildSketchDeadlineMutex sync.Mutex
-	sketchRoot                 *paths.Path
-	sketchName                 string
-	sketchMapper               *sourcemapper.SketchMapper
-	sketchTrackedFilesCount    int
-	trackedInoDocs             map[string]lsp.TextDocumentItem
-	inoDocsWithDiagnostics     map[lsp.DocumentURI]bool
+	closing                 chan bool
+	clangdStarted           *sync.Cond
+	dataMux                 sync.RWMutex
+	compileCommandsDir      *paths.Path
+	buildPath               *paths.Path
+	buildSketchRoot         *paths.Path
+	buildSketchCpp          *paths.Path
+	sketchRoot              *paths.Path
+	sketchName              string
+	sketchMapper            *sourcemapper.SketchMapper
+	sketchTrackedFilesCount int
+	trackedInoDocs          map[string]lsp.TextDocumentItem
+	inoDocsWithDiagnostics  map[lsp.DocumentURI]bool
+	sketchRebuilder         *SketchRebuilder
 
 	config BoardConfig
 }
@@ -143,27 +138,36 @@ func (ls *INOLanguageServer) waitClangdStart(logger jsonrpc.FunctionLogger) erro
 func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLanguageServer {
 	logger := NewLSPFunctionLogger(color.HiWhiteString, "LS: ")
 	ls := &INOLanguageServer{
-		trackedInoDocs:          map[string]lsp.TextDocumentItem{},
-		inoDocsWithDiagnostics:  map[lsp.DocumentURI]bool{},
-		closing:                 make(chan bool),
-		buildSketchSymbolsLoad:  make(chan bool, 1),
-		buildSketchSymbolsCheck: make(chan bool, 1),
+		trackedInoDocs:         map[string]lsp.TextDocumentItem{},
+		inoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
+		closing:                make(chan bool),
+		// buildSketchSymbolsLoad:  make(chan bool, 1),
+		// buildSketchSymbolsCheck: make(chan bool, 1),
 		config: BoardConfig{
 			SelectedBoard: board,
 		},
 	}
 	ls.clangdStarted = sync.NewCond(&ls.dataMux)
+	ls.sketchRebuilder = NewSketchBuilder(ls)
 
-	if buildPath, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
+	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
 		log.Fatalf("Could not create temp folder: %s", err)
 	} else {
-		ls.buildPath = buildPath.Canonical()
+		ls.compileCommandsDir = tmp.Canonical()
+	}
+
+	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
+		log.Fatalf("Could not create temp folder: %s", err)
+	} else {
+		ls.buildPath = tmp.Canonical()
 		ls.buildSketchRoot = ls.buildPath.Join("sketch")
 	}
+
 	if enableLogging {
 		logger.Logf("Initial board configuration: %s", board)
 		logger.Logf("Language server build path: %s", ls.buildPath)
 		logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
+		logger.Logf("Language server compile-commands: %s", ls.compileCommandsDir.Join("compile_commands.json"))
 	}
 
 	ls.IDE = NewIDELSPServer(logger, stdin, stdout, ls)
@@ -175,81 +179,12 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLa
 		ls.Close()
 	}()
 
-	go func() {
-		defer streams.CatchAndLogPanic()
-		for {
-			select {
-			case <-ls.buildSketchSymbolsLoad:
-				// ...also un-queue buildSketchSymbolsCheck
-				select {
-				case <-ls.buildSketchSymbolsCheck:
-				default:
-				}
-				ls.LoadCppDocumentSymbols()
-
-			case <-ls.buildSketchSymbolsCheck:
-				ls.CheckCppDocumentSymbols()
-
-			case <-ls.closing:
-				return
-			}
-		}
-	}()
-
-	go func() {
-		defer streams.CatchAndLogPanic()
-		ls.rebuildEnvironmentLoop()
-	}()
 	return ls
 }
 
-func (ls *INOLanguageServer) queueLoadCppDocumentSymbols() {
-	select {
-	case ls.buildSketchSymbolsLoad <- true:
-	default:
-	}
-}
-
-func (handler *INOLanguageServer) queueCheckCppDocumentSymbols() {
-	select {
-	case handler.buildSketchSymbolsCheck <- true:
-	default:
-	}
-}
-
-func (handler *INOLanguageServer) LoadCppDocumentSymbols() error {
-	logger := NewLSPFunctionLogger(color.HiBlueString, "SYLD --- ")
-	defer logger.Logf("(done)")
-	handler.readLock(logger, true)
-	defer handler.readUnlock(logger)
-
-	return handler.refreshCppDocumentSymbols(logger)
-}
-
-func (handler *INOLanguageServer) CheckCppDocumentSymbols() error {
-	logger := NewLSPFunctionLogger(color.HiBlueString, "SYCK --- ")
-	defer logger.Logf("(done)")
-	handler.readLock(logger, true)
-	defer handler.readUnlock(logger)
-
-	oldSymbols := handler.buildSketchSymbols
-	canary := handler.buildSketchSymbolsCanary
-	if err := handler.refreshCppDocumentSymbols(logger); err != nil {
-		return err
-	}
-	if len(oldSymbols) != len(handler.buildSketchSymbols) || canary != handler.buildSketchSymbolsCanary {
-		logger.Logf("function symbols change detected, triggering sketch rebuild!")
-		handler.scheduleRebuildEnvironment()
-	}
-	return nil
-}
-
 func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
-	ls.writeLock(logger, false /* do not wait for clangd... we are going to start it! */)
 	go func() {
 		defer streams.CatchAndLogPanic()
-		// the lock is "moved" into the goroutine
-		defer ls.writeUnlock(logger)
 
 		logger := NewLSPFunctionLogger(color.HiCyanString, "INIT --- ")
 		logger.Logf("initializing workbench: %s", inoParams.RootURI)
@@ -258,9 +193,15 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		ls.sketchName = ls.sketchRoot.Base()
 		ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
 
-		if err := ls.generateBuildEnvironment(logger); err != nil {
+		if success, err := ls.generateBuildEnvironment(context.Background(), logger); err != nil {
 			logger.Logf("error starting clang: %s", err)
 			return
+		} else if !success {
+			logger.Logf("bootstrap build failed!")
+		}
+
+		if err := ls.buildPath.Join("compile_commands.json").CopyTo(ls.compileCommandsDir.Join("compile_commands.json")); err != nil {
+			logger.Logf("ERROR: updating compile_commands: %s", err)
 		}
 
 		if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
@@ -907,6 +848,8 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
+	ls.triggerRebuild()
+
 	// Add the TextDocumentItem in the tracked files list
 	inoTextDocItem := inoParam.TextDocument
 	ls.trackedInoDocs[inoTextDocItem.URI.AsPath().String()] = inoTextDocItem
@@ -921,9 +864,6 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 			logger.Logf("Clang already notified, do not notify it anymore")
 			return
 		}
-
-		// Queue a load of ino.cpp document symbols
-		ls.queueLoadCppDocumentSymbols()
 	}
 
 	if cppItem, err := ls.ino2cppTextDocumentItem(logger, inoTextDocItem); err != nil {
@@ -941,6 +881,8 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.FunctionLogger, inoParams *lsp.DidChangeTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
+
+	ls.triggerRebuild()
 
 	logger.Logf("didChange(%s)", inoParams.TextDocument)
 	for _, change := range inoParams.ContentChanges {
@@ -969,6 +911,8 @@ func (ls *INOLanguageServer) TextDocumentDidSaveNotifFromIDE(logger jsonrpc.Func
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
+	ls.triggerRebuild()
+
 	logger.Logf("didSave(%s) hasText=%v", inoParams.TextDocument, inoParams.Text != "")
 	if cppTextDocument, err := ls.ino2cppTextDocumentIdentifier(logger, inoParams.TextDocument); err != nil {
 		logger.Logf("--E Error: %s", err)
@@ -993,6 +937,8 @@ func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.Fun
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
+	ls.triggerRebuild()
+
 	logger.Logf("didClose(%s)", inoParams.TextDocument)
 
 	if cppParams, err := ls.didClose(logger, inoParams); err != nil {
@@ -1011,7 +957,6 @@ func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.Fun
 }
 
 func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.FunctionLogger, cppParams *lsp.PublishDiagnosticsParams) {
-	// Default to read lock
 	ls.readLock(logger, false)
 	defer ls.readUnlock(logger)
 
@@ -1073,7 +1018,7 @@ func (ls *INOLanguageServer) WindowWorkDoneProgressCreateReqFromClangd(ctx conte
 	return nil
 }
 
-// Close closes all the json-rpc connections.
+// Close closes all the json-rpc connections and clean-up temp folders.
 func (ls *INOLanguageServer) Close() {
 	if ls.Clangd != nil {
 		ls.Clangd.Close()
@@ -1082,6 +1027,12 @@ func (ls *INOLanguageServer) Close() {
 	if ls.closing != nil {
 		close(ls.closing)
 		ls.closing = nil
+	}
+	if ls.buildPath != nil {
+		ls.buildPath.RemoveAll()
+	}
+	if ls.compileCommandsDir != nil {
+		ls.compileCommandsDir.RemoveAll()
 	}
 }
 
@@ -1096,51 +1047,6 @@ func (ls *INOLanguageServer) CleanUp() {
 		ls.buildPath.RemoveAll()
 		ls.buildPath = nil
 	}
-}
-
-func (ls *INOLanguageServer) initializeWorkbench(logger jsonrpc.FunctionLogger) error {
-	logger.Logf("--> RE-initialize()")
-	currCppTextVersion := ls.sketchMapper.CppText.Version
-
-	if err := ls.generateBuildEnvironment(logger); err != nil {
-		return err
-	}
-
-	if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
-		ls.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
-		ls.sketchMapper.CppText.Version = currCppTextVersion + 1
-	} else {
-		return errors.WithMessage(err, "reading generated cpp file from sketch")
-	}
-
-	// Send didSave to notify clang that the source cpp is changed
-	logger.Logf("Sending 'didSave' notification to Clangd")
-	cppURI := lsp.NewDocumentURIFromPath(ls.buildSketchCpp)
-	didSaveParams := &lsp.DidSaveTextDocumentParams{
-		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
-	}
-	if err := ls.Clangd.conn.TextDocumentDidSave(didSaveParams); err != nil {
-		logger.Logf("error reinitilizing clangd:", err)
-		return err
-	}
-
-	// Send the full text to clang
-	logger.Logf("Sending full-text 'didChange' notification to Clangd")
-	didChangeParams := &lsp.DidChangeTextDocumentParams{
-		TextDocument: lsp.VersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: cppURI},
-			Version:                ls.sketchMapper.CppText.Version,
-		},
-		ContentChanges: []lsp.TextDocumentContentChangeEvent{
-			{Text: ls.sketchMapper.CppText.Text},
-		},
-	}
-	if err := ls.Clangd.conn.TextDocumentDidChange(didChangeParams); err != nil {
-		logger.Logf("error reinitilizing clangd:", err)
-		return err
-	}
-
-	return nil
 }
 
 func extractDataFolderFromArduinoCLI(logger jsonrpc.FunctionLogger) (*paths.Path, error) {
@@ -1174,79 +1080,6 @@ func extractDataFolderFromArduinoCLI(logger jsonrpc.FunctionLogger) (*paths.Path
 	// Return only the build path
 	logger.Logf("Arduino Data Dir -> %s", res.Directories.Data)
 	return paths.New(res.Directories.Data), nil
-}
-
-func (ls *INOLanguageServer) refreshCppDocumentSymbols(logger jsonrpc.FunctionLogger) error {
-	// Query source code symbols
-	ls.readUnlock(logger)
-	cppURI := lsp.NewDocumentURIFromPath(ls.buildSketchCpp)
-	logger.Logf("requesting documentSymbol for %s", cppURI)
-
-	cppParams := &lsp.DocumentSymbolParams{
-		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
-	}
-	cppDocumentSymbols, _ /* cppSymbolInformation */, cppErr, err := ls.Clangd.conn.TextDocumentDocumentSymbol(context.Background(), cppParams)
-	ls.readLock(logger, true)
-	if err != nil {
-		logger.Logf("error: %s", err)
-		return fmt.Errorf("quering source code symbols: %w", err)
-	}
-	if cppErr != nil {
-		logger.Logf("error: %s", cppErr.AsError())
-		return fmt.Errorf("quering source code symbols: %w", cppErr.AsError())
-	}
-
-	if cppDocumentSymbols == nil {
-		err := errors.New("expected DocumenSymbol array but got SymbolInformation instead")
-		logger.Logf("error: %s", err)
-		return err
-	}
-
-	// Filter non-functions symbols
-	i := 0
-	for _, symbol := range cppDocumentSymbols {
-		if symbol.Kind != lsp.SymbolKindFunction {
-			continue
-		}
-		cppDocumentSymbols[i] = symbol
-		i++
-	}
-	cppDocumentSymbols = cppDocumentSymbols[:i]
-	ls.buildSketchSymbols = cppDocumentSymbols
-
-	symbolsCanary := ""
-	for _, symbol := range cppDocumentSymbols {
-		logger.Logf("   symbol: %s %s %s", symbol.Kind, symbol.Name, symbol.Range)
-		if symbolText, err := textedits.ExtractRange(ls.sketchMapper.CppText.Text, symbol.Range); err != nil {
-			logger.Logf("     > invalid range: %s", err)
-			symbolsCanary += "/"
-		} else if end := strings.Index(symbolText, "{"); end != -1 {
-			logger.Logf("     TRIMMED> %s", symbolText[:end])
-			symbolsCanary += symbolText[:end]
-		} else {
-			logger.Logf("            > %s", symbolText)
-			symbolsCanary += symbolText
-		}
-	}
-	ls.buildSketchSymbolsCanary = symbolsCanary
-	return nil
-}
-
-func (ls *INOLanguageServer) CheckCppIncludesChanges() {
-	logger := NewLSPFunctionLogger(color.HiBlueString, "INCK --- ")
-	logger.Logf("check for Cpp Include Changes")
-	includesCanary := ""
-	for _, line := range strings.Split(ls.sketchMapper.CppText.Text, "\n") {
-		if strings.Contains(line, "#include ") {
-			includesCanary += line
-		}
-	}
-
-	if includesCanary != ls.buildSketchIncludesCanary {
-		ls.buildSketchIncludesCanary = includesCanary
-		logger.Logf("#include change detected, triggering sketch rebuild!")
-		ls.scheduleRebuildEnvironment()
-	}
 }
 
 func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
@@ -1340,26 +1173,9 @@ func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChan
 			return nil, errors.Errorf("invalid change range %s:%s", inoDoc.URI, inoChange.Range)
 		}
 
-		// Detect changes in critical lines (for example function definitions)
-		// and trigger arduino-preprocessing + clangd restart.
-		dirty := false
-		for _, sym := range ls.buildSketchSymbols {
-			if sym.SelectionRange.Overlaps(cppChangeRange) {
-				dirty = true
-				logger.Logf("--! DIRTY CHANGE detected using symbol tables, force sketch rebuild!")
-				break
-			}
-		}
-		if ls.sketchMapper.ApplyTextChange(inoDoc.URI, inoChange) {
-			dirty = true
-			logger.Logf("--! DIRTY CHANGE detected with sketch mapper, force sketch rebuild!")
-		}
-		if dirty {
-			ls.scheduleRebuildEnvironment()
-		}
-		ls.sketchMapper.DebugLogAll()
+		_ = ls.sketchMapper.ApplyTextChange(inoDoc.URI, inoChange)
 
-		logger.Logf("New version:----------+\n" + ls.sketchMapper.CppText.Text + "\n----------------------")
+		ls.sketchMapper.DebugLogAll()
 
 		cppChanges = append(cppChanges, lsp.TextDocumentContentChangeEvent{
 			Range:       &cppChangeRange,
@@ -1367,8 +1183,6 @@ func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChan
 			Text:        inoChange.Text,
 		})
 	}
-
-	ls.CheckCppIncludesChanges()
 
 	// build a cpp equivalent didChange request
 	return &lsp.DidChangeTextDocumentParams{
@@ -1824,19 +1638,6 @@ func (ls *INOLanguageServer) cpp2inoDiagnostics(logger jsonrpc.FunctionLogger, c
 		inoDiagsParams.Diagnostics = append(inoDiagsParams.Diagnostics, inoDiag)
 
 		ls.inoDocsWithDiagnostics[inoURI] = true
-
-		// If we have an "undefined reference" in the .ino code trigger a
-		// check for newly created symbols (that in turn may trigger a
-		// new arduino-preprocessing of the sketch).
-		var inoDiagCode string
-		if err := json.Unmarshal(inoDiag.Code, &inoDiagCode); err != nil {
-			if inoDiagCode == "undeclared_var_use_suggest" ||
-				inoDiagCode == "undeclared_var_use" ||
-				inoDiagCode == "ovl_no_viable_function_in_call" ||
-				inoDiagCode == "pp_file_not_found" {
-				ls.queueCheckCppDocumentSymbols()
-			}
-		}
 	}
 
 	inoDiagParams := []*lsp.PublishDiagnosticsParams{}

@@ -369,7 +369,11 @@ func dumpInoToCppMap(s map[InoLine]int) {
 // DebugLogAll dumps the internal status of the mapper
 func (s *SketchMapper) DebugLogAll() {
 	stripFile := func(s string) string {
-		return s[strings.LastIndex(s, "/"):]
+		l := strings.LastIndex(s, "/")
+		if l == -1 {
+			return s
+		}
+		return s[l:]
 	}
 	cpp := strings.Split(s.CppText.Text, "\n")
 	log.Printf("  > Current sketchmapper content:")

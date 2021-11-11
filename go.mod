@@ -5,7 +5,7 @@ go 1.12
 replace go.bug.st/lsp => ../go-lsp
 
 require (
-	github.com/arduino/arduino-cli v0.0.0-20211105112240-8cae8809aad9
+	github.com/arduino/arduino-cli v0.0.0-20211111113528-bf4a7844a79b
 	github.com/arduino/go-paths-helper v1.6.1
 	github.com/fatih/color v1.13.0
 	github.com/pkg/errors v0.9.1

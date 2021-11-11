@@ -21,13 +21,38 @@ type ClangdLSPClient struct {
 	ls   *INOLanguageServer
 }
 
-func NewClangdLSPClient(
-	logger jsonrpc.FunctionLogger,
-	buildPath, buildSketchCpp, dataFolder *paths.Path,
-	inoLanguageServer *INOLanguageServer,
-) *ClangdLSPClient {
-	clangdStdout, clangdStdin, clangdStderr := startClangd(logger, buildPath, buildSketchCpp, dataFolder)
-	clangdStdio := streams.NewReadWriteCloser(clangdStdin, clangdStdout)
+func NewClangdLSPClient(logger jsonrpc.FunctionLogger, compileCommandsDir, buildSketchCpp, dataFolder *paths.Path, inoLanguageServer *INOLanguageServer) *ClangdLSPClient {
+	// Start clangd
+	args := []string{
+		globalClangdPath,
+		"-log=verbose",
+		fmt.Sprintf(`--compile-commands-dir=%s`, compileCommandsDir),
+	}
+	if dataFolder != nil {
+		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**")))
+	}
+
+	//	clangdStdout, clangdStdin, clangdStderr := startClangd(logger, compileCommandsDir, buildSketchCpp, dataFolder)
+	logger.Logf("    Starting clangd: %s", strings.Join(args, " "))
+	var clangdStdin io.WriteCloser
+	var clangdStdout, clangdStderr io.ReadCloser
+	if clangdCmd, err := executils.NewProcess(args...); err != nil {
+		panic("starting clangd: " + err.Error())
+	} else if cin, err := clangdCmd.StdinPipe(); err != nil {
+		panic("getting clangd stdin: " + err.Error())
+	} else if cout, err := clangdCmd.StdoutPipe(); err != nil {
+		panic("getting clangd stdout: " + err.Error())
+	} else if cerr, err := clangdCmd.StderrPipe(); err != nil {
+		panic("getting clangd stderr: " + err.Error())
+	} else if err := clangdCmd.Start(); err != nil {
+		panic("running clangd: " + err.Error())
+	} else {
+		clangdStdin = cin
+		clangdStdout = cout
+		clangdStderr = cerr
+	}
+
+	clangdStdio := streams.NewReadWriteCloser(clangdStdout, clangdStdin)
 	if enableLogging {
 		clangdStdio = streams.LogReadWriteCloserAs(clangdStdio, "inols-clangd.log")
 		go io.Copy(streams.OpenLogFileAs("inols-clangd-err.log"), clangdStderr)
@@ -47,32 +72,6 @@ func NewClangdLSPClient(
 		ErrorColor:     color.New(color.BgHiMagenta, color.FgHiWhite, color.BlinkSlow).Sprintf,
 	})
 	return client
-}
-
-func startClangd(logger jsonrpc.FunctionLogger, compileCommandsDir, sketchCpp, dataFolder *paths.Path) (io.WriteCloser, io.ReadCloser, io.ReadCloser) {
-	// Start clangd
-	args := []string{
-		globalClangdPath,
-		"-log=verbose",
-		fmt.Sprintf(`--compile-commands-dir=%s`, compileCommandsDir),
-	}
-	if dataFolder != nil {
-		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**")))
-	}
-	logger.Logf("    Starting clangd: %s", strings.Join(args, " "))
-	if clangdCmd, err := executils.NewProcess(args...); err != nil {
-		panic("starting clangd: " + err.Error())
-	} else if clangdIn, err := clangdCmd.StdinPipe(); err != nil {
-		panic("getting clangd stdin: " + err.Error())
-	} else if clangdOut, err := clangdCmd.StdoutPipe(); err != nil {
-		panic("getting clangd stdout: " + err.Error())
-	} else if clangdErr, err := clangdCmd.StderrPipe(); err != nil {
-		panic("getting clangd stderr: " + err.Error())
-	} else if err := clangdCmd.Start(); err != nil {
-		panic("running clangd: " + err.Error())
-	} else {
-		return clangdIn, clangdOut, clangdErr
-	}
 }
 
 func (client *ClangdLSPClient) Run() {

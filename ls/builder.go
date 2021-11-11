@@ -2,13 +2,17 @@ package ls
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/arduino/arduino-cli/arduino/builder"
 	"github.com/arduino/arduino-cli/arduino/libraries"
 	"github.com/arduino/arduino-cli/executils"
+	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
 	"github.com/fatih/color"
@@ -18,101 +22,165 @@ import (
 	"go.bug.st/lsp/jsonrpc"
 )
 
-func (handler *INOLanguageServer) scheduleRebuildEnvironment() {
-	handler.rebuildSketchDeadlineMutex.Lock()
-	defer handler.rebuildSketchDeadlineMutex.Unlock()
-	d := time.Now().Add(time.Second)
-	handler.rebuildSketchDeadline = &d
+type SketchRebuilder struct {
+	ls      *INOLanguageServer
+	trigger chan bool
+	cancel  func()
+	mutex   sync.Mutex
 }
 
-func (handler *INOLanguageServer) rebuildEnvironmentLoop() {
-	logger := NewLSPFunctionLogger(color.HiMagentaString, "RBLD---")
-
-	grabDeadline := func() *time.Time {
-		handler.rebuildSketchDeadlineMutex.Lock()
-		defer handler.rebuildSketchDeadlineMutex.Unlock()
-
-		res := handler.rebuildSketchDeadline
-		handler.rebuildSketchDeadline = nil
-		return res
+func NewSketchBuilder(ls *INOLanguageServer) *SketchRebuilder {
+	res := &SketchRebuilder{
+		trigger: make(chan bool, 1),
+		cancel:  func() {},
+		ls:      ls,
 	}
+	go func() {
+		defer streams.CatchAndLogPanic()
+		res.rebuilderLoop()
+	}()
+	return res
+}
 
+func (ls *INOLanguageServer) triggerRebuild() {
+	ls.sketchRebuilder.TriggerRebuild()
+}
+
+func (r *SketchRebuilder) TriggerRebuild() {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	r.cancel() // Stop possibly already running builds
+	select {
+	case r.trigger <- true:
+	default:
+	}
+}
+
+func (r *SketchRebuilder) rebuilderLoop() {
+	logger := NewLSPFunctionLogger(color.HiMagentaString, "SKETCH REBUILD: ")
 	for {
-		// Wait for someone to schedule a preprocessing...
-		time.Sleep(100 * time.Millisecond)
-		deadline := grabDeadline()
-		if deadline == nil {
-			continue
+		<-r.trigger
+
+		for {
+			// Concede a 200ms delay to accumulate bursts of changes
+			select {
+			case <-r.trigger:
+				continue
+			case <-time.After(time.Second):
+			}
+			break
 		}
 
-		for time.Now().Before(*deadline) {
-			time.Sleep(100 * time.Millisecond)
+		r.ls.progressHandler.Create("arduinoLanguageServerRebuild")
+		r.ls.progressHandler.Begin("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressBegin{Title: "Building sketch"})
 
-			if d := grabDeadline(); d != nil {
-				deadline = d
-			}
+		ctx, cancel := context.WithCancel(context.Background())
+		r.mutex.Lock()
+		logger.Logf("Sketch rebuild started")
+		r.cancel = cancel
+		r.mutex.Unlock()
+
+		if err := r.doRebuild(ctx, logger); err != nil {
+			logger.Logf("Error: %s", err)
 		}
 
-		// Regenerate preprocessed sketch!
-		done := make(chan bool)
-		go func() {
-			defer streams.CatchAndLogPanic()
-
-			handler.progressHandler.Create("arduinoLanguageServerRebuild")
-			handler.progressHandler.Begin("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressBegin{
-				Title: "Building sketch",
-			})
-
-			count := 0
-			dots := []string{".", "..", "..."}
-			for {
-				select {
-				case <-time.After(time.Millisecond * 400):
-					msg := "compiling" + dots[count%3]
-					count++
-					handler.progressHandler.Report("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressReport{Message: msg})
-				case <-done:
-					msg := "done"
-					handler.progressHandler.End("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressEnd{Message: msg})
-					return
-				}
-			}
-		}()
-
-		handler.writeLock(logger, true)
-		handler.initializeWorkbench(logger)
-		handler.writeUnlock(logger)
-		done <- true
-		close(done)
+		cancel()
+		r.ls.progressHandler.End("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressEnd{Message: "done"})
 	}
 }
 
-func (ls *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.FunctionLogger) error {
-	sketchDir := ls.sketchRoot
-	fqbn := ls.config.SelectedBoard.Fqbn
+func (r *SketchRebuilder) doRebuild(ctx context.Context, logger jsonrpc.FunctionLogger) error {
+	ls := r.ls
 
-	// Export temporary files
+	if success, err := ls.generateBuildEnvironment(ctx, logger); err != nil {
+		return err
+	} else if !success {
+		return fmt.Errorf("build failed")
+	}
+
+	ls.writeLock(logger, true)
+	defer ls.writeUnlock(logger)
+
+	// Check one last time if the process has been canceled
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	if err := ls.buildPath.Join("compile_commands.json").CopyTo(ls.compileCommandsDir.Join("compile_commands.json")); err != nil {
+		logger.Logf("ERROR: updating compile_commands: %s", err)
+	}
+
+	if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
+		oldVesrion := ls.sketchMapper.CppText.Version
+		ls.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
+		ls.sketchMapper.CppText.Version = oldVesrion + 1
+		ls.sketchMapper.DebugLogAll()
+	} else {
+		return errors.WithMessage(err, "reading generated cpp file from sketch")
+	}
+
+	// Send didSave to notify clang that the source cpp is changed
+	logger.Logf("Sending 'didSave' notification to Clangd")
+	cppURI := lsp.NewDocumentURIFromPath(ls.buildSketchCpp)
+	didSaveParams := &lsp.DidSaveTextDocumentParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
+	}
+	if err := ls.Clangd.conn.TextDocumentDidSave(didSaveParams); err != nil {
+		logger.Logf("error reinitilizing clangd:", err)
+		return err
+	}
+
+	// Send the full text to clang
+	logger.Logf("Sending full-text 'didChange' notification to Clangd")
+	didChangeParams := &lsp.DidChangeTextDocumentParams{
+		TextDocument: lsp.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: cppURI},
+			Version:                ls.sketchMapper.CppText.Version,
+		},
+		ContentChanges: []lsp.TextDocumentContentChangeEvent{
+			{Text: ls.sketchMapper.CppText.Text},
+		},
+	}
+	if err := ls.Clangd.conn.TextDocumentDidChange(didChangeParams); err != nil {
+		logger.Logf("error reinitilizing clangd:", err)
+		return err
+	}
+
+	return nil
+}
+
+func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logger jsonrpc.FunctionLogger) (bool, error) {
+	// Extract all build information from language server status
+	ls.readLock(logger, false)
+	sketchRoot := ls.sketchRoot
+	fqbn := ls.config.SelectedBoard.Fqbn
+	buildPath := ls.buildPath
 	type overridesFile struct {
 		Overrides map[string]string `json:"overrides"`
 	}
 	data := overridesFile{Overrides: map[string]string{}}
 	for uri, trackedFile := range ls.trackedInoDocs {
-		rel, err := paths.New(uri).RelFrom(ls.sketchRoot)
+		rel, err := paths.New(uri).RelFrom(sketchRoot)
 		if err != nil {
-			return errors.WithMessage(err, "dumping tracked files")
+			ls.readUnlock(logger)
+			return false, errors.WithMessage(err, "dumping tracked files")
 		}
 		data.Overrides[rel.String()] = trackedFile.Text
 	}
+	ls.readUnlock(logger)
 
+	// Run arduino-cli to perform the build
 	for filename, override := range data.Overrides {
-		logger.Logf("Dumped %s override:\n%s", filename, override)
+		logger.Logf("Dumping %s override:\n%s", filename, override)
 	}
-
 	var overridesJSON *paths.Path
 	if jsonBytes, err := json.MarshalIndent(data, "", "  "); err != nil {
-		return errors.WithMessage(err, "dumping tracked files")
+		return false, errors.WithMessage(err, "dumping tracked files")
 	} else if tmp, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
-		return errors.WithMessage(err, "dumping tracked files")
+		return false, errors.WithMessage(err, "dumping tracked files")
 	} else {
 		overridesJSON = tmp
 		defer tmp.Remove()
@@ -124,22 +192,22 @@ func (ls *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.FunctionLog
 		"compile",
 		"--fqbn", fqbn,
 		"--only-compilation-database",
-		"--clean",
+		//"--clean",
 		"--source-override", overridesJSON.String(),
-		"--build-path", ls.buildPath.String(),
+		"--build-path", buildPath.String(),
 		"--format", "json",
-		sketchDir.String(),
+		sketchRoot.String(),
 	}
 	cmd, err := executils.NewProcess(args...)
 	if err != nil {
-		return errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+		return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 	}
 	cmdOutput := &bytes.Buffer{}
 	cmd.RedirectStdoutTo(cmdOutput)
-	cmd.SetDirFromPath(sketchDir)
+	cmd.SetDirFromPath(sketchRoot)
 	logger.Logf("running: %s", strings.Join(args, " "))
-	if err := cmd.Run(); err != nil {
-		return errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+	if err := cmd.RunWithinContext(ctx); err != nil {
+		return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 	}
 
 	// Currently those values are not used, keeping here for future improvements
@@ -155,18 +223,17 @@ func (ls *INOLanguageServer) generateBuildEnvironment(logger jsonrpc.FunctionLog
 	}
 	var res cmdRes
 	if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
-		return errors.Errorf("parsing arduino-cli output: %s", err)
+		return false, errors.Errorf("parsing arduino-cli output: %s", err)
 	}
 	logger.Logf("arduino-cli output: %s", cmdOutput)
 
 	// TODO: do canonicalization directly in `arduino-cli`
-	canonicalizeCompileCommandsJSON(ls.buildPath)
+	canonicalizeCompileCommandsJSON(buildPath.Join("compile_commands.json"))
 
-	return nil
+	return res.Success, nil
 }
 
-func canonicalizeCompileCommandsJSON(compileCommandsDir *paths.Path) {
-	compileCommandsJSONPath := compileCommandsDir.Join("compile_commands.json")
+func canonicalizeCompileCommandsJSON(compileCommandsJSONPath *paths.Path) {
 	compileCommands, err := builder.LoadCompilationDatabase(compileCommandsJSONPath)
 	if err != nil {
 		panic("could not find compile_commands.json")
