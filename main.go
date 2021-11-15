@@ -4,6 +4,8 @@ import (
 	"flag"
 	"io"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 
@@ -44,6 +46,9 @@ func main() {
 		logfile := streams.OpenLogFileAs("inols-err.log")
 		log.SetOutput(io.MultiWriter(logfile, os.Stderr))
 		defer streams.CatchAndLogPanic()
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
 	} else {
 		log.SetOutput(os.Stderr)
 	}
