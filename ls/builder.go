@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"runtime"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/arduino/arduino-cli/arduino/builder"
 	"github.com/arduino/arduino-cli/arduino/libraries"
 	"github.com/arduino/arduino-cli/executils"
+	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1"
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
@@ -20,6 +22,7 @@ import (
 	"go.bug.st/json"
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
+	"google.golang.org/grpc"
 )
 
 type SketchRebuilder struct {
@@ -172,65 +175,116 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 	}
 	ls.readUnlock(logger)
 
-	// Run arduino-cli to perform the build
-	for filename, override := range data.Overrides {
-		logger.Logf("Dumping %s override:\n%s", filename, override)
-	}
-	var overridesJSON *paths.Path
-	if jsonBytes, err := json.MarshalIndent(data, "", "  "); err != nil {
-		return false, errors.WithMessage(err, "dumping tracked files")
-	} else if tmp, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
-		return false, errors.WithMessage(err, "dumping tracked files")
+	var success bool
+	if true {
+		// Establish a connection with the gRPC server, started with the command:
+		// arduino-cli daemon
+		conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			return false, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
+		}
+		defer conn.Close()
+
+		client := rpc.NewArduinoCoreServiceClient(conn)
+		compRespStream, err := client.Compile(context.Background(),
+			&rpc.CompileRequest{
+				Instance:                      &rpc.Instance{Id: 1}, // XXX
+				Fqbn:                          fqbn,
+				SketchPath:                    sketchRoot.String(),
+				SourceOverride:                data.Overrides,
+				BuildPath:                     buildPath.String(),
+				CreateCompilationDatabaseOnly: true,
+			},
+		)
+		if err != nil {
+			return false, fmt.Errorf("error running compile: %w", err)
+		}
+
+		// Loop and consume the server stream until all the operations are done.
+		for {
+			compResp, err := compRespStream.Recv()
+			if err == io.EOF {
+				success = true
+				logger.Logf("Compile successful!")
+				break
+			}
+			if err != nil {
+				return false, fmt.Errorf("error running compile: %w", err)
+			}
+
+			// TODO: we can accumulate stdout/stderr buffer if needed
+			_ = compResp
+			// if resp := compResp.GetOutStream(); resp != nil {
+			// 	logger.Logf("STDOUT: %s", resp)
+			// }
+			// if resperr := compResp.GetErrStream(); resperr != nil {
+			// 	logger.Logf("STDERR: %s", resperr)
+			// }
+		}
+
 	} else {
-		overridesJSON = tmp
-		defer tmp.Remove()
-	}
 
-	// XXX: do this from IDE or via gRPC
-	args := []string{globalCliPath,
-		"--config-file", globalCliConfigPath,
-		"compile",
-		"--fqbn", fqbn,
-		"--only-compilation-database",
-		//"--clean",
-		"--source-override", overridesJSON.String(),
-		"--build-path", buildPath.String(),
-		"--format", "json",
-		sketchRoot.String(),
-	}
-	cmd, err := executils.NewProcess(args...)
-	if err != nil {
-		return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
-	}
-	cmdOutput := &bytes.Buffer{}
-	cmd.RedirectStdoutTo(cmdOutput)
-	cmd.SetDirFromPath(sketchRoot)
-	logger.Logf("running: %s", strings.Join(args, " "))
-	if err := cmd.RunWithinContext(ctx); err != nil {
-		return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
-	}
+		// Dump overrides into a temporary json file
+		for filename, override := range data.Overrides {
+			logger.Logf("Dumping %s override:\n%s", filename, override)
+		}
+		var overridesJSON *paths.Path
+		if jsonBytes, err := json.MarshalIndent(data, "", "  "); err != nil {
+			return false, errors.WithMessage(err, "dumping tracked files")
+		} else if tmp, err := paths.WriteToTempFile(jsonBytes, nil, ""); err != nil {
+			return false, errors.WithMessage(err, "dumping tracked files")
+		} else {
+			overridesJSON = tmp
+			defer tmp.Remove()
+		}
 
-	// Currently those values are not used, keeping here for future improvements
-	type cmdBuilderRes struct {
-		BuildPath     *paths.Path `json:"build_path"`
-		UsedLibraries []*libraries.Library
+		// Run arduino-cli to perform the build
+		args := []string{globalCliPath,
+			"--config-file", globalCliConfigPath,
+			"compile",
+			"--fqbn", fqbn,
+			"--only-compilation-database",
+			//"--clean",
+			"--source-override", overridesJSON.String(),
+			"--build-path", buildPath.String(),
+			"--format", "json",
+			sketchRoot.String(),
+		}
+		cmd, err := executils.NewProcess(args...)
+		if err != nil {
+			return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+		}
+		cmdOutput := &bytes.Buffer{}
+		cmd.RedirectStdoutTo(cmdOutput)
+		cmd.SetDirFromPath(sketchRoot)
+		logger.Logf("running: %s", strings.Join(args, " "))
+		if err := cmd.RunWithinContext(ctx); err != nil {
+			return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+		}
+
+		// Currently those values are not used, keeping here for future improvements
+		type cmdBuilderRes struct {
+			BuildPath     *paths.Path `json:"build_path"`
+			UsedLibraries []*libraries.Library
+		}
+		type cmdRes struct {
+			CompilerOut   string        `json:"compiler_out"`
+			CompilerErr   string        `json:"compiler_err"`
+			BuilderResult cmdBuilderRes `json:"builder_result"`
+			Success       bool          `json:"success"`
+		}
+		var res cmdRes
+		if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
+			return false, errors.Errorf("parsing arduino-cli output: %s", err)
+		}
+		logger.Logf("arduino-cli output: %s", cmdOutput)
+		success = res.Success
 	}
-	type cmdRes struct {
-		CompilerOut   string        `json:"compiler_out"`
-		CompilerErr   string        `json:"compiler_err"`
-		BuilderResult cmdBuilderRes `json:"builder_result"`
-		Success       bool          `json:"success"`
-	}
-	var res cmdRes
-	if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
-		return false, errors.Errorf("parsing arduino-cli output: %s", err)
-	}
-	logger.Logf("arduino-cli output: %s", cmdOutput)
 
 	// TODO: do canonicalization directly in `arduino-cli`
 	canonicalizeCompileCommandsJSON(buildPath.Join("compile_commands.json"))
 
-	return res.Success, nil
+	return success, nil
 }
 
 func canonicalizeCompileCommandsJSON(compileCommandsJSONPath *paths.Path) {
