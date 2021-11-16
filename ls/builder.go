@@ -186,21 +186,26 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 		defer conn.Close()
 
 		client := rpc.NewArduinoCoreServiceClient(conn)
-		compRespStream, err := client.Compile(context.Background(),
-			&rpc.CompileRequest{
-				Instance:                      &rpc.Instance{Id: 1}, // XXX
-				Fqbn:                          fqbn,
-				SketchPath:                    sketchRoot.String(),
-				SourceOverride:                data.Overrides,
-				BuildPath:                     buildPath.String(),
-				CreateCompilationDatabaseOnly: true,
-			},
-		)
+		compileReq := &rpc.CompileRequest{
+			Instance:                      &rpc.Instance{Id: 1}, // XXX
+			Fqbn:                          fqbn,
+			SketchPath:                    sketchRoot.String(),
+			SourceOverride:                data.Overrides,
+			BuildPath:                     buildPath.String(),
+			CreateCompilationDatabaseOnly: true,
+			Verbose:                       true,
+		}
+		compileReqJson, _ := json.MarshalIndent(compileReq, "", "  ")
+		logger.Logf("Running build with: %s", string(compileReqJson))
+
+		compRespStream, err := client.Compile(context.Background(), compileReq)
 		if err != nil {
 			return false, fmt.Errorf("error running compile: %w", err)
 		}
 
 		// Loop and consume the server stream until all the operations are done.
+		stdout := ""
+		stderr := ""
 		for {
 			compResp, err := compRespStream.Recv()
 			if err == io.EOF {
@@ -209,17 +214,19 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 				break
 			}
 			if err != nil {
+				logger.Logf("build stdout:")
+				logger.Logf(stdout)
+				logger.Logf("build stderr:")
+				logger.Logf(stderr)
 				return false, fmt.Errorf("error running compile: %w", err)
 			}
 
-			// TODO: we can accumulate stdout/stderr buffer if needed
-			_ = compResp
-			// if resp := compResp.GetOutStream(); resp != nil {
-			// 	logger.Logf("STDOUT: %s", resp)
-			// }
-			// if resperr := compResp.GetErrStream(); resperr != nil {
-			// 	logger.Logf("STDERR: %s", resperr)
-			// }
+			if resp := compResp.GetOutStream(); resp != nil {
+				stdout += string(resp)
+			}
+			if resperr := compResp.GetErrStream(); resperr != nil {
+				stderr += string(resperr)
+			}
 		}
 
 	} else {
