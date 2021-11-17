@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,8 +83,18 @@ var yellow = color.New(color.FgHiYellow)
 func (ls *INOLanguageServer) writeLock(logger jsonrpc.FunctionLogger, requireClangd bool) {
 	ls.dataMux.Lock()
 	logger.Logf(yellow.Sprintf("write-locked"))
-	if requireClangd {
-		ls.waitClangdStart(logger)
+	if requireClangd && ls.Clangd == nil {
+		// if clangd is not started...
+		logger.Logf("(throttled: waiting for clangd)")
+		logger.Logf(yellow.Sprintf("unlocked (waiting clangd)"))
+		ls.clangdStarted.Wait()
+		logger.Logf(yellow.Sprintf("locked (waiting clangd)"))
+
+		if ls.Clangd == nil {
+			logger.Logf("clangd startup failed: quitting Language server")
+			ls.Close()
+			os.Exit(2)
+		}
 	}
 }
 
@@ -115,23 +126,6 @@ func (ls *INOLanguageServer) readLock(logger jsonrpc.FunctionLogger, requireClan
 func (ls *INOLanguageServer) readUnlock(logger jsonrpc.FunctionLogger) {
 	logger.Logf(yellow.Sprintf("read-unlocked"))
 	ls.dataMux.RUnlock()
-}
-
-func (ls *INOLanguageServer) waitClangdStart(logger jsonrpc.FunctionLogger) error {
-	if ls.Clangd != nil {
-		return nil
-	}
-
-	logger.Logf("(throttled: waiting for clangd)")
-	logger.Logf(yellow.Sprintf("unlocked (waiting clangd)"))
-	ls.clangdStarted.Wait()
-	logger.Logf(yellow.Sprintf("locked (waiting clangd)"))
-
-	if ls.Clangd == nil {
-		logger.Logf("clangd startup failed: aborting call")
-		return errors.New("could not start clangd, aborted")
-	}
-	return nil
 }
 
 // NewINOLanguageServer creates and configures an Arduino Language Server.
@@ -185,6 +179,8 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLa
 func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
 	go func() {
 		defer streams.CatchAndLogPanic()
+		// Unlock goroutines waiting for clangd
+		defer ls.clangdStarted.Broadcast()
 
 		logger := NewLSPFunctionLogger(color.HiCyanString, "INIT --- ")
 		logger.Logf("initializing workbench: %s", inoParams.RootURI)
@@ -198,6 +194,7 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 			return
 		} else if !success {
 			logger.Logf("bootstrap build failed!")
+			return
 		}
 
 		if err := ls.buildPath.Join("compile_commands.json").CopyTo(ls.compileCommandsDir.Join("compile_commands.json")); err != nil {
@@ -248,9 +245,6 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 			logger.Logf("error sending initialized notification to clangd: %v", err)
 			return
 		}
-
-		// signal that clangd is running now...
-		ls.clangdStarted.Broadcast()
 
 		logger.Logf("Done initializing workbench")
 	}()
