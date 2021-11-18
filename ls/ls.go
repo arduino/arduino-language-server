@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/arduino/arduino-cli/executils"
+	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/settings/v1"
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
@@ -22,6 +23,7 @@ import (
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
 	"go.bug.st/lsp/textedits"
+	"google.golang.org/grpc"
 )
 
 // INOLanguageServer is a JSON-RPC handler that delegates messages to clangd.
@@ -1019,36 +1021,58 @@ func (ls *INOLanguageServer) CleanUp() {
 }
 
 func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.FunctionLogger) (*paths.Path, error) {
-	// XXX: do this from IDE or via gRPC
-	args := []string{ls.config.CliPath.String(),
-		"--config-file", ls.config.CliConfigPath.String(),
-		"config",
-		"dump",
-		"--format", "json",
-	}
-	cmd, err := executils.NewProcess(args...)
-	if err != nil {
-		return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
-	}
-	cmdOutput := &bytes.Buffer{}
-	cmd.RedirectStdoutTo(cmdOutput)
-	logger.Logf("running: %s", strings.Join(args, " "))
-	if err := cmd.Run(); err != nil {
-		return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
-	}
+	if ls.config.CliPath == nil {
+		// Establish a connection with the arduino-cli gRPC server
+		conn, err := grpc.Dial(ls.config.CliDaemonAddress, grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			return nil, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
+		}
+		defer conn.Close()
+		client := rpc.NewSettingsServiceClient(conn)
 
-	type cmdRes struct {
-		Directories struct {
-			Data string `json:"data"`
-		} `json:"directories"`
+		resp, err := client.GetValue(context.Background(), &rpc.GetValueRequest{
+			Key: "directories.data",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("error getting arduino data dir: %w", err)
+		}
+		var dataDir string
+		if err := json.Unmarshal([]byte(resp.JsonData), &dataDir); err != nil {
+			return nil, fmt.Errorf("error getting arduino data dir: %w", err)
+		}
+		logger.Logf("Arduino Data Dir -> %s", dataDir)
+		return paths.New(dataDir), nil
+	} else {
+		args := []string{ls.config.CliPath.String(),
+			"--config-file", ls.config.CliConfigPath.String(),
+			"config",
+			"dump",
+			"--format", "json",
+		}
+		cmd, err := executils.NewProcess(args...)
+		if err != nil {
+			return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+		}
+		cmdOutput := &bytes.Buffer{}
+		cmd.RedirectStdoutTo(cmdOutput)
+		logger.Logf("running: %s", strings.Join(args, " "))
+		if err := cmd.Run(); err != nil {
+			return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
+		}
+
+		type cmdRes struct {
+			Directories struct {
+				Data string `json:"data"`
+			} `json:"directories"`
+		}
+		var res cmdRes
+		if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
+			return nil, errors.Errorf("parsing arduino-cli output: %s", err)
+		}
+		// Return only the build path
+		logger.Logf("Arduino Data Dir -> %s", res.Directories.Data)
+		return paths.New(res.Directories.Data), nil
 	}
-	var res cmdRes
-	if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
-		return nil, errors.Errorf("parsing arduino-cli output: %s", err)
-	}
-	// Return only the build path
-	logger.Logf("Arduino Data Dir -> %s", res.Directories.Data)
-	return paths.New(res.Directories.Data), nil
 }
 
 func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {

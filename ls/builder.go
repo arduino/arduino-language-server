@@ -177,15 +177,14 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 
 	var success bool
 	if config.CliPath == nil {
-		// Establish a connection with the gRPC server, started with the command:
-		// arduino-cli daemon
+		// Establish a connection with the arduino-cli gRPC server
 		conn, err := grpc.Dial(config.CliDaemonAddress, grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
 			return false, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
 		}
 		defer conn.Close()
-
 		client := rpc.NewArduinoCoreServiceClient(conn)
+
 		compileReq := &rpc.CompileRequest{
 			Instance:                      &rpc.Instance{Id: int32(config.CliInstanceNumber)},
 			Fqbn:                          config.Fqbn,
