@@ -21,9 +21,8 @@ func (ls *INOLanguageServer) handleError(logger jsonrpc.FunctionLogger, err erro
 		submatch := exp.FindStringSubmatch(errorStr)
 		message = submatch[1]
 	} else if strings.Contains(errorStr, "platform not installed") || strings.Contains(errorStr, "no FQBN provided") {
-		if len(ls.config.SelectedBoard.Name) > 0 {
-			board := ls.config.SelectedBoard.Name
-			message = "Editor support may be inaccurate because the core for the board `" + board + "` is not installed."
+		if ls.config.Fqbn != "" {
+			message = "Editor support may be inaccurate because the core for the board `" + ls.config.Fqbn + "` is not installed."
 			message += " Use the Boards Manager to install it."
 		} else {
 			// This case happens most often when the app is started for the first time and no

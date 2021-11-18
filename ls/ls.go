@@ -24,30 +24,13 @@ import (
 	"go.bug.st/lsp/textedits"
 )
 
-var globalCliPath string
-var globalCliConfigPath string
-var globalClangdPath string
-var globalFormatterConf *paths.Path
-var enableLogging bool
-
-// Setup initializes global variables.
-func Setup(cliPath, cliConfigPath, clangdPath, formatFilePath string, _enableLogging bool) {
-	globalCliPath = cliPath
-	globalCliConfigPath = cliConfigPath
-	globalClangdPath = clangdPath
-	if formatFilePath != "" {
-		globalFormatterConf = paths.New(formatFilePath)
-	}
-	enableLogging = _enableLogging
-}
-
 // INOLanguageServer is a JSON-RPC handler that delegates messages to clangd.
 type INOLanguageServer struct {
+	config *Config
 	IDE    *IDELSPServer
 	Clangd *ClangdLSPClient
 
-	progressHandler *ProgressProxyHandler
-
+	progressHandler         *ProgressProxyHandler
 	closing                 chan bool
 	clangdStarted           *sync.Cond
 	dataMux                 sync.RWMutex
@@ -62,20 +45,16 @@ type INOLanguageServer struct {
 	trackedInoDocs          map[string]lsp.TextDocumentItem
 	inoDocsWithDiagnostics  map[lsp.DocumentURI]bool
 	sketchRebuilder         *SketchRebuilder
-
-	config BoardConfig
 }
 
-// BoardConfig describes the board and port selected by the user.
-type BoardConfig struct {
-	SelectedBoard Board  `json:"selectedBoard"`
-	SelectedPort  string `json:"selectedPort"`
-}
-
-// Board structure.
-type Board struct {
-	Name string `json:"name"`
-	Fqbn string `json:"fqbn"`
+// Config describes the language server configuration.
+type Config struct {
+	Fqbn          string
+	CliPath       *paths.Path
+	CliConfigPath *paths.Path
+	ClangdPath    *paths.Path
+	FormatterConf *paths.Path
+	EnableLogging bool
 }
 
 var yellow = color.New(color.FgHiYellow)
@@ -129,17 +108,13 @@ func (ls *INOLanguageServer) readUnlock(logger jsonrpc.FunctionLogger) {
 }
 
 // NewINOLanguageServer creates and configures an Arduino Language Server.
-func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLanguageServer {
+func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *INOLanguageServer {
 	logger := NewLSPFunctionLogger(color.HiWhiteString, "LS: ")
 	ls := &INOLanguageServer{
 		trackedInoDocs:         map[string]lsp.TextDocumentItem{},
 		inoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
 		closing:                make(chan bool),
-		// buildSketchSymbolsLoad:  make(chan bool, 1),
-		// buildSketchSymbolsCheck: make(chan bool, 1),
-		config: BoardConfig{
-			SelectedBoard: board,
-		},
+		config:                 config,
 	}
 	ls.clangdStarted = sync.NewCond(&ls.dataMux)
 	ls.sketchRebuilder = NewSketchBuilder(ls)
@@ -157,12 +132,10 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, board Board) *INOLa
 		ls.buildSketchRoot = ls.buildPath.Join("sketch")
 	}
 
-	if enableLogging {
-		logger.Logf("Initial board configuration: %s", board)
-		logger.Logf("Language server build path: %s", ls.buildPath)
-		logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
-		logger.Logf("Language server compile-commands: %s", ls.compileCommandsDir.Join("compile_commands.json"))
-	}
+	logger.Logf("Initial board configuration: %s", ls.config.Fqbn)
+	logger.Logf("Language server build path: %s", ls.buildPath)
+	logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
+	logger.Logf("Language server compile-commands: %s", ls.compileCommandsDir.Join("compile_commands.json"))
 
 	ls.IDE = NewIDELSPServer(logger, stdin, stdout, ls)
 	ls.progressHandler = NewProgressProxy(ls.IDE.conn)
@@ -210,14 +183,14 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		}
 
 		// Retrieve data folder
-		dataFolder, err := extractDataFolderFromArduinoCLI(logger)
+		dataFolder, err := ls.extractDataFolderFromArduinoCLI(logger)
 		if err != nil {
 			logger.Logf("error retrieving data folder from arduino-cli: %s", err)
 			return
 		}
 
 		// Start clangd
-		ls.Clangd = NewClangdLSPClient(logger, ls.buildPath, ls.buildSketchCpp, dataFolder, ls)
+		ls.Clangd = NewClangdLSPClient(logger, dataFolder, ls)
 		go func() {
 			defer streams.CatchAndLogPanic()
 			ls.Clangd.Run()
@@ -1043,10 +1016,10 @@ func (ls *INOLanguageServer) CleanUp() {
 	}
 }
 
-func extractDataFolderFromArduinoCLI(logger jsonrpc.FunctionLogger) (*paths.Path, error) {
+func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.FunctionLogger) (*paths.Path, error) {
 	// XXX: do this from IDE or via gRPC
-	args := []string{globalCliPath,
-		"--config-file", globalCliConfigPath,
+	args := []string{ls.config.CliPath.String(),
+		"--config-file", ls.config.CliConfigPath.String(),
 		"config",
 		"dump",
 		"--format", "json",
@@ -1806,9 +1779,9 @@ WhitespaceSensitiveMacros: []
 	if sketchFormatterConf := ls.sketchRoot.Join(".clang-format"); sketchFormatterConf.Exist() {
 		// If a custom config is present in the sketch folder, use that one
 		try(sketchFormatterConf)
-	} else if globalFormatterConf != nil && globalFormatterConf.Exist() {
+	} else if ls.config.FormatterConf != nil && ls.config.FormatterConf.Exist() {
 		// Otherwise if a global config file is present, use that one
-		try(globalFormatterConf)
+		try(ls.config.FormatterConf)
 	}
 
 	targetFile := cppuri.AsPath()

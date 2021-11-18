@@ -56,16 +56,31 @@ func main() {
 	if cliConfigPath == "" {
 		log.Fatal("Path to ArduinoCLI config file must be set.")
 	}
+	if clangdPath == "" {
+		log.Fatal("Path to Clangd must be set.")
+	}
 
-	ls.Setup(cliPath, cliConfigPath, clangdPath, formatFilePath, enableLogging)
-	initialBoard := ls.Board{Fqbn: initialFqbn, Name: initialBoardName}
+	config := &ls.Config{
+		Fqbn:          initialFqbn,
+		ClangdPath:    paths.New(clangdPath),
+		EnableLogging: enableLogging,
+	}
+	if cliPath != "" {
+		config.CliPath = paths.New(cliPath)
+	}
+	if cliConfigPath != "" {
+		config.CliConfigPath = paths.New(cliConfigPath)
+	}
+	if formatFilePath != "" {
+		config.FormatterConf = paths.New(formatFilePath)
+	}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
 	if enableLogging {
 		stdio = streams.LogReadWriteCloserAs(stdio, "inols.log")
 	}
 
-	inoHandler := ls.NewINOLanguageServer(stdio, stdio, initialBoard)
+	inoHandler := ls.NewINOLanguageServer(stdio, stdio, config)
 
 	// Intercept kill signal
 	c := make(chan os.Signal, 2)

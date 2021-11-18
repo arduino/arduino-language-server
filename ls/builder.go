@@ -159,8 +159,10 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 	// Extract all build information from language server status
 	ls.readLock(logger, false)
 	sketchRoot := ls.sketchRoot
-	fqbn := ls.config.SelectedBoard.Fqbn
+	fqbn := ls.config.Fqbn
 	buildPath := ls.buildPath
+	cliPath := ls.config.CliPath
+	cliConfigPath := ls.config.CliConfigPath
 	type overridesFile struct {
 		Overrides map[string]string `json:"overrides"`
 	}
@@ -176,7 +178,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 	ls.readUnlock(logger)
 
 	var success bool
-	if true {
+	if cliPath == nil {
 		// Establish a connection with the gRPC server, started with the command:
 		// arduino-cli daemon
 		conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure(), grpc.WithBlock())
@@ -246,8 +248,8 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 		}
 
 		// Run arduino-cli to perform the build
-		args := []string{globalCliPath,
-			"--config-file", globalCliConfigPath,
+		args := []string{cliPath.String(),
+			"--config-file", cliConfigPath.String(),
 			"compile",
 			"--fqbn", fqbn,
 			"--only-compilation-database",

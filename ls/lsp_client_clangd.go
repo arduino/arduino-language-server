@@ -21,18 +21,17 @@ type ClangdLSPClient struct {
 	ls   *INOLanguageServer
 }
 
-func NewClangdLSPClient(logger jsonrpc.FunctionLogger, compileCommandsDir, buildSketchCpp, dataFolder *paths.Path, inoLanguageServer *INOLanguageServer) *ClangdLSPClient {
+func NewClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, ls *INOLanguageServer) *ClangdLSPClient {
 	// Start clangd
 	args := []string{
-		globalClangdPath,
+		ls.config.ClangdPath.String(),
 		"-log=verbose",
-		fmt.Sprintf(`--compile-commands-dir=%s`, compileCommandsDir),
+		fmt.Sprintf(`--compile-commands-dir=%s`, ls.buildPath),
 	}
 	if dataFolder != nil {
 		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**")))
 	}
 
-	//	clangdStdout, clangdStdin, clangdStderr := startClangd(logger, compileCommandsDir, buildSketchCpp, dataFolder)
 	logger.Logf("    Starting clangd: %s", strings.Join(args, " "))
 	var clangdStdin io.WriteCloser
 	var clangdStdout, clangdStderr io.ReadCloser
@@ -53,7 +52,7 @@ func NewClangdLSPClient(logger jsonrpc.FunctionLogger, compileCommandsDir, build
 	}
 
 	clangdStdio := streams.NewReadWriteCloser(clangdStdout, clangdStdin)
-	if enableLogging {
+	if ls.config.EnableLogging {
 		clangdStdio = streams.LogReadWriteCloserAs(clangdStdio, "inols-clangd.log")
 		go io.Copy(streams.OpenLogFileAs("inols-clangd-err.log"), clangdStderr)
 	} else {
@@ -61,7 +60,7 @@ func NewClangdLSPClient(logger jsonrpc.FunctionLogger, compileCommandsDir, build
 	}
 
 	client := &ClangdLSPClient{
-		ls: inoLanguageServer,
+		ls: ls,
 	}
 	client.conn = lsp.NewClient(clangdStdio, clangdStdio, client)
 	client.conn.SetLogger(&LSPLogger{
