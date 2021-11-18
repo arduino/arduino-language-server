@@ -159,10 +159,8 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 	// Extract all build information from language server status
 	ls.readLock(logger, false)
 	sketchRoot := ls.sketchRoot
-	fqbn := ls.config.Fqbn
 	buildPath := ls.buildPath
-	cliPath := ls.config.CliPath
-	cliConfigPath := ls.config.CliConfigPath
+	config := ls.config
 	type overridesFile struct {
 		Overrides map[string]string `json:"overrides"`
 	}
@@ -178,10 +176,10 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 	ls.readUnlock(logger)
 
 	var success bool
-	if cliPath == nil {
+	if config.CliPath == nil {
 		// Establish a connection with the gRPC server, started with the command:
 		// arduino-cli daemon
-		conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure(), grpc.WithBlock())
+		conn, err := grpc.Dial(config.CliDaemonAddress, grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
 			return false, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
 		}
@@ -189,8 +187,8 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 
 		client := rpc.NewArduinoCoreServiceClient(conn)
 		compileReq := &rpc.CompileRequest{
-			Instance:                      &rpc.Instance{Id: 1}, // XXX
-			Fqbn:                          fqbn,
+			Instance:                      &rpc.Instance{Id: int32(config.CliInstanceNumber)},
+			Fqbn:                          config.Fqbn,
 			SketchPath:                    sketchRoot.String(),
 			SourceOverride:                data.Overrides,
 			BuildPath:                     buildPath.String(),
@@ -248,15 +246,15 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 		}
 
 		// Run arduino-cli to perform the build
-		args := []string{cliPath.String(),
-			"--config-file", cliConfigPath.String(),
+		args := []string{config.CliPath.String(),
+			"--config-file", config.CliConfigPath.String(),
 			"compile",
-			"--fqbn", fqbn,
+			"--fqbn", config.Fqbn,
 			"--only-compilation-database",
-			//"--clean",
 			"--source-override", overridesJSON.String(),
 			"--build-path", buildPath.String(),
 			"--format", "json",
+			//"--clean",
 			sketchRoot.String(),
 		}
 		cmd, err := executils.NewProcess(args...)

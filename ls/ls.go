@@ -49,12 +49,14 @@ type INOLanguageServer struct {
 
 // Config describes the language server configuration.
 type Config struct {
-	Fqbn          string
-	CliPath       *paths.Path
-	CliConfigPath *paths.Path
-	ClangdPath    *paths.Path
-	FormatterConf *paths.Path
-	EnableLogging bool
+	Fqbn              string
+	CliPath           *paths.Path
+	CliConfigPath     *paths.Path
+	ClangdPath        *paths.Path
+	CliDaemonAddress  string
+	CliInstanceNumber int
+	FormatterConf     *paths.Path
+	EnableLogging     bool
 }
 
 var yellow = color.New(color.FgHiYellow)
