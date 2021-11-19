@@ -306,7 +306,7 @@ func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Contex
 	defer ls.readUnlock(logger)
 
 	logger.Logf("--> completion(%s)\n", inoParams.TextDocument)
-	cppTextDocPositionParams, err := ls.ino2cppTextDocumentPositionParams(logger, inoParams.TextDocumentPositionParams)
+	cppTextDocPositionParams, err := ls.ide2clangTextDocumentPositionParams(logger, inoParams.TextDocumentPositionParams)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -350,25 +350,20 @@ func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Contex
 	return &inoResp, nil
 }
 
-func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.HoverParams) (*lsp.Hover, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.HoverParams) (*lsp.Hover, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
 
-	inoURI := inoParams.TextDocument.URI
-	inoTextDocPosition := inoParams.TextDocumentPositionParams
-	logger.Logf("--> hover(%s)\n", inoTextDocPosition)
-
-	cppTextDocPosition, err := ls.ino2cppTextDocumentPositionParams(logger, inoTextDocPosition)
+	clangTextDocPosition, err := ls.ide2clangTextDocumentPositionParams(logger, ideParams.TextDocumentPositionParams)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
 
-	logger.Logf("    --> hover(%s)\n", cppTextDocPosition)
-	cppParams := &lsp.HoverParams{
-		TextDocumentPositionParams: cppTextDocPosition,
+	clangParams := &lsp.HoverParams{
+		TextDocumentPositionParams: clangTextDocPosition,
 	}
-	clangResp, clangErr, err := ls.Clangd.conn.TextDocumentHover(ctx, cppParams)
+	clangResp, clangErr, err := ls.Clangd.conn.TextDocumentHover(ctx, clangParams)
 	if err != nil {
 		logger.Logf("clangd connectiono error: %v", err)
 		ls.Close()
@@ -380,21 +375,26 @@ func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, lo
 	}
 
 	if clangResp == nil {
+		logger.Logf("response: nil")
 		return nil, nil
 	}
 
-	inoResp := *clangResp
-	// TODO: ????
-	// if len(clangResp.Contents.Value) == 0 {
-	// 	return nil
-	// }
-	cppToIno := inoURI != lsp.NilURI && inoURI.AsPath().EquivalentTo(ls.buildSketchCpp)
-	if cppToIno {
-		_, inoRange := ls.sketchMapper.CppToInoRange(*clangResp.Range)
-		inoResp.Range = &inoRange
+	_, r, err := ls.clang2IdeRangeAndDocumentURI(logger, clangParams.TextDocument.URI, *clangResp.Range)
+	if err != nil {
+		logger.Logf("error during range conversion: %v", err)
+		ls.Close()
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
-	logger.Logf("<-- hover(%s)", strconv.Quote(inoResp.Contents.Value))
-	return &inoResp, nil
+	ideResp := lsp.Hover{
+		Contents: clangResp.Contents,
+		Range:    &r,
+	}
+	logger.Logf("Hover content: %s", strconv.Quote(ideResp.Contents.Value))
+	return &ideResp, nil
+}
+
+func (ls *INOLanguageServer) clangURIRefersToIno(uri lsp.DocumentURI) bool {
+	return uri.AsPath().EquivalentTo(ls.buildSketchCpp)
 }
 
 func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.SignatureHelpParams) (*lsp.SignatureHelp, *jsonrpc.ResponseError) {
@@ -404,7 +404,7 @@ func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Con
 	inoTextDocumentPosition := inoParams.TextDocumentPositionParams
 
 	logger.Logf("%s", inoTextDocumentPosition)
-	cppTextDocumentPosition, err := ls.ino2cppTextDocumentPositionParams(logger, inoTextDocumentPosition)
+	cppTextDocumentPosition, err := ls.ide2clangTextDocumentPositionParams(logger, inoTextDocumentPosition)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -436,7 +436,7 @@ func (ls *INOLanguageServer) TextDocumentDefinitionReqFromIDE(ctx context.Contex
 	inoTextDocPosition := p.TextDocumentPositionParams
 
 	logger.Logf("%s", inoTextDocPosition)
-	cppTextDocPosition, err := ls.ino2cppTextDocumentPositionParams(logger, inoTextDocPosition)
+	cppTextDocPosition, err := ls.ide2clangTextDocumentPositionParams(logger, inoTextDocPosition)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -481,7 +481,7 @@ func (ls *INOLanguageServer) TextDocumentTypeDefinitionReqFromIDE(ctx context.Co
 
 	logger.Logf("%s", inoTextDocumentPosition)
 	// inoURI := inoTextDocumentPosition.TextDocument.URI
-	cppTextDocumentPosition, err := ls.ino2cppTextDocumentPositionParams(logger, inoTextDocumentPosition)
+	cppTextDocumentPosition, err := ls.ide2clangTextDocumentPositionParams(logger, inoTextDocumentPosition)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -527,7 +527,7 @@ func (ls *INOLanguageServer) TextDocumentImplementationReqFromIDE(ctx context.Co
 	inoTextDocumentPosition := inoParams.TextDocumentPositionParams
 	logger.Logf("%s", inoTextDocumentPosition)
 
-	cppTextDocumentPosition, err := ls.ino2cppTextDocumentPositionParams(logger, inoTextDocumentPosition)
+	cppTextDocumentPosition, err := ls.ide2clangTextDocumentPositionParams(logger, inoTextDocumentPosition)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -569,7 +569,7 @@ func (ls *INOLanguageServer) TextDocumentDocumentHighlightReqFromIDE(ctx context
 	defer ls.readUnlock(logger)
 
 	inoTextDocumentPosition := inoParams.TextDocumentPositionParams
-	cppTextDocumentPosition, err := ls.ino2cppTextDocumentPositionParams(logger, inoTextDocumentPosition)
+	cppTextDocumentPosition, err := ls.ide2clangTextDocumentPositionParams(logger, inoTextDocumentPosition)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -1235,7 +1235,7 @@ func (ls *INOLanguageServer) ino2cppDocumentURI(logger jsonrpc.FunctionLogger, i
 	return lsp.NilURI, err
 }
 
-func (ls *INOLanguageServer) inoDocumentURIFromInoPath(logger jsonrpc.FunctionLogger, inoPath string) (lsp.DocumentURI, error) {
+func (ls *INOLanguageServer) idePathToIdeURI(logger jsonrpc.FunctionLogger, inoPath string) (lsp.DocumentURI, error) {
 	if inoPath == sourcemapper.NotIno.File {
 		return sourcemapper.NotInoURI, nil
 	}
@@ -1252,65 +1252,57 @@ func (ls *INOLanguageServer) inoDocumentURIFromInoPath(logger jsonrpc.FunctionLo
 	return doc.URI, nil
 }
 
-func (ls *INOLanguageServer) cpp2inoDocumentURI(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
-	// TODO: Split this function into 2
-	//       - Cpp2inoSketchDocumentURI: converts sketch     (cppURI, cppRange) -> (inoURI, inoRange)
-	//       - Cpp2inoDocumentURI      : converts non-sketch (cppURI)           -> (inoURI)              [range is the same]
-
-	// Sketchbook/Sketch/Sketch.ino      <- build-path/sketch/Sketch.ino.cpp
-	// Sketchbook/Sketch/AnotherTab.ino  <- build-path/sketch/Sketch.ino.cpp  (different section from above)
-	// Sketchbook/Sketch/AnotherFile.cpp <- build-path/sketch/AnotherFile.cpp (1:1)
-	// another/path/source.cpp           <- unchanged
-
-	// Convert build path to sketch path
-	cppPath := cppURI.AsPath()
-	if cppPath.EquivalentTo(ls.buildSketchCpp) {
-		inoPath, inoRange, err := ls.sketchMapper.CppToInoRangeOk(cppRange)
+func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
+	// Sketchbook/Sketch/Sketch.ino      <-> build-path/sketch/Sketch.ino.cpp
+	// Sketchbook/Sketch/AnotherTab.ino  <-> build-path/sketch/Sketch.ino.cpp  (different section from above)
+	if ls.clangURIRefersToIno(clangURI) {
+		// We are converting from preprocessed sketch.ino.cpp back to a sketch.ino file
+		idePath, ideRange, err := ls.sketchMapper.CppToInoRangeOk(clangRange)
 		if err == nil {
-			if ls.sketchMapper.IsPreprocessedCppLine(cppRange.Start.Line) {
-				inoPath = sourcemapper.NotIno.File
-				logger.Logf("    URI: is in preprocessed section")
-				logger.Logf("         converted %s to %s:%s", cppRange, inoPath, inoRange)
-			} else {
-				logger.Logf("    URI: converted %s to %s:%s", cppRange, inoPath, inoRange)
+			if ls.sketchMapper.IsPreprocessedCppLine(clangRange.Start.Line) {
+				idePath = sourcemapper.NotIno.File
+				logger.Logf("  Range is in PREPROCESSED section of the sketch")
 			}
 		} else if _, ok := err.(sourcemapper.AdjustedRangeErr); ok {
-			logger.Logf("    URI: converted %s to %s:%s (END LINE ADJUSTED)", cppRange, inoPath, inoRange)
+			logger.Logf("  Range has been END LINE ADJSUTED")
 			err = nil
 		} else {
-			logger.Logf("    URI: ERROR: %s", err)
+			logger.Logf("  Range conversion ERROR: %s", err)
 			ls.sketchMapper.DebugLogAll()
 			return lsp.NilURI, lsp.NilRange, err
 		}
-		inoURI, err := ls.inoDocumentURIFromInoPath(logger, inoPath)
-		return inoURI, inoRange, err
+		ideURI, err := ls.idePathToIdeURI(logger, idePath)
+		logger.Logf("  Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
+		return ideURI, ideRange, err
 	}
 
-	inside, err := cppPath.IsInsideDir(ls.buildSketchRoot)
+	// /another/global/path/to/source.cpp <-> /another/global/path/to/source.cpp (same range)
+	ideRange := clangRange
+	clangPath := clangURI.AsPath()
+	inside, err := clangPath.IsInsideDir(ls.buildSketchRoot)
 	if err != nil {
-		logger.Logf("    could not determine if '%s' is inside '%s'", cppPath, ls.buildSketchRoot)
+		logger.Logf("ERROR: could not determine if '%s' is inside '%s'", clangURI, ls.buildSketchRoot)
 		return lsp.NilURI, lsp.NilRange, err
 	}
 	if !inside {
-		logger.Logf("    '%s' is not inside '%s'", cppPath, ls.buildSketchRoot)
-		logger.Logf("    keep doc identifier to '%s' as-is", cppPath)
-		return cppURI, cppRange, nil
+		ideURI := clangURI
+		logger.Logf("  Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
+		return clangURI, clangRange, nil
 	}
 
-	rel, err := ls.buildSketchRoot.RelTo(cppPath)
-	if err == nil {
-		inoPath := ls.sketchRoot.JoinPath(rel).String()
-		logger.Logf("    URI: '%s' -> '%s'", cppPath, inoPath)
-		inoURI, err := ls.inoDocumentURIFromInoPath(logger, inoPath)
-		logger.Logf("              as URI: '%s'", inoURI)
-		return inoURI, cppRange, err
+	// Sketchbook/Sketch/AnotherFile.cpp <-> build-path/sketch/AnotherFile.cpp (same range)
+	rel, err := ls.buildSketchRoot.RelTo(clangPath)
+	if err != nil {
+		logger.Logf("ERROR: could not transform '%s' into a relative path on '%s': %s", clangURI, ls.buildSketchRoot, err)
+		return lsp.NilURI, lsp.NilRange, err
 	}
-
-	logger.Logf("    could not determine rel-path of '%s' in '%s': %s", cppPath, ls.buildSketchRoot, err)
-	return lsp.NilURI, lsp.NilRange, err
+	idePath := ls.sketchRoot.JoinPath(rel).String()
+	ideURI, err := ls.idePathToIdeURI(logger, idePath)
+	logger.Logf("  Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
+	return ideURI, clangRange, err
 }
 
-func (ls *INOLanguageServer) ino2cppTextDocumentPositionParams(logger jsonrpc.FunctionLogger, inoParams lsp.TextDocumentPositionParams) (lsp.TextDocumentPositionParams, error) {
+func (ls *INOLanguageServer) ide2clangTextDocumentPositionParams(logger jsonrpc.FunctionLogger, inoParams lsp.TextDocumentPositionParams) (lsp.TextDocumentPositionParams, error) {
 	inoTextDocument := inoParams.TextDocument
 	inoPosition := inoParams.Position
 	inoURI := inoTextDocument.URI
@@ -1447,7 +1439,7 @@ func (ls *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger,
 
 		// ...otherwise convert edits to the sketch.ino.cpp into multilpe .ino edits
 		for _, edit := range edits {
-			inoURI, inoRange, err := ls.cpp2inoDocumentURI(logger, editURI, edit.Range)
+			inoURI, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, editURI, edit.Range)
 			if err != nil {
 				logger.Logf("    error converting edit %s:%s: %s", editURI, edit.Range, err)
 				continue
@@ -1468,7 +1460,7 @@ func (ls *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger,
 }
 
 func (ls *INOLanguageServer) cpp2inoLocation(logger jsonrpc.FunctionLogger, cppLocation lsp.Location) (lsp.Location, error) {
-	inoURI, inoRange, err := ls.cpp2inoDocumentURI(logger, cppLocation.URI, cppLocation.Range)
+	inoURI, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppLocation.URI, cppLocation.Range)
 	return lsp.Location{
 		URI:   inoURI,
 		Range: inoRange,
@@ -1476,7 +1468,7 @@ func (ls *INOLanguageServer) cpp2inoLocation(logger jsonrpc.FunctionLogger, cppL
 }
 
 func (ls *INOLanguageServer) cpp2inoDocumentHighlight(logger jsonrpc.FunctionLogger, cppHighlight lsp.DocumentHighlight, cppURI lsp.DocumentURI) (lsp.DocumentHighlight, error) {
-	_, inoRange, err := ls.cpp2inoDocumentURI(logger, cppURI, cppHighlight.Range)
+	_, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, cppHighlight.Range)
 	if err != nil {
 		return lsp.DocumentHighlight{}, err
 	}
@@ -1510,7 +1502,7 @@ func (ls *INOLanguageServer) cpp2inoTextEdits(logger jsonrpc.FunctionLogger, cpp
 }
 
 func (ls *INOLanguageServer) cpp2inoTextEdit(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, error) {
-	inoURI, inoRange, err := ls.cpp2inoDocumentURI(logger, cppURI, cppEdit.Range)
+	inoURI, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, cppEdit.Range)
 	inoEdit := cppEdit
 	inoEdit.Range = inoRange
 	return inoURI, inoEdit, err
@@ -1570,13 +1562,13 @@ func (ls *INOLanguageServer) cpp2inoDiagnostics(logger jsonrpc.FunctionLogger, c
 	isSketch := cppURI.AsPath().EquivalentTo(ls.buildSketchCpp)
 
 	if !isSketch {
-		inoURI, _, err := ls.cpp2inoDocumentURI(logger, cppURI, lsp.NilRange)
+		inoURI, _, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, lsp.NilRange)
 		if err != nil {
 			return nil, err
 		}
 		inoDiags := []lsp.Diagnostic{}
 		for _, cppDiag := range cppDiagsParams.Diagnostics {
-			inoURIofConvertedRange, inoRange, err := ls.cpp2inoDocumentURI(logger, cppURI, cppDiag.Range)
+			inoURIofConvertedRange, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, cppDiag.Range)
 			if err != nil {
 				return nil, err
 			}
@@ -1608,7 +1600,7 @@ func (ls *INOLanguageServer) cpp2inoDiagnostics(logger jsonrpc.FunctionLogger, c
 	ls.inoDocsWithDiagnostics = map[lsp.DocumentURI]bool{}
 
 	for _, cppDiag := range cppDiagsParams.Diagnostics {
-		inoURI, inoRange, err := ls.cpp2inoDocumentURI(logger, cppURI, cppDiag.Range)
+		inoURI, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, cppDiag.Range)
 		if err != nil {
 			return nil, err
 		}
