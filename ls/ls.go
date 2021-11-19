@@ -44,7 +44,7 @@ type INOLanguageServer struct {
 	sketchName              string
 	sketchMapper            *sourcemapper.SketchMapper
 	sketchTrackedFilesCount int
-	trackedInoDocs          map[string]lsp.TextDocumentItem
+	trackedIDEDocs          map[string]lsp.TextDocumentItem
 	inoDocsWithDiagnostics  map[lsp.DocumentURI]bool
 	sketchRebuilder         *SketchRebuilder
 }
@@ -115,7 +115,7 @@ func (ls *INOLanguageServer) readUnlock(logger jsonrpc.FunctionLogger) {
 func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *INOLanguageServer {
 	logger := NewLSPFunctionLogger(color.HiWhiteString, "LS: ")
 	ls := &INOLanguageServer{
-		trackedInoDocs:         map[string]lsp.TextDocumentItem{},
+		trackedIDEDocs:         map[string]lsp.TextDocumentItem{},
 		inoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
 		closing:                make(chan bool),
 		config:                 config,
@@ -822,7 +822,7 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 
 	// Add the TextDocumentItem in the tracked files list
 	inoTextDocItem := inoParam.TextDocument
-	ls.trackedInoDocs[inoTextDocItem.URI.AsPath().String()] = inoTextDocItem
+	ls.trackedIDEDocs[inoTextDocItem.URI.AsPath().String()] = inoTextDocItem
 
 	// If we are tracking a .ino...
 	if inoTextDocItem.URI.Ext() == ".ino" {
@@ -1076,8 +1076,8 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 
 func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
 	inoIdentifier := inoDidClose.TextDocument
-	if _, exist := ls.trackedInoDocs[inoIdentifier.URI.AsPath().String()]; exist {
-		delete(ls.trackedInoDocs, inoIdentifier.URI.AsPath().String())
+	if _, exist := ls.trackedIDEDocs[inoIdentifier.URI.AsPath().String()]; exist {
+		delete(ls.trackedIDEDocs, inoIdentifier.URI.AsPath().String())
 	} else {
 		logger.Logf("    didClose of untracked document: %s", inoIdentifier.URI)
 		return nil, unknownURI(inoIdentifier.URI)
@@ -1114,8 +1114,8 @@ func (ls *INOLanguageServer) ino2cppTextDocumentItem(logger jsonrpc.FunctionLogg
 	} else {
 		cppItem.LanguageID = inoItem.LanguageID
 		inoPath := inoItem.URI.AsPath().String()
-		cppItem.Text = ls.trackedInoDocs[inoPath].Text
-		cppItem.Version = ls.trackedInoDocs[inoPath].Version
+		cppItem.Text = ls.trackedIDEDocs[inoPath].Text
+		cppItem.Version = ls.trackedIDEDocs[inoPath].Version
 	}
 
 	return cppItem, nil
@@ -1134,15 +1134,15 @@ func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChan
 
 	// Apply the change to the tracked sketch file.
 	trackedInoID := inoDoc.URI.AsPath().String()
-	if doc, ok := ls.trackedInoDocs[trackedInoID]; !ok {
+	if doc, ok := ls.trackedIDEDocs[trackedInoID]; !ok {
 		return nil, unknownURI(inoDoc.URI)
 	} else if updatedDoc, err := textedits.ApplyLSPTextDocumentContentChangeEvent(doc, inoDidChangeParams); err != nil {
 		return nil, err
 	} else {
-		ls.trackedInoDocs[trackedInoID] = updatedDoc
+		ls.trackedIDEDocs[trackedInoID] = updatedDoc
 	}
 
-	logger.Logf("Tracked SKETCH file:----------+\n" + ls.trackedInoDocs[trackedInoID].Text + "\n----------------------")
+	logger.Logf("Tracked SKETCH file:----------+\n" + ls.trackedIDEDocs[trackedInoID].Text + "\n----------------------")
 
 	// If the file is not part of a .ino flie forward the change as-is to clangd
 	if inoDoc.URI.Ext() != ".ino" {
@@ -1193,140 +1193,6 @@ func (ls *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger jsonr
 	res := doc
 	res.URI = cppURI
 	return res, err
-}
-
-func (ls *INOLanguageServer) ide2ClangTextDocumentIdentifier(logger jsonrpc.FunctionLogger, ideTextDocIdentifier lsp.TextDocumentIdentifier) (lsp.TextDocumentIdentifier, error) {
-	clangURI, err := ls.ide2ClangDocumentURI(logger, ideTextDocIdentifier.URI)
-	return lsp.TextDocumentIdentifier{URI: clangURI}, err
-}
-
-func (ls *INOLanguageServer) ide2ClangDocumentURI(logger jsonrpc.FunctionLogger, ideURI lsp.DocumentURI) (lsp.DocumentURI, error) {
-	// Sketchbook/Sketch/Sketch.ino      -> build-path/sketch/Sketch.ino.cpp
-	// Sketchbook/Sketch/AnotherTab.ino  -> build-path/sketch/Sketch.ino.cpp  (different section from above)
-	idePath := ideURI.AsPath()
-	if idePath.Ext() == ".ino" {
-		clangURI := lsp.NewDocumentURIFromPath(ls.buildSketchCpp)
-		logger.Logf("URI: %s -> %s", ideURI, clangURI)
-		return clangURI, nil
-	}
-
-	// another/path/source.cpp -> another/path/source.cpp (unchanged)
-	inside, err := idePath.IsInsideDir(ls.sketchRoot)
-	if err != nil {
-		logger.Logf("ERROR: could not determine if '%s' is inside '%s'", idePath, ls.sketchRoot)
-		return lsp.NilURI, unknownURI(ideURI)
-	}
-	if !inside {
-		clangURI := ideURI
-		logger.Logf("URI: %s -> %s", ideURI, clangURI)
-		return clangURI, nil
-	}
-
-	// Sketchbook/Sketch/AnotherFile.cpp -> build-path/sketch/AnotherFile.cpp
-	rel, err := ls.sketchRoot.RelTo(idePath)
-	if err != nil {
-		logger.Logf("ERROR: could not determine rel-path of '%s' in '%s': %s", idePath, ls.sketchRoot, err)
-		return lsp.NilURI, err
-	}
-
-	clangPath := ls.buildSketchRoot.JoinPath(rel)
-	clangURI := lsp.NewDocumentURIFromPath(clangPath)
-	logger.Logf("URI: %s -> %s", ideURI, clangURI)
-	return clangURI, nil
-}
-
-func (ls *INOLanguageServer) idePathToIdeURI(logger jsonrpc.FunctionLogger, inoPath string) (lsp.DocumentURI, error) {
-	if inoPath == sourcemapper.NotIno.File {
-		return sourcemapper.NotInoURI, nil
-	}
-	doc, ok := ls.trackedInoDocs[inoPath]
-	if !ok {
-		logger.Logf("    !!! Unresolved .ino path: %s", inoPath)
-		logger.Logf("    !!! Known doc paths are:")
-		for p := range ls.trackedInoDocs {
-			logger.Logf("    !!! > %s", p)
-		}
-		uri := lsp.NewDocumentURI(inoPath)
-		return uri, unknownURI(uri)
-	}
-	return doc.URI, nil
-}
-
-func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
-	// Sketchbook/Sketch/Sketch.ino      <-> build-path/sketch/Sketch.ino.cpp
-	// Sketchbook/Sketch/AnotherTab.ino  <-> build-path/sketch/Sketch.ino.cpp  (different section from above)
-	if ls.clangURIRefersToIno(clangURI) {
-		// We are converting from preprocessed sketch.ino.cpp back to a sketch.ino file
-		idePath, ideRange, err := ls.sketchMapper.CppToInoRangeOk(clangRange)
-		if err == nil {
-			if ls.sketchMapper.IsPreprocessedCppLine(clangRange.Start.Line) {
-				idePath = sourcemapper.NotIno.File
-				logger.Logf("Range is in PREPROCESSED section of the sketch")
-			}
-		} else if _, ok := err.(sourcemapper.AdjustedRangeErr); ok {
-			logger.Logf("Range has been END LINE ADJSUTED")
-			err = nil
-		} else {
-			logger.Logf("Range conversion ERROR: %s", err)
-			ls.sketchMapper.DebugLogAll()
-			return lsp.NilURI, lsp.NilRange, err
-		}
-		ideURI, err := ls.idePathToIdeURI(logger, idePath)
-		logger.Logf("Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
-		return ideURI, ideRange, err
-	}
-
-	// /another/global/path/to/source.cpp <-> /another/global/path/to/source.cpp (same range)
-	ideRange := clangRange
-	clangPath := clangURI.AsPath()
-	inside, err := clangPath.IsInsideDir(ls.buildSketchRoot)
-	if err != nil {
-		logger.Logf("ERROR: could not determine if '%s' is inside '%s'", clangURI, ls.buildSketchRoot)
-		return lsp.NilURI, lsp.NilRange, err
-	}
-	if !inside {
-		ideURI := clangURI
-		logger.Logf("Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
-		return clangURI, clangRange, nil
-	}
-
-	// Sketchbook/Sketch/AnotherFile.cpp <-> build-path/sketch/AnotherFile.cpp (same range)
-	rel, err := ls.buildSketchRoot.RelTo(clangPath)
-	if err != nil {
-		logger.Logf("ERROR: could not transform '%s' into a relative path on '%s': %s", clangURI, ls.buildSketchRoot, err)
-		return lsp.NilURI, lsp.NilRange, err
-	}
-	idePath := ls.sketchRoot.JoinPath(rel).String()
-	ideURI, err := ls.idePathToIdeURI(logger, idePath)
-	logger.Logf("Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
-	return ideURI, clangRange, err
-}
-
-func (ls *INOLanguageServer) ide2ClangTextDocumentPositionParams(logger jsonrpc.FunctionLogger, ideParams lsp.TextDocumentPositionParams) (lsp.TextDocumentPositionParams, error) {
-	ideTextDocument := ideParams.TextDocument
-	idePosition := ideParams.Position
-	ideURI := ideTextDocument.URI
-
-	clangTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, ideTextDocument)
-	if err != nil {
-		logger.Logf("%s -> invalid text document: %s", ideParams, err)
-		return lsp.TextDocumentPositionParams{}, err
-	}
-	clangPosition := idePosition
-	if ls.clangURIRefersToIno(clangTextDocument.URI) {
-		if cppLine, ok := ls.sketchMapper.InoToCppLineOk(ideURI, idePosition.Line); ok {
-			clangPosition.Line = cppLine
-		} else {
-			logger.Logf("%s -> invalid line requested: %s:%d", ideParams, ideURI, idePosition.Line)
-			return lsp.TextDocumentPositionParams{}, unknownURI(ideURI)
-		}
-	}
-	clangParams := lsp.TextDocumentPositionParams{
-		TextDocument: clangTextDocument,
-		Position:     clangPosition,
-	}
-	logger.Logf("%s -> %s", ideParams, clangParams)
-	return clangParams, nil
 }
 
 func (ls *INOLanguageServer) ino2cppRange(logger jsonrpc.FunctionLogger, inoURI lsp.DocumentURI, inoRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
@@ -1464,17 +1330,6 @@ func (ls *INOLanguageServer) cpp2inoLocation(logger jsonrpc.FunctionLogger, cppL
 		URI:   inoURI,
 		Range: inoRange,
 	}, err
-}
-
-func (ls *INOLanguageServer) clang2IdeDocumentHighlight(logger jsonrpc.FunctionLogger, clangHighlight lsp.DocumentHighlight, cppURI lsp.DocumentURI) (lsp.DocumentHighlight, error) {
-	_, ideRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, clangHighlight.Range)
-	if err != nil {
-		return lsp.DocumentHighlight{}, err
-	}
-	return lsp.DocumentHighlight{
-		Kind:  clangHighlight.Kind,
-		Range: ideRange,
-	}, nil
 }
 
 func (ls *INOLanguageServer) cpp2inoTextEdits(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {
@@ -1628,190 +1483,6 @@ func (ls *INOLanguageServer) cpp2inoDiagnostics(logger jsonrpc.FunctionLogger, c
 		inoDiagParams = append(inoDiagParams, v)
 	}
 	return inoDiagParams, nil
-}
-
-func (ls *INOLanguageServer) createClangdFormatterConfig(logger jsonrpc.FunctionLogger, cppuri lsp.DocumentURI) (func(), error) {
-	// clangd looks for a .clang-format configuration file on the same directory
-	// pointed by the uri passed in the lsp command parameters.
-	// https://github.com/llvm/llvm-project/blob/64d06ed9c9e0389cd27545d2f6e20455a91d89b1/clang-tools-extra/clangd/ClangdLSPServer.cpp#L856-L868
-	// https://github.com/llvm/llvm-project/blob/64d06ed9c9e0389cd27545d2f6e20455a91d89b1/clang-tools-extra/clangd/ClangdServer.cpp#L402-L404
-
-	config := `# See: https://releases.llvm.org/11.0.1/tools/clang/docs/ClangFormatStyleOptions.html
----
-Language: Cpp
-# LLVM is the default style setting, used when a configuration option is not set here
-BasedOnStyle: LLVM
-AccessModifierOffset: -2
-AlignAfterOpenBracket: Align
-AlignConsecutiveAssignments: false
-AlignConsecutiveBitFields: false
-AlignConsecutiveDeclarations: false
-AlignConsecutiveMacros: false
-AlignEscapedNewlines: DontAlign
-AlignOperands: Align
-AlignTrailingComments: true
-AllowAllArgumentsOnNextLine: true
-AllowAllConstructorInitializersOnNextLine: true
-AllowAllParametersOfDeclarationOnNextLine: true
-AllowShortBlocksOnASingleLine: Always
-AllowShortCaseLabelsOnASingleLine: true
-AllowShortEnumsOnASingleLine: true
-AllowShortFunctionsOnASingleLine: Empty
-AllowShortIfStatementsOnASingleLine: Always
-AllowShortLambdasOnASingleLine: Empty
-AllowShortLoopsOnASingleLine: true
-AlwaysBreakAfterDefinitionReturnType: None
-AlwaysBreakAfterReturnType: None
-AlwaysBreakBeforeMultilineStrings: false
-AlwaysBreakTemplateDeclarations: No
-BinPackArguments: true
-BinPackParameters: true
-# Only used when "BreakBeforeBraces" set to "Custom"
-BraceWrapping:
-  AfterCaseLabel: false
-  AfterClass: false
-  AfterControlStatement: Never
-  AfterEnum: false
-  AfterFunction: false
-  AfterNamespace: false
-  #AfterObjCDeclaration:
-  AfterStruct: false
-  AfterUnion: false
-  AfterExternBlock: false
-  BeforeCatch: false
-  BeforeElse: false
-  BeforeLambdaBody: false
-  BeforeWhile: false
-  IndentBraces: false
-  SplitEmptyFunction: false
-  SplitEmptyRecord: false
-  SplitEmptyNamespace: false
-# Java-specific
-#BreakAfterJavaFieldAnnotations:
-BreakBeforeBinaryOperators: NonAssignment
-BreakBeforeBraces: Attach
-BreakBeforeTernaryOperators: true
-BreakConstructorInitializers: BeforeColon
-BreakInheritanceList: BeforeColon
-BreakStringLiterals: false
-ColumnLimit: 0
-# "" matches none
-CommentPragmas: ""
-CompactNamespaces: false
-ConstructorInitializerAllOnOneLineOrOnePerLine: true
-ConstructorInitializerIndentWidth: 2
-ContinuationIndentWidth: 2
-Cpp11BracedListStyle: false
-DeriveLineEnding: true
-DerivePointerAlignment: true
-DisableFormat: false
-# Docs say "Do not use this in config files". The default (LLVM 11.0.1) is "false".
-#ExperimentalAutoDetectBinPacking:
-FixNamespaceComments: false
-ForEachMacros: []
-IncludeBlocks: Preserve
-IncludeCategories: []
-# "" matches none
-IncludeIsMainRegex: ""
-IncludeIsMainSourceRegex: ""
-IndentCaseBlocks: true
-IndentCaseLabels: true
-IndentExternBlock: Indent
-IndentGotoLabels: false
-IndentPPDirectives: None
-IndentWidth: 2
-IndentWrappedFunctionNames: false
-InsertTrailingCommas: None
-# Java-specific
-#JavaImportGroups:
-# JavaScript-specific
-#JavaScriptQuotes:
-#JavaScriptWrapImports
-KeepEmptyLinesAtTheStartOfBlocks: true
-MacroBlockBegin: ""
-MacroBlockEnd: ""
-# Set to a large number to effectively disable
-MaxEmptyLinesToKeep: 100000
-NamespaceIndentation: None
-NamespaceMacros: []
-# Objective C-specific
-#ObjCBinPackProtocolList:
-#ObjCBlockIndentWidth:
-#ObjCBreakBeforeNestedBlockParam:
-#ObjCSpaceAfterProperty:
-#ObjCSpaceBeforeProtocolList
-PenaltyBreakAssignment: 1
-PenaltyBreakBeforeFirstCallParameter: 1
-PenaltyBreakComment: 1
-PenaltyBreakFirstLessLess: 1
-PenaltyBreakString: 1
-PenaltyBreakTemplateDeclaration: 1
-PenaltyExcessCharacter: 1
-PenaltyReturnTypeOnItsOwnLine: 1
-# Used as a fallback if alignment style can't be detected from code (DerivePointerAlignment: true)
-PointerAlignment: Right
-RawStringFormats: []
-ReflowComments: false
-SortIncludes: false
-SortUsingDeclarations: false
-SpaceAfterCStyleCast: false
-SpaceAfterLogicalNot: false
-SpaceAfterTemplateKeyword: false
-SpaceBeforeAssignmentOperators: true
-SpaceBeforeCpp11BracedList: false
-SpaceBeforeCtorInitializerColon: true
-SpaceBeforeInheritanceColon: true
-SpaceBeforeParens: ControlStatements
-SpaceBeforeRangeBasedForLoopColon: true
-SpaceBeforeSquareBrackets: false
-SpaceInEmptyBlock: false
-SpaceInEmptyParentheses: false
-SpacesBeforeTrailingComments: 2
-SpacesInAngles: false
-SpacesInCStyleCastParentheses: false
-SpacesInConditionalStatement: false
-SpacesInContainerLiterals: false
-SpacesInParentheses: false
-SpacesInSquareBrackets: false
-Standard: Auto
-StatementMacros: []
-TabWidth: 2
-TypenameMacros: []
-# Default to LF if line endings can't be detected from the content (DeriveLineEnding).
-UseCRLF: false
-UseTab: Never
-WhitespaceSensitiveMacros: []
-`
-	try := func(conf *paths.Path) bool {
-		if c, err := conf.ReadFile(); err != nil {
-			logger.Logf("    error reading custom formatter config file %s: %s", conf, err)
-		} else {
-			logger.Logf("    using custom formatter config file %s", conf)
-			config = string(c)
-		}
-		return true
-	}
-
-	if sketchFormatterConf := ls.sketchRoot.Join(".clang-format"); sketchFormatterConf.Exist() {
-		// If a custom config is present in the sketch folder, use that one
-		try(sketchFormatterConf)
-	} else if ls.config.FormatterConf != nil && ls.config.FormatterConf.Exist() {
-		// Otherwise if a global config file is present, use that one
-		try(ls.config.FormatterConf)
-	}
-
-	targetFile := cppuri.AsPath()
-	if targetFile.IsNotDir() {
-		targetFile = targetFile.Parent()
-	}
-	targetFile = targetFile.Join(".clang-format")
-	cleanup := func() {
-		targetFile.Remove()
-		logger.Logf("    formatter config cleaned")
-	}
-	logger.Logf("    writing formatter config in: %s", targetFile)
-	err := targetFile.WriteFile([]byte(config))
-	return cleanup, err
 }
 
 func unknownURI(uri lsp.DocumentURI) error {
