@@ -1,6 +1,8 @@
 package ls
 
 import (
+	"fmt"
+
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
@@ -65,4 +67,83 @@ func (ls *INOLanguageServer) clang2IdeDocumentHighlight(logger jsonrpc.FunctionL
 		Kind:  clangHighlight.Kind,
 		Range: ideRange,
 	}, nil
+}
+
+func (ls *INOLanguageServer) clang2IdeDiagnostics(logger jsonrpc.FunctionLogger, clangDiagsParams *lsp.PublishDiagnosticsParams) ([]*lsp.PublishDiagnosticsParams, error) {
+	clangURI := clangDiagsParams.URI
+	if !ls.clangURIRefersToIno(clangURI) {
+		ideDiags := []lsp.Diagnostic{}
+		ideDiagsURI := lsp.DocumentURI{}
+		for _, clangDiag := range clangDiagsParams.Diagnostics {
+			ideURI, ideRange, err := ls.clang2IdeRangeAndDocumentURI(logger, clangURI, clangDiag.Range)
+			if err != nil {
+				return nil, err
+			}
+			if ideURI.String() == sourcemapper.NotInoURI.String() {
+				continue
+			}
+			if ideDiagsURI.String() == "" {
+				ideDiagsURI = ideURI
+			} else if ideDiagsURI.String() != ideURI.String() {
+				return nil, fmt.Errorf("unexpected URI %s: it should be %s", ideURI, ideURI)
+			}
+			ideDiag := clangDiag
+			ideDiag.Range = ideRange
+			ideDiags = append(ideDiags, ideDiag)
+		}
+		return []*lsp.PublishDiagnosticsParams{
+			{
+				URI:         ideDiagsURI,
+				Diagnostics: ideDiags,
+			},
+		}, nil
+	}
+
+	// Diagnostics coming from sketch.ino.cpp refers to all .ino files, so it must update
+	// the diagnostics list of all .ino files altogether.
+	// XXX: maybe this logic can be moved outside of this conversion function, make it much
+	// more straighforward.
+	allIdeInoDiagsParams := map[lsp.DocumentURI]*lsp.PublishDiagnosticsParams{}
+	for ideInoURI := range ls.ideInoDocsWithDiagnostics {
+		allIdeInoDiagsParams[ideInoURI] = &lsp.PublishDiagnosticsParams{
+			URI:         ideInoURI,
+			Diagnostics: []lsp.Diagnostic{},
+		}
+	}
+	ls.ideInoDocsWithDiagnostics = map[lsp.DocumentURI]bool{}
+
+	for _, clangDiag := range clangDiagsParams.Diagnostics {
+		ideURI, ideRange, err := ls.clang2IdeRangeAndDocumentURI(logger, clangURI, clangDiag.Range)
+		if err != nil {
+			return nil, err
+		}
+		if ideURI.String() == sourcemapper.NotInoURI.String() {
+			continue
+		}
+
+		ideInoDiagsParams, ok := allIdeInoDiagsParams[ideURI]
+		if !ok {
+			ideInoDiagsParams = &lsp.PublishDiagnosticsParams{
+				URI:         ideURI,
+				Diagnostics: []lsp.Diagnostic{},
+			}
+			allIdeInoDiagsParams[ideURI] = ideInoDiagsParams
+		}
+
+		ideInoDiag := clangDiag
+		ideInoDiag.Range = ideRange
+		ideInoDiagsParams.Diagnostics = append(ideInoDiagsParams.Diagnostics, ideInoDiag)
+
+		ls.ideInoDocsWithDiagnostics[ideURI] = true
+	}
+
+	ideInoDiagParams := []*lsp.PublishDiagnosticsParams{}
+	for _, v := range allIdeInoDiagsParams {
+		ideInoDiagParams = append(ideInoDiagParams, v)
+	}
+	return ideInoDiagParams, nil
+}
+
+func (ls *INOLanguageServer) clang2IdeSymbolInformation(clangSymbolsInformation []lsp.SymbolInformation) []lsp.SymbolInformation {
+	panic("not implemented")
 }

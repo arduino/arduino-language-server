@@ -32,21 +32,21 @@ type INOLanguageServer struct {
 	IDE    *IDELSPServer
 	Clangd *ClangdLSPClient
 
-	progressHandler         *ProgressProxyHandler
-	closing                 chan bool
-	clangdStarted           *sync.Cond
-	dataMux                 sync.RWMutex
-	compileCommandsDir      *paths.Path
-	buildPath               *paths.Path
-	buildSketchRoot         *paths.Path
-	buildSketchCpp          *paths.Path
-	sketchRoot              *paths.Path
-	sketchName              string
-	sketchMapper            *sourcemapper.SketchMapper
-	sketchTrackedFilesCount int
-	trackedIDEDocs          map[string]lsp.TextDocumentItem
-	inoDocsWithDiagnostics  map[lsp.DocumentURI]bool
-	sketchRebuilder         *SketchRebuilder
+	progressHandler           *ProgressProxyHandler
+	closing                   chan bool
+	clangdStarted             *sync.Cond
+	dataMux                   sync.RWMutex
+	compileCommandsDir        *paths.Path
+	buildPath                 *paths.Path
+	buildSketchRoot           *paths.Path
+	buildSketchCpp            *paths.Path
+	sketchRoot                *paths.Path
+	sketchName                string
+	sketchMapper              *sourcemapper.SketchMapper
+	sketchTrackedFilesCount   int
+	trackedIDEDocs            map[string]lsp.TextDocumentItem
+	ideInoDocsWithDiagnostics map[lsp.DocumentURI]bool
+	sketchRebuilder           *SketchRebuilder
 }
 
 // Config describes the language server configuration.
@@ -115,10 +115,10 @@ func (ls *INOLanguageServer) readUnlock(logger jsonrpc.FunctionLogger) {
 func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *INOLanguageServer {
 	logger := NewLSPFunctionLogger(color.HiWhiteString, "LS: ")
 	ls := &INOLanguageServer{
-		trackedIDEDocs:         map[string]lsp.TextDocumentItem{},
-		inoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
-		closing:                make(chan bool),
-		config:                 config,
+		trackedIDEDocs:            map[string]lsp.TextDocumentItem{},
+		ideInoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
+		closing:                   make(chan bool),
+		config:                    config,
 	}
 	ls.clangdStarted = sync.NewCond(&ls.dataMux)
 	ls.sketchRebuilder = NewSketchBuilder(ls)
@@ -641,7 +641,7 @@ func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Co
 	var inoSymbolInformation []lsp.SymbolInformation
 	if cppSymbolInformation != nil {
 		logger.Logf("    <-- documentSymbol(%d symbol information)", len(cppSymbolInformation))
-		inoSymbolInformation = ls.cpp2inoSymbolInformation(cppSymbolInformation)
+		inoSymbolInformation = ls.clang2IdeSymbolInformation(cppSymbolInformation)
 	}
 	return inoDocSymbols, inoSymbolInformation, nil
 }
@@ -762,7 +762,7 @@ func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.C
 	// Method: "textDocument/rangeFormatting"
 	logger.Logf("%s", inoParams.TextDocument)
 	inoURI := inoParams.TextDocument.URI
-	cppParams, err := ls.ino2cppDocumentRangeFormattingParams(logger, inoParams)
+	cppParams, err := ls.ide2ClangDocumentRangeFormattingParams(logger, inoParams)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -937,7 +937,7 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 
 	// the diagnostics on sketch.cpp.ino once mapped into their
 	// .ino counter parts may span over multiple .ino files...
-	allInoParams, err := ls.cpp2inoDiagnostics(logger, cppParams)
+	allInoParams, err := ls.clang2IdeDiagnostics(logger, cppParams)
 	if err != nil {
 		logger.Logf("Error converting diagnostics to .ino: %s", err)
 		return
@@ -1195,16 +1195,16 @@ func (ls *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger jsonr
 	return res, err
 }
 
-func (ls *INOLanguageServer) ino2cppRange(logger jsonrpc.FunctionLogger, inoURI lsp.DocumentURI, inoRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
-	cppURI, err := ls.ide2ClangDocumentURI(logger, inoURI)
+func (ls *INOLanguageServer) ide2ClangRange(logger jsonrpc.FunctionLogger, ideURI lsp.DocumentURI, ideRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
+	clangURI, err := ls.ide2ClangDocumentURI(logger, ideURI)
 	if err != nil {
-		return lsp.NilURI, lsp.Range{}, err
+		return lsp.DocumentURI{}, lsp.Range{}, err
 	}
-	if cppURI.AsPath().EquivalentTo(ls.buildSketchCpp) {
-		cppRange := ls.sketchMapper.InoToCppLSPRange(inoURI, inoRange)
-		return cppURI, cppRange, nil
+	if clangURI.AsPath().EquivalentTo(ls.buildSketchCpp) {
+		cppRange := ls.sketchMapper.InoToCppLSPRange(ideURI, ideRange)
+		return clangURI, cppRange, nil
 	}
-	return cppURI, inoRange, nil
+	return clangURI, ideRange, nil
 }
 
 func (ls *INOLanguageServer) cpp2inoLocationArray(logger jsonrpc.FunctionLogger, cppLocations []lsp.Location) ([]lsp.Location, error) {
@@ -1220,17 +1220,18 @@ func (ls *INOLanguageServer) cpp2inoLocationArray(logger jsonrpc.FunctionLogger,
 	return inoLocations, nil
 }
 
-func (ls *INOLanguageServer) ino2cppDocumentRangeFormattingParams(logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentRangeFormattingParams) (*lsp.DocumentRangeFormattingParams, error) {
-	cppTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, inoParams.TextDocument)
+func (ls *INOLanguageServer) ide2ClangDocumentRangeFormattingParams(logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentRangeFormattingParams) (*lsp.DocumentRangeFormattingParams, error) {
+	clangTextDocumentIdentifier, err := ls.ide2ClangTextDocumentIdentifier(logger, ideParams.TextDocument)
 	if err != nil {
 		return nil, err
 	}
 
-	_, cppRange, err := ls.ino2cppRange(logger, inoParams.TextDocument.URI, inoParams.Range)
+	_, clangRange, err := ls.ide2ClangRange(logger, ideParams.TextDocument.URI, ideParams.Range)
 	return &lsp.DocumentRangeFormattingParams{
-		TextDocument: cppTextDocument,
-		Range:        cppRange,
-		Options:      inoParams.Options,
+		WorkDoneProgressParams: ideParams.WorkDoneProgressParams,
+		Options:                ideParams.Options,
+		TextDocument:           clangTextDocumentIdentifier,
+		Range:                  clangRange,
 	}, err
 }
 
@@ -1404,85 +1405,6 @@ func (ls *INOLanguageServer) cpp2inoDocumentSymbols(logger jsonrpc.FunctionLogge
 	}
 
 	return inoSymbols
-}
-
-func (ls *INOLanguageServer) cpp2inoSymbolInformation(syms []lsp.SymbolInformation) []lsp.SymbolInformation {
-	panic("not implemented")
-}
-
-func (ls *INOLanguageServer) cpp2inoDiagnostics(logger jsonrpc.FunctionLogger, cppDiagsParams *lsp.PublishDiagnosticsParams) ([]*lsp.PublishDiagnosticsParams, error) {
-
-	cppURI := cppDiagsParams.URI
-	isSketch := cppURI.AsPath().EquivalentTo(ls.buildSketchCpp)
-
-	if !isSketch {
-		inoURI, _, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, lsp.NilRange)
-		if err != nil {
-			return nil, err
-		}
-		inoDiags := []lsp.Diagnostic{}
-		for _, cppDiag := range cppDiagsParams.Diagnostics {
-			inoURIofConvertedRange, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, cppDiag.Range)
-			if err != nil {
-				return nil, err
-			}
-			if inoURIofConvertedRange.String() == sourcemapper.NotInoURI.String() {
-				continue
-			}
-			if inoURIofConvertedRange.String() != inoURI.String() {
-				return nil, fmt.Errorf("unexpected inoURI %s: it should be %s", inoURIofConvertedRange, inoURI)
-			}
-			inoDiag := cppDiag
-			inoDiag.Range = inoRange
-			inoDiags = append(inoDiags, inoDiag)
-		}
-		return []*lsp.PublishDiagnosticsParams{
-			{
-				URI:         inoURI,
-				Diagnostics: inoDiags,
-			},
-		}, nil
-	}
-
-	allInoDiagsParams := map[lsp.DocumentURI]*lsp.PublishDiagnosticsParams{}
-	for inoURI := range ls.inoDocsWithDiagnostics {
-		allInoDiagsParams[inoURI] = &lsp.PublishDiagnosticsParams{
-			URI:         inoURI,
-			Diagnostics: []lsp.Diagnostic{},
-		}
-	}
-	ls.inoDocsWithDiagnostics = map[lsp.DocumentURI]bool{}
-
-	for _, cppDiag := range cppDiagsParams.Diagnostics {
-		inoURI, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, cppDiag.Range)
-		if err != nil {
-			return nil, err
-		}
-		if inoURI.String() == sourcemapper.NotInoURI.String() {
-			continue
-		}
-
-		inoDiagsParams, ok := allInoDiagsParams[inoURI]
-		if !ok {
-			inoDiagsParams = &lsp.PublishDiagnosticsParams{
-				URI:         inoURI,
-				Diagnostics: []lsp.Diagnostic{},
-			}
-			allInoDiagsParams[inoURI] = inoDiagsParams
-		}
-
-		inoDiag := cppDiag
-		inoDiag.Range = inoRange
-		inoDiagsParams.Diagnostics = append(inoDiagsParams.Diagnostics, inoDiag)
-
-		ls.inoDocsWithDiagnostics[inoURI] = true
-	}
-
-	inoDiagParams := []*lsp.PublishDiagnosticsParams{}
-	for _, v := range allInoDiagsParams {
-		inoDiagParams = append(inoDiagParams, v)
-	}
-	return inoDiagParams, nil
 }
 
 func unknownURI(uri lsp.DocumentURI) error {
