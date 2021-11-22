@@ -1106,7 +1106,7 @@ func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose
 		delete(ls.trackedIDEDocs, inoIdentifier.URI.AsPath().String())
 	} else {
 		logger.Logf("    didClose of untracked document: %s", inoIdentifier.URI)
-		return nil, unknownURI(inoIdentifier.URI)
+		return nil, &UnknownURI{inoIdentifier.URI}
 	}
 
 	// If we are tracking a .ino...
@@ -1161,7 +1161,7 @@ func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChan
 	// Apply the change to the tracked sketch file.
 	trackedInoID := inoDoc.URI.AsPath().String()
 	if doc, ok := ls.trackedIDEDocs[trackedInoID]; !ok {
-		return nil, unknownURI(inoDoc.URI)
+		return nil, &UnknownURI{inoDoc.URI}
 	} else if updatedDoc, err := textedits.ApplyLSPTextDocumentContentChangeEvent(doc, inoDidChangeParams); err != nil {
 		return nil, err
 	} else {
@@ -1446,6 +1446,10 @@ func (ls *INOLanguageServer) cpp2inoDocumentSymbols(logger jsonrpc.FunctionLogge
 	return inoSymbols
 }
 
-func unknownURI(uri lsp.DocumentURI) error {
-	return errors.New("Document is not available: " + uri.String())
+type UnknownURI struct {
+	URI lsp.DocumentURI
+}
+
+func (e *UnknownURI) Error() string {
+	return "Document is not available: " + e.URI.String()
 }

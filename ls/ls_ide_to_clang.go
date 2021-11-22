@@ -18,7 +18,7 @@ func (ls *INOLanguageServer) idePathToIdeURI(logger jsonrpc.FunctionLogger, inoP
 			logger.Logf("    !!! > %s", p)
 		}
 		uri := lsp.NewDocumentURI(inoPath)
-		return uri, unknownURI(uri)
+		return uri, &UnknownURI{uri}
 	}
 	return doc.URI, nil
 }
@@ -42,7 +42,7 @@ func (ls *INOLanguageServer) ide2ClangDocumentURI(logger jsonrpc.FunctionLogger,
 	inside, err := idePath.IsInsideDir(ls.sketchRoot)
 	if err != nil {
 		logger.Logf("ERROR: could not determine if '%s' is inside '%s'", idePath, ls.sketchRoot)
-		return lsp.NilURI, unknownURI(ideURI)
+		return lsp.NilURI, &UnknownURI{ideURI}
 	}
 	if !inside {
 		clangURI := ideURI
@@ -79,7 +79,7 @@ func (ls *INOLanguageServer) ide2ClangTextDocumentPositionParams(logger jsonrpc.
 			clangPosition.Line = cppLine
 		} else {
 			logger.Logf("%s -> invalid line requested: %s:%d", ideParams, ideURI, idePosition.Line)
-			return lsp.TextDocumentPositionParams{}, unknownURI(ideURI)
+			return lsp.TextDocumentPositionParams{}, &UnknownURI{ideURI}
 		}
 	}
 	clangParams := lsp.TextDocumentPositionParams{
