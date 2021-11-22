@@ -926,31 +926,51 @@ func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.Fun
 	}
 }
 
-func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.FunctionLogger, cppParams *lsp.PublishDiagnosticsParams) {
+func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.FunctionLogger, clangParams *lsp.PublishDiagnosticsParams) {
 	ls.readLock(logger, false)
 	defer ls.readUnlock(logger)
 
-	logger.Logf("%s (%d diagnostics):", cppParams.URI, len(cppParams.Diagnostics))
-	for _, diag := range cppParams.Diagnostics {
+	logger.Logf("%s (%d diagnostics):", clangParams.URI, len(clangParams.Diagnostics))
+	for _, diag := range clangParams.Diagnostics {
 		logger.Logf("  > %s - %s: %s", diag.Range.Start, diag.Severity, string(diag.Code))
 	}
 
 	// the diagnostics on sketch.cpp.ino once mapped into their
 	// .ino counter parts may span over multiple .ino files...
-	allInoParams, err := ls.clang2IdeDiagnostics(logger, cppParams)
+	allIdeParams, err := ls.clang2IdeDiagnostics(logger, clangParams)
 	if err != nil {
 		logger.Logf("Error converting diagnostics to .ino: %s", err)
 		return
 	}
 
+	// If the incoming diagnostics are from sketch.cpp.ino then...
+	if ls.clangURIRefersToIno(clangParams.URI) {
+		// ...add all the new diagnostics...
+		for ideInoURI := range allIdeParams {
+			ls.ideInoDocsWithDiagnostics[ideInoURI] = true
+		}
+
+		// .. and cleanup all previouse diagnostics that are no longer valid...
+		for ideInoURI := range ls.ideInoDocsWithDiagnostics {
+			if _, ok := allIdeParams[ideInoURI]; ok {
+				continue
+			}
+			allIdeParams[ideInoURI] = &lsp.PublishDiagnosticsParams{
+				URI:         ideInoURI,
+				Diagnostics: []lsp.Diagnostic{},
+			}
+			delete(ls.ideInoDocsWithDiagnostics, ideInoURI)
+		}
+	}
+
 	// Push back to IDE the converted diagnostics
 	logger.Logf("diagnostics to IDE:")
-	for _, inoParams := range allInoParams {
-		logger.Logf("  - %s (%d diagnostics):", inoParams.URI, len(inoParams.Diagnostics))
-		for _, diag := range inoParams.Diagnostics {
+	for _, ideParams := range allIdeParams {
+		logger.Logf("  - %s (%d diagnostics):", ideParams.URI, len(ideParams.Diagnostics))
+		for _, diag := range ideParams.Diagnostics {
 			logger.Logf("    > %s - %s: %s", diag.Range.Start, diag.Severity, diag.Code)
 		}
-		if err := ls.IDE.conn.TextDocumentPublishDiagnostics(inoParams); err != nil {
+		if err := ls.IDE.conn.TextDocumentPublishDiagnostics(ideParams); err != nil {
 			logger.Logf("Error sending diagnostics to IDE: %s", err)
 			return
 		}
