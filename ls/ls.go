@@ -379,11 +379,14 @@ func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, lo
 		return nil, nil
 	}
 
-	_, r, err := ls.clang2IdeRangeAndDocumentURI(logger, clangParams.TextDocument.URI, *clangResp.Range)
+	_, r, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangParams.TextDocument.URI, *clangResp.Range)
 	if err != nil {
 		logger.Logf("error during range conversion: %v", err)
 		ls.Close()
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
+	if inPreprocessed {
+		return nil, nil
 	}
 	ideResp := lsp.Hover{
 		Contents: clangResp.Contents,
@@ -595,7 +598,10 @@ func (ls *INOLanguageServer) TextDocumentDocumentHighlightReqFromIDE(ctx context
 
 	ideHighlights := []lsp.DocumentHighlight{}
 	for _, clangHighlight := range clangHighlights {
-		ideHighlight, err := ls.clang2IdeDocumentHighlight(logger, clangHighlight, clangURI)
+		ideHighlight, inPreprocessed, err := ls.clang2IdeDocumentHighlight(logger, clangHighlight, clangURI)
+		if inPreprocessed {
+			continue
+		}
 		if err != nil {
 			logger.Logf("ERROR converting highlight %s:%s: %s", clangURI, clangHighlight.Range, err)
 			return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
@@ -1230,10 +1236,14 @@ func (ls *INOLanguageServer) ide2ClangRange(logger jsonrpc.FunctionLogger, ideUR
 func (ls *INOLanguageServer) cpp2inoLocationArray(logger jsonrpc.FunctionLogger, cppLocations []lsp.Location) ([]lsp.Location, error) {
 	inoLocations := []lsp.Location{}
 	for _, cppLocation := range cppLocations {
-		inoLocation, err := ls.cpp2inoLocation(logger, cppLocation)
+		inoLocation, inPreprocessed, err := ls.cpp2inoLocation(logger, cppLocation)
 		if err != nil {
 			logger.Logf("ERROR converting location %s: %s", cppLocation, err)
 			return nil, err
+		}
+		if inPreprocessed {
+			logger.Logf("ignored in-preprocessed-section location")
+			continue
 		}
 		inoLocations = append(inoLocations, inoLocation)
 	}
@@ -1325,9 +1335,14 @@ func (ls *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger,
 
 		// ...otherwise convert edits to the sketch.ino.cpp into multilpe .ino edits
 		for _, edit := range edits {
-			inoURI, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, editURI, edit.Range)
+			inoURI, inoRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, editURI, edit.Range)
 			if err != nil {
 				logger.Logf("    error converting edit %s:%s: %s", editURI, edit.Range, err)
+				continue
+			}
+			if inPreprocessed {
+				// XXX: ignore
+				logger.Logf("    ignored in-preprocessed-section change")
 				continue
 			}
 			//inoFile, inoRange := ls.sketchMapper.CppToInoRange(edit.Range)
@@ -1345,12 +1360,12 @@ func (ls *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger,
 	return inoWorkspaceEdit
 }
 
-func (ls *INOLanguageServer) cpp2inoLocation(logger jsonrpc.FunctionLogger, cppLocation lsp.Location) (lsp.Location, error) {
-	inoURI, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppLocation.URI, cppLocation.Range)
+func (ls *INOLanguageServer) cpp2inoLocation(logger jsonrpc.FunctionLogger, cppLocation lsp.Location) (lsp.Location, bool, error) {
+	inoURI, inoRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, cppLocation.URI, cppLocation.Range)
 	return lsp.Location{
 		URI:   inoURI,
 		Range: inoRange,
-	}, err
+	}, inPreprocessed, err
 }
 
 func (ls *INOLanguageServer) cpp2inoTextEdits(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {
@@ -1358,9 +1373,13 @@ func (ls *INOLanguageServer) cpp2inoTextEdits(logger jsonrpc.FunctionLogger, cpp
 	allInoEdits := map[lsp.DocumentURI][]lsp.TextEdit{}
 	for _, cppEdit := range cppEdits {
 		logger.Logf("        > %s -> %s", cppEdit.Range, strconv.Quote(cppEdit.NewText))
-		inoURI, inoEdit, err := ls.cpp2inoTextEdit(logger, cppURI, cppEdit)
+		inoURI, inoEdit, inPreprocessed, err := ls.cpp2inoTextEdit(logger, cppURI, cppEdit)
 		if err != nil {
 			return nil, err
+		}
+		if inPreprocessed {
+			logger.Logf(("ignoring in-preprocessed-section edit"))
+			continue
 		}
 		allInoEdits[inoURI] = append(allInoEdits[inoURI], inoEdit)
 	}
@@ -1376,11 +1395,11 @@ func (ls *INOLanguageServer) cpp2inoTextEdits(logger jsonrpc.FunctionLogger, cpp
 	return allInoEdits, nil
 }
 
-func (ls *INOLanguageServer) cpp2inoTextEdit(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, error) {
-	inoURI, inoRange, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, cppEdit.Range)
+func (ls *INOLanguageServer) cpp2inoTextEdit(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, bool, error) {
+	inoURI, inoRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, cppEdit.Range)
 	inoEdit := cppEdit
 	inoEdit.Range = inoRange
-	return inoURI, inoEdit, err
+	return inoURI, inoEdit, inPreprocessed, err
 }
 
 func (ls *INOLanguageServer) cpp2inoDocumentSymbols(logger jsonrpc.FunctionLogger, cppSymbols []lsp.DocumentSymbol, inoRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
