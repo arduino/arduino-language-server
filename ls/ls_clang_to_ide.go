@@ -130,6 +130,60 @@ func (ls *INOLanguageServer) clang2IdeDiagnosticRelatedInformationArray(logger j
 	return ideInfos, nil
 }
 
-func (ls *INOLanguageServer) clang2IdeSymbolInformation(clangSymbolsInformation []lsp.SymbolInformation) []lsp.SymbolInformation {
+func (ls *INOLanguageServer) clang2IdeDocumentSymbols(logger jsonrpc.FunctionLogger, clangSymbols []lsp.DocumentSymbol, ideRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
+	logger.Logf("documentSymbol(%d document symbols)", len(clangSymbols))
+	ideRequestedPath := ideRequestedURI.AsPath().String()
+	logger.Logf("    filtering for requested ino file: %s", ideRequestedPath)
+	if ideRequestedURI.Ext() != ".ino" || len(clangSymbols) == 0 {
+		return clangSymbols
+	}
+
+	ideSymbols := []lsp.DocumentSymbol{}
+	for _, clangSymbol := range clangSymbols {
+		logger.Logf("    > convert %s %s", clangSymbol.Kind, clangSymbol.Range)
+		if ls.sketchMapper.IsPreprocessedCppLine(clangSymbol.Range.Start.Line) {
+			logger.Logf("      symbol is in the preprocessed section of the sketch.ino.cpp")
+			continue
+		}
+
+		idePath, ideRange := ls.sketchMapper.CppToInoRange(clangSymbol.Range)
+		ideSelectionPath, ideSelectionRange := ls.sketchMapper.CppToInoRange(clangSymbol.SelectionRange)
+
+		if idePath != ideSelectionPath {
+			logger.Logf("      ERROR: symbol range and selection belongs to different URI!")
+			logger.Logf("        symbol %s != selection %s", clangSymbol.Range, clangSymbol.SelectionRange)
+			logger.Logf("        %s:%s != %s:%s", idePath, ideRange, ideSelectionPath, ideSelectionRange)
+			continue
+		}
+
+		if idePath != ideRequestedPath {
+			logger.Logf("    skipping symbol related to %s", idePath)
+			continue
+		}
+
+		ideSymbols = append(ideSymbols, lsp.DocumentSymbol{
+			Name:           clangSymbol.Name,
+			Detail:         clangSymbol.Detail,
+			Deprecated:     clangSymbol.Deprecated,
+			Kind:           clangSymbol.Kind,
+			Range:          ideRange,
+			SelectionRange: ideSelectionRange,
+			Children:       ls.clang2IdeDocumentSymbols(logger, clangSymbol.Children, ideRequestedURI),
+			Tags:           ls.clang2IdeSymbolTags(logger, clangSymbol.Tags),
+		})
+	}
+
+	return ideSymbols
+}
+
+func (ls *INOLanguageServer) clang2IdeSymbolTags(logger jsonrpc.FunctionLogger, clangSymbolTags []lsp.SymbolTag) []lsp.SymbolTag {
+	if len(clangSymbolTags) == 0 || clangSymbolTags == nil {
+		return clangSymbolTags
+	}
+	panic("not implemented")
+}
+
+func (ls *INOLanguageServer) clang2IdeSymbolsInformation(logger jsonrpc.FunctionLogger, clangSymbolsInformation []lsp.SymbolInformation) []lsp.SymbolInformation {
+	logger.Logf("SymbolInformation (%d elements):", len(clangSymbolsInformation))
 	panic("not implemented")
 }

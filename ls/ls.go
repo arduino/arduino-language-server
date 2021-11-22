@@ -611,24 +611,22 @@ func (ls *INOLanguageServer) TextDocumentDocumentHighlightReqFromIDE(ctx context
 	return ideHighlights, nil
 }
 
-func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentSymbolParams) ([]lsp.DocumentSymbol, []lsp.SymbolInformation, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentSymbolParams) ([]lsp.DocumentSymbol, []lsp.SymbolInformation, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
+	ideTextDocument := ideParams.TextDocument
 
-	inoTextDocument := inoParams.TextDocument
-	inoURI := inoTextDocument.URI
-	logger.Logf("--> %s")
-
-	cppTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, inoTextDocument)
+	// Convert request for clang
+	cppTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, ideTextDocument)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
+	clangParams := *ideParams
+	clangParams.TextDocument = cppTextDocument
 
-	cppParams := *inoParams
-	cppParams.TextDocument = cppTextDocument
-	logger.Logf("    --> documentSymbol(%s)", cppTextDocument)
-	cppDocSymbols, cppSymbolInformation, clangErr, err := ls.Clangd.conn.TextDocumentDocumentSymbol(ctx, &cppParams)
+	// Send request to clang
+	clangDocSymbols, clangSymbolsInformation, clangErr, err := ls.Clangd.conn.TextDocumentDocumentSymbol(ctx, &clangParams)
 	if err != nil {
 		logger.Logf("clangd connectiono error: %v", err)
 		ls.Close()
@@ -639,17 +637,16 @@ func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Co
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
 	}
 
-	var inoDocSymbols []lsp.DocumentSymbol
-	if cppDocSymbols != nil {
-		logger.Logf("    <-- documentSymbol(%d document symbols)", len(cppDocSymbols))
-		inoDocSymbols = ls.cpp2inoDocumentSymbols(logger, cppDocSymbols, inoURI)
+	// Convert response for IDE
+	var ideDocSymbols []lsp.DocumentSymbol
+	if clangDocSymbols != nil {
+		ideDocSymbols = ls.clang2IdeDocumentSymbols(logger, clangDocSymbols, ideTextDocument.URI)
 	}
-	var inoSymbolInformation []lsp.SymbolInformation
-	if cppSymbolInformation != nil {
-		logger.Logf("    <-- documentSymbol(%d symbol information)", len(cppSymbolInformation))
-		inoSymbolInformation = ls.clang2IdeSymbolInformation(cppSymbolInformation)
+	var ideSymbolsInformation []lsp.SymbolInformation
+	if clangSymbolsInformation != nil {
+		ideSymbolsInformation = ls.clang2IdeSymbolsInformation(logger, clangSymbolsInformation)
 	}
-	return inoDocSymbols, inoSymbolInformation, nil
+	return ideDocSymbols, ideSymbolsInformation, nil
 }
 
 func (ls *INOLanguageServer) TextDocumentCodeActionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.CodeActionParams) ([]lsp.CommandOrCodeAction, *jsonrpc.ResponseError) {
@@ -1221,18 +1218,6 @@ func (ls *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger jsonr
 	return res, err
 }
 
-func (ls *INOLanguageServer) ide2ClangRange(logger jsonrpc.FunctionLogger, ideURI lsp.DocumentURI, ideRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
-	clangURI, err := ls.ide2ClangDocumentURI(logger, ideURI)
-	if err != nil {
-		return lsp.DocumentURI{}, lsp.Range{}, err
-	}
-	if clangURI.AsPath().EquivalentTo(ls.buildSketchCpp) {
-		cppRange := ls.sketchMapper.InoToCppLSPRange(ideURI, ideRange)
-		return clangURI, cppRange, nil
-	}
-	return clangURI, ideRange, nil
-}
-
 func (ls *INOLanguageServer) cpp2inoLocationArray(logger jsonrpc.FunctionLogger, cppLocations []lsp.Location) ([]lsp.Location, error) {
 	inoLocations := []lsp.Location{}
 	for _, cppLocation := range cppLocations {
@@ -1400,50 +1385,6 @@ func (ls *INOLanguageServer) cpp2inoTextEdit(logger jsonrpc.FunctionLogger, cppU
 	inoEdit := cppEdit
 	inoEdit.Range = inoRange
 	return inoURI, inoEdit, inPreprocessed, err
-}
-
-func (ls *INOLanguageServer) cpp2inoDocumentSymbols(logger jsonrpc.FunctionLogger, cppSymbols []lsp.DocumentSymbol, inoRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
-	inoRequested := inoRequestedURI.AsPath().String()
-	logger.Logf("    filtering for requested ino file: %s", inoRequested)
-	if inoRequestedURI.Ext() != ".ino" || len(cppSymbols) == 0 {
-		return cppSymbols
-	}
-
-	inoSymbols := []lsp.DocumentSymbol{}
-	for _, symbol := range cppSymbols {
-		logger.Logf("    > convert %s %s", symbol.Kind, symbol.Range)
-		if ls.sketchMapper.IsPreprocessedCppLine(symbol.Range.Start.Line) {
-			logger.Logf("      symbol is in the preprocessed section of the sketch.ino.cpp")
-			continue
-		}
-
-		inoFile, inoRange := ls.sketchMapper.CppToInoRange(symbol.Range)
-		inoSelectionURI, inoSelectionRange := ls.sketchMapper.CppToInoRange(symbol.SelectionRange)
-
-		if inoFile != inoSelectionURI {
-			logger.Logf("      ERROR: symbol range and selection belongs to different URI!")
-			logger.Logf("        symbol %s != selection %s", symbol.Range, symbol.SelectionRange)
-			logger.Logf("        %s:%s != %s:%s", inoFile, inoRange, inoSelectionURI, inoSelectionRange)
-			continue
-		}
-
-		if inoFile != inoRequested {
-			logger.Logf("    skipping symbol related to %s", inoFile)
-			continue
-		}
-
-		inoSymbols = append(inoSymbols, lsp.DocumentSymbol{
-			Name:           symbol.Name,
-			Detail:         symbol.Detail,
-			Deprecated:     symbol.Deprecated,
-			Kind:           symbol.Kind,
-			Range:          inoRange,
-			SelectionRange: inoSelectionRange,
-			Children:       ls.cpp2inoDocumentSymbols(logger, symbol.Children, inoRequestedURI),
-		})
-	}
-
-	return inoSymbols
 }
 
 type UnknownURI struct {

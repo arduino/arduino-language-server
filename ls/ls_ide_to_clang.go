@@ -1,6 +1,8 @@
 package ls
 
 import (
+	"fmt"
+
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
@@ -88,4 +90,20 @@ func (ls *INOLanguageServer) ide2ClangTextDocumentPositionParams(logger jsonrpc.
 	}
 	logger.Logf("%s -> %s", ideParams, clangParams)
 	return clangParams, nil
+}
+
+func (ls *INOLanguageServer) ide2ClangRange(logger jsonrpc.FunctionLogger, ideURI lsp.DocumentURI, ideRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {
+	clangURI, err := ls.ide2ClangDocumentURI(logger, ideURI)
+	if err != nil {
+		return lsp.DocumentURI{}, lsp.Range{}, err
+	}
+	clangRange := ideRange
+	if ls.clangURIRefersToIno(clangURI) {
+		if r, ok := ls.sketchMapper.InoToCppLSPRangeOk(ideURI, ideRange); ok {
+			clangRange = r
+		} else {
+			return lsp.DocumentURI{}, lsp.Range{}, fmt.Errorf("invalid range %s:%s: could not be mapped to Arduino-preprocessed sketck.ino.cpp", ideURI, ideRange)
+		}
+	}
+	return clangURI, clangRange, nil
 }
