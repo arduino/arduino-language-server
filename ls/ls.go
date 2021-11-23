@@ -443,40 +443,39 @@ func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, lo
 	return &ideResp, nil
 }
 
-func (ls *INOLanguageServer) clangURIRefersToIno(uri lsp.DocumentURI) bool {
-	return uri.AsPath().EquivalentTo(ls.buildSketchCpp)
+func (ls *INOLanguageServer) clangURIRefersToIno(clangURI lsp.DocumentURI) bool {
+	return clangURI.AsPath().EquivalentTo(ls.buildSketchCpp)
 }
 
-func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.SignatureHelpParams) (*lsp.SignatureHelp, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.SignatureHelpParams) (*lsp.SignatureHelp, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
 
-	inoTextDocumentPosition := inoParams.TextDocumentPositionParams
-
-	logger.Logf("%s", inoTextDocumentPosition)
-	cppTextDocumentPosition, err := ls.ide2ClangTextDocumentPositionParams(logger, inoTextDocumentPosition)
+	clangTextDocumentPosition, err := ls.ide2ClangTextDocumentPositionParams(logger, ideParams.TextDocumentPositionParams)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
 
-	logger.Logf("-> %s", cppTextDocumentPosition)
-	cppParams := *inoParams
-	cppParams.TextDocumentPositionParams = cppTextDocumentPosition
-	cppSignatureHelp, cppErr, err := ls.Clangd.conn.TextDocumentSignatureHelp(ctx, inoParams)
+	clangParams := &lsp.SignatureHelpParams{
+		TextDocumentPositionParams: clangTextDocumentPosition,
+		WorkDoneProgressParams:     ideParams.WorkDoneProgressParams,
+		Context:                    ideParams.Context,
+	}
+	clangSignatureHelp, clangErr, err := ls.Clangd.conn.TextDocumentSignatureHelp(ctx, clangParams)
 	if err != nil {
 		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
-	if cppErr != nil {
-		logger.Logf("clangd response error: %v", cppErr.AsError())
-		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: cppErr.AsError().Error()}
+	if clangErr != nil {
+		logger.Logf("clangd response error: %v", clangErr.AsError())
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
 	}
 
 	// No need to convert back to inoSignatureHelp
-
-	return cppSignatureHelp, nil
+	ideSignatureHelp := clangSignatureHelp
+	return ideSignatureHelp, nil
 }
 
 func (ls *INOLanguageServer) TextDocumentDefinitionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
