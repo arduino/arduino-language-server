@@ -301,28 +301,24 @@ func (ls *INOLanguageServer) ShutdownReqFromIDE(ctx context.Context, logger json
 	return nil
 }
 
-func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.CompletionParams) (*lsp.CompletionList, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.CompletionParams) (*lsp.CompletionList, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
 
-	logger.Logf("--> completion(%s)\n", inoParams.TextDocument)
-	cppTextDocPositionParams, err := ls.ide2ClangTextDocumentPositionParams(logger, inoParams.TextDocumentPositionParams)
+	cppTextDocPositionParams, err := ls.ide2ClangTextDocumentPositionParams(logger, ideParams.TextDocumentPositionParams)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
 
-	cppParams := inoParams
-	cppParams.TextDocumentPositionParams = cppTextDocPositionParams
-	logger.Logf("    --> completion(%s)\n", inoParams.TextDocument)
-	inoURI := inoParams.TextDocument.URI
-
-	if err != nil {
-		logger.Logf("Error: %s", err)
-		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	clangParams := &lsp.CompletionParams{
+		TextDocumentPositionParams: cppTextDocPositionParams,
+		Context:                    ideParams.Context,
+		WorkDoneProgressParams:     ideParams.WorkDoneProgressParams,
+		PartialResultParams:        ideParams.PartialResultParams,
 	}
 
-	clangResp, clangErr, err := ls.Clangd.conn.TextDocumentCompletion(ctx, cppParams)
+	clangCompletionList, clangErr, err := ls.Clangd.conn.TextDocumentCompletion(ctx, clangParams)
 	if err != nil {
 		logger.Logf("clangd connection error: %v", err)
 		ls.Close()
@@ -333,21 +329,67 @@ func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Contex
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
 	}
 
-	cppToIno := inoURI != lsp.NilURI && inoURI.AsPath().EquivalentTo(ls.buildSketchCpp)
-
-	inoResp := *clangResp
-	inoItems := make([]lsp.CompletionItem, 0)
-	for _, item := range clangResp.Items {
-		if !strings.HasPrefix(item.InsertText, "_") {
-			if cppToIno && item.TextEdit != nil {
-				_, item.TextEdit.Range = ls.sketchMapper.CppToInoRange(item.TextEdit.Range)
-			}
-			inoItems = append(inoItems, item)
-		}
+	ideCompletionList := &lsp.CompletionList{
+		IsIncomplete: clangCompletionList.IsIncomplete,
 	}
-	inoResp.Items = inoItems
-	logger.Logf("<-- completion(%d items) cppToIno=%v", len(inoResp.Items), cppToIno)
-	return &inoResp, nil
+	for _, clangItem := range clangCompletionList.Items {
+		if strings.HasPrefix(clangItem.InsertText, "_") {
+			// XXX: Should be really ignored?
+			continue
+		}
+
+		var ideTextEdit *lsp.TextEdit
+		if clangItem.TextEdit != nil {
+			if ideURI, _ideTextEdit, isPreprocessed, err := ls.cpp2inoTextEdit(logger, clangParams.TextDocument.URI, *clangItem.TextEdit); err != nil {
+				logger.Logf("Error converting textedit: %s", err)
+				return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+			} else if ideURI != ideParams.TextDocument.URI || isPreprocessed {
+				err := fmt.Errorf("text edit is in preprocessed section or is mapped to another file")
+				logger.Logf("Error converting textedit: %s", err)
+				return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+			} else {
+				ideTextEdit = &_ideTextEdit
+			}
+		}
+		var ideAdditionalTextEdits []lsp.TextEdit
+		if len(clangItem.AdditionalTextEdits) > 0 {
+			_ideAdditionalTextEdits, err := ls.cland2IdeTextEdits(logger, clangParams.TextDocument.URI, clangItem.AdditionalTextEdits)
+			if err != nil {
+				logger.Logf("Error converting textedit: %s", err)
+				return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+			}
+			ideAdditionalTextEdits = _ideAdditionalTextEdits[ideParams.TextDocument.URI]
+		}
+
+		var ideCommand *lsp.Command
+		if clangItem.Command != nil {
+			c := ls.cpp2inoCommand(logger, *clangItem.Command)
+			ideCommand = &c
+		}
+
+		ideCompletionList.Items = append(ideCompletionList.Items, lsp.CompletionItem{
+			Label:               clangItem.Label,
+			LabelDetails:        clangItem.LabelDetails,
+			Kind:                clangItem.Kind,
+			Tags:                clangItem.Tags,
+			Detail:              clangItem.Detail,
+			Documentation:       clangItem.Documentation,
+			Deprecated:          clangItem.Deprecated,
+			Preselect:           clangItem.Preselect,
+			SortText:            clangItem.SortText,
+			FilterText:          clangItem.FilterText,
+			InsertText:          clangItem.InsertText,
+			InsertTextFormat:    clangItem.InsertTextFormat,
+			InsertTextMode:      clangItem.InsertTextMode,
+			CommitCharacters:    clangItem.CommitCharacters,
+			Data:                clangItem.Data,
+			Command:             ideCommand,
+			TextEdit:            ideTextEdit,
+			AdditionalTextEdits: ideAdditionalTextEdits,
+		})
+	}
+	logger.Logf("<-- completion(%d items)", len(ideCompletionList.Items))
+	return ideCompletionList, nil
 }
 
 func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.HoverParams) (*lsp.Hover, *jsonrpc.ResponseError) {
