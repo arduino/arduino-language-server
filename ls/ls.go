@@ -365,7 +365,7 @@ func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, lo
 	}
 	clangResp, clangErr, err := ls.Clangd.conn.TextDocumentHover(ctx, clangParams)
 	if err != nil {
-		logger.Logf("clangd connectiono error: %v", err)
+		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
@@ -418,7 +418,7 @@ func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Con
 	cppParams.TextDocumentPositionParams = cppTextDocumentPosition
 	cppSignatureHelp, cppErr, err := ls.Clangd.conn.TextDocumentSignatureHelp(ctx, inoParams)
 	if err != nil {
-		logger.Logf("clangd connectiono error: %v", err)
+		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
@@ -450,7 +450,7 @@ func (ls *INOLanguageServer) TextDocumentDefinitionReqFromIDE(ctx context.Contex
 	cppParams.TextDocumentPositionParams = cppTextDocPosition
 	cppLocations, cppLocationLinks, cppErr, err := ls.Clangd.conn.TextDocumentDefinition(ctx, &cppParams)
 	if err != nil {
-		logger.Logf("clangd connectiono error: %v", err)
+		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
@@ -497,7 +497,7 @@ func (ls *INOLanguageServer) TextDocumentTypeDefinitionReqFromIDE(ctx context.Co
 	cppParams.TextDocumentPositionParams = cppTextDocumentPosition
 	cppLocations, cppLocationLinks, cppErr, err := ls.Clangd.conn.TextDocumentTypeDefinition(ctx, &cppParams)
 	if err != nil {
-		logger.Logf("clangd connectiono error: %v", err)
+		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
@@ -541,7 +541,7 @@ func (ls *INOLanguageServer) TextDocumentImplementationReqFromIDE(ctx context.Co
 	cppParams.TextDocumentPositionParams = cppTextDocumentPosition
 	cppLocations, cppLocationLinks, cppErr, err := ls.Clangd.conn.TextDocumentImplementation(ctx, &cppParams)
 	if err != nil {
-		logger.Logf("clangd connectiono error: %v", err)
+		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
@@ -582,7 +582,7 @@ func (ls *INOLanguageServer) TextDocumentDocumentHighlightReqFromIDE(ctx context
 	clangParams.TextDocumentPositionParams = clangTextDocumentPosition
 	clangHighlights, clangErr, err := ls.Clangd.conn.TextDocumentDocumentHighlight(ctx, &clangParams)
 	if err != nil {
-		logger.Logf("clangd connectiono ERROR: %v", err)
+		logger.Logf("clangd communication ERROR: %v", err)
 		ls.Close()
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
@@ -628,7 +628,7 @@ func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Co
 	// Send request to clang
 	clangDocSymbols, clangSymbolsInformation, clangErr, err := ls.Clangd.conn.TextDocumentDocumentSymbol(ctx, &clangParams)
 	if err != nil {
-		logger.Logf("clangd connectiono error: %v", err)
+		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
@@ -675,7 +675,7 @@ func (ls *INOLanguageServer) TextDocumentCodeActionReqFromIDE(ctx context.Contex
 
 	cppResp, cppErr, err := ls.Clangd.conn.TextDocumentCodeAction(ctx, &cppParams)
 	if err != nil {
-		logger.Logf("clangd connectiono error: %v", err)
+		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
@@ -733,7 +733,7 @@ func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Contex
 	}
 	clangEdits, clangErr, err := ls.Clangd.conn.TextDocumentFormatting(ctx, clangParams)
 	if err != nil {
-		logger.Logf("clangd connectiono error: %v", err)
+		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
@@ -786,7 +786,7 @@ func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.C
 
 	clangEdits, clangErr, err := ls.Clangd.conn.TextDocumentRangeFormatting(ctx, clangParams)
 	if err != nil {
-		logger.Logf("clangd connectiono error: %v", err)
+		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
