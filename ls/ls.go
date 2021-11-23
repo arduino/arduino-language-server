@@ -404,6 +404,7 @@ func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, lo
 
 	clangParams := &lsp.HoverParams{
 		TextDocumentPositionParams: clangTextDocPosition,
+		WorkDoneProgressParams:     ideParams.WorkDoneProgressParams,
 	}
 	clangResp, clangErr, err := ls.Clangd.conn.TextDocumentHover(ctx, clangParams)
 	if err != nil {
@@ -417,22 +418,26 @@ func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, lo
 	}
 
 	if clangResp == nil {
-		logger.Logf("response: nil")
+		logger.Logf("null response")
 		return nil, nil
 	}
 
-	_, r, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangParams.TextDocument.URI, *clangResp.Range)
-	if err != nil {
-		logger.Logf("error during range conversion: %v", err)
-		ls.Close()
-		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
-	}
-	if inPreprocessed {
-		return nil, nil
+	var ideRange *lsp.Range
+	if clangResp.Range != nil {
+		_, r, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangParams.TextDocument.URI, *clangResp.Range)
+		if err != nil {
+			logger.Logf("error during range conversion: %v", err)
+			ls.Close()
+			return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+		}
+		if inPreprocessed {
+			return nil, nil
+		}
+		ideRange = &r
 	}
 	ideResp := lsp.Hover{
 		Contents: clangResp.Contents,
-		Range:    &r,
+		Range:    ideRange,
 	}
 	logger.Logf("Hover content: %s", strconv.Quote(ideResp.Contents.Value))
 	return &ideResp, nil
