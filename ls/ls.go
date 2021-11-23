@@ -705,33 +705,33 @@ func (ls *INOLanguageServer) TextDocumentCodeActionReqFromIDE(ctx context.Contex
 	return inoResp, nil
 }
 
-func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
 
-	inoTextDocument := inoParams.TextDocument
-	inoURI := inoTextDocument.URI
-	logger.Logf("--> formatting(%s)", inoTextDocument)
+	ideTextDocument := ideParams.TextDocument
+	ideURI := ideTextDocument.URI
 
-	cppTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, inoTextDocument)
+	clangTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, ideTextDocument)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
-	cppURI := cppTextDocument.URI
+	clangURI := clangTextDocument.URI
 
-	logger.Logf("    --> formatting(%s)", cppTextDocument)
-
-	if cleanup, e := ls.createClangdFormatterConfig(logger, cppURI); e != nil {
+	if cleanup, err := ls.createClangdFormatterConfig(logger, clangURI); err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	} else {
 		defer cleanup()
 	}
 
-	cppParams := *inoParams
-	cppParams.TextDocument = cppTextDocument
-	cppEdits, clangErr, err := ls.Clangd.conn.TextDocumentFormatting(ctx, &cppParams)
+	clangParams := &lsp.DocumentFormattingParams{
+		WorkDoneProgressParams: ideParams.WorkDoneProgressParams,
+		Options:                ideParams.Options,
+		TextDocument:           clangTextDocument,
+	}
+	clangEdits, clangErr, err := ls.Clangd.conn.TextDocumentFormatting(ctx, clangParams)
 	if err != nil {
 		logger.Logf("clangd connectiono error: %v", err)
 		ls.Close()
@@ -742,44 +742,49 @@ func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Contex
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
 	}
 
-	if cppEdits == nil {
+	if clangEdits == nil {
 		return nil, nil
 	}
 
-	sketchEdits, err := ls.cpp2inoTextEdits(logger, cppURI, cppEdits)
+	ideEdits, err := ls.cland2IdeTextEdits(logger, clangURI, clangEdits)
 	if err != nil {
 		logger.Logf("ERROR converting textEdits: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
-	if inoEdits, ok := sketchEdits[inoURI]; !ok {
+
+	// Edits may span over multiple .ino files, filter only the edits relative to the currently displayed file
+	if inoEdits, ok := ideEdits[ideURI]; !ok {
 		return []lsp.TextEdit{}, nil
 	} else {
 		return inoEdits, nil
 	}
 }
 
-func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.DocumentRangeFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentRangeFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
 
-	// Method: "textDocument/rangeFormatting"
-	logger.Logf("%s", inoParams.TextDocument)
-	inoURI := inoParams.TextDocument.URI
-	cppParams, err := ls.ide2ClangDocumentRangeFormattingParams(logger, inoParams)
+	ideURI := ideParams.TextDocument.URI
+	clangURI, clangRange, err := ls.ide2ClangRange(logger, ideURI, ideParams.Range)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
-	cppURI := cppParams.TextDocument.URI
-	logger.Logf("-> %s", cppParams.TextDocument)
-	if cleanup, e := ls.createClangdFormatterConfig(logger, cppURI); e != nil {
+	clangParams := &lsp.DocumentRangeFormattingParams{
+		WorkDoneProgressParams: ideParams.WorkDoneProgressParams,
+		Options:                ideParams.Options,
+		TextDocument:           lsp.TextDocumentIdentifier{URI: clangURI},
+		Range:                  clangRange,
+	}
+
+	if cleanup, e := ls.createClangdFormatterConfig(logger, clangURI); e != nil {
 		logger.Logf("cannot create formatter config file: %v", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	} else {
 		defer cleanup()
 	}
 
-	cppEdits, clangErr, err := ls.Clangd.conn.TextDocumentRangeFormatting(ctx, cppParams)
+	clangEdits, clangErr, err := ls.Clangd.conn.TextDocumentRangeFormatting(ctx, clangParams)
 	if err != nil {
 		logger.Logf("clangd connectiono error: %v", err)
 		ls.Close()
@@ -790,17 +795,18 @@ func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.C
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
 	}
 
-	// Transform and return the result
-	if cppEdits != nil {
+	if clangEdits == nil {
 		return nil, nil
 	}
 
-	sketchEdits, err := ls.cpp2inoTextEdits(logger, cppURI, cppEdits)
+	sketchEdits, err := ls.cland2IdeTextEdits(logger, clangURI, clangEdits)
 	if err != nil {
 		logger.Logf("ERROR converting textEdits: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
-	if inoEdits, ok := sketchEdits[inoURI]; !ok {
+
+	// Edits may span over multiple .ino files, filter only the edits relative to the currently displayed file
+	if inoEdits, ok := sketchEdits[ideURI]; !ok {
 		return []lsp.TextEdit{}, nil
 	} else {
 		return inoEdits, nil
@@ -1235,21 +1241,6 @@ func (ls *INOLanguageServer) cpp2inoLocationArray(logger jsonrpc.FunctionLogger,
 	return inoLocations, nil
 }
 
-func (ls *INOLanguageServer) ide2ClangDocumentRangeFormattingParams(logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentRangeFormattingParams) (*lsp.DocumentRangeFormattingParams, error) {
-	clangTextDocumentIdentifier, err := ls.ide2ClangTextDocumentIdentifier(logger, ideParams.TextDocument)
-	if err != nil {
-		return nil, err
-	}
-
-	_, clangRange, err := ls.ide2ClangRange(logger, ideParams.TextDocument.URI, ideParams.Range)
-	return &lsp.DocumentRangeFormattingParams{
-		WorkDoneProgressParams: ideParams.WorkDoneProgressParams,
-		Options:                ideParams.Options,
-		TextDocument:           clangTextDocumentIdentifier,
-		Range:                  clangRange,
-	}, err
-}
-
 func (ls *INOLanguageServer) cpp2inoCodeAction(logger jsonrpc.FunctionLogger, codeAction lsp.CodeAction, uri lsp.DocumentURI) lsp.CodeAction {
 	inoCodeAction := lsp.CodeAction{
 		Title:       codeAction.Title,
@@ -1351,33 +1342,6 @@ func (ls *INOLanguageServer) cpp2inoLocation(logger jsonrpc.FunctionLogger, cppL
 		URI:   inoURI,
 		Range: inoRange,
 	}, inPreprocessed, err
-}
-
-func (ls *INOLanguageServer) cpp2inoTextEdits(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {
-	logger.Logf("%s cpp/textEdit (%d elements)", cppURI, len(cppEdits))
-	allInoEdits := map[lsp.DocumentURI][]lsp.TextEdit{}
-	for _, cppEdit := range cppEdits {
-		logger.Logf("        > %s -> %s", cppEdit.Range, strconv.Quote(cppEdit.NewText))
-		inoURI, inoEdit, inPreprocessed, err := ls.cpp2inoTextEdit(logger, cppURI, cppEdit)
-		if err != nil {
-			return nil, err
-		}
-		if inPreprocessed {
-			logger.Logf(("ignoring in-preprocessed-section edit"))
-			continue
-		}
-		allInoEdits[inoURI] = append(allInoEdits[inoURI], inoEdit)
-	}
-
-	logger.Logf("converted to:")
-
-	for inoURI, inoEdits := range allInoEdits {
-		logger.Logf("-> %s ino/textEdit (%d elements)", inoURI, len(inoEdits))
-		for _, inoEdit := range inoEdits {
-			logger.Logf("        > %s -> %s", inoEdit.Range, strconv.Quote(inoEdit.NewText))
-		}
-	}
-	return allInoEdits, nil
 }
 
 func (ls *INOLanguageServer) cpp2inoTextEdit(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, bool, error) {

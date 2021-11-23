@@ -1,6 +1,8 @@
 package ls
 
 import (
+	"strconv"
+
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
@@ -174,6 +176,33 @@ func (ls *INOLanguageServer) clang2IdeDocumentSymbols(logger jsonrpc.FunctionLog
 	}
 
 	return ideSymbols
+}
+
+func (ls *INOLanguageServer) cland2IdeTextEdits(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangTextEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {
+	logger.Logf("%s clang/textEdit (%d elements)", clangURI, len(clangTextEdits))
+	allIdeTextEdits := map[lsp.DocumentURI][]lsp.TextEdit{}
+	for _, clangTextEdit := range clangTextEdits {
+		ideURI, ideTextEdit, inPreprocessed, err := ls.cpp2inoTextEdit(logger, clangURI, clangTextEdit)
+		if err != nil {
+			return nil, err
+		}
+		logger.Logf("  > %s:%s -> %s", clangURI, clangTextEdit.Range, strconv.Quote(clangTextEdit.NewText))
+		if inPreprocessed {
+			logger.Logf(("    ignoring in-preprocessed-section edit"))
+			continue
+		}
+		allIdeTextEdits[ideURI] = append(allIdeTextEdits[ideURI], ideTextEdit)
+	}
+
+	logger.Logf("converted to:")
+
+	for ideURI, ideTextEdits := range allIdeTextEdits {
+		logger.Logf("  %s ino/textEdit (%d elements)", ideURI, len(ideTextEdits))
+		for _, ideTextEdit := range ideTextEdits {
+			logger.Logf("    > %s:%s -> %s", ideURI, ideTextEdit.Range, strconv.Quote(ideTextEdit.NewText))
+		}
+	}
+	return allIdeTextEdits, nil
 }
 
 func (ls *INOLanguageServer) clang2IdeSymbolTags(logger jsonrpc.FunctionLogger, clangSymbolTags []lsp.SymbolTag) []lsp.SymbolTag {
