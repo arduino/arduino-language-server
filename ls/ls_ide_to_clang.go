@@ -66,30 +66,22 @@ func (ls *INOLanguageServer) ide2ClangDocumentURI(logger jsonrpc.FunctionLogger,
 }
 
 func (ls *INOLanguageServer) ide2ClangTextDocumentPositionParams(logger jsonrpc.FunctionLogger, ideParams lsp.TextDocumentPositionParams) (lsp.TextDocumentPositionParams, error) {
-	ideTextDocument := ideParams.TextDocument
-	idePosition := ideParams.Position
-	ideURI := ideTextDocument.URI
-
-	clangTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, ideTextDocument)
+	clangURI, clangPosition, err := ls.ide2ClangPosition(logger, ideParams.TextDocument.URI, ideParams.Position)
 	if err != nil {
-		logger.Logf("%s -> invalid text document: %s", ideParams, err)
+		logger.Logf("Error converting position %s: %s", ideParams, err)
 		return lsp.TextDocumentPositionParams{}, err
 	}
-	clangPosition := idePosition
-	if ls.clangURIRefersToIno(clangTextDocument.URI) {
-		if cppLine, ok := ls.sketchMapper.InoToCppLineOk(ideURI, idePosition.Line); ok {
-			clangPosition.Line = cppLine
-		} else {
-			logger.Logf("%s -> invalid line requested: %s:%d", ideParams, ideURI, idePosition.Line)
-			return lsp.TextDocumentPositionParams{}, &UnknownURI{ideURI}
-		}
-	}
 	clangParams := lsp.TextDocumentPositionParams{
-		TextDocument: clangTextDocument,
+		TextDocument: lsp.TextDocumentIdentifier{URI: clangURI},
 		Position:     clangPosition,
 	}
 	logger.Logf("%s -> %s", ideParams, clangParams)
 	return clangParams, nil
+}
+
+func (ls *INOLanguageServer) ide2ClangPosition(logger jsonrpc.FunctionLogger, ideURI lsp.DocumentURI, idePosition lsp.Position) (lsp.DocumentURI, lsp.Position, error) {
+	clangURI, clangRange, err := ls.ide2ClangRange(logger, ideURI, lsp.Range{Start: idePosition, End: idePosition})
+	return clangURI, clangRange.Start, err
 }
 
 func (ls *INOLanguageServer) ide2ClangRange(logger jsonrpc.FunctionLogger, ideURI lsp.DocumentURI, ideRange lsp.Range) (lsp.DocumentURI, lsp.Range, error) {

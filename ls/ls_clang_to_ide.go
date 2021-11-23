@@ -116,7 +116,7 @@ func (ls *INOLanguageServer) clang2IdeDiagnostic(logger jsonrpc.FunctionLogger, 
 func (ls *INOLanguageServer) clang2IdeDiagnosticRelatedInformationArray(logger jsonrpc.FunctionLogger, clangInfos []lsp.DiagnosticRelatedInformation) ([]lsp.DiagnosticRelatedInformation, error) {
 	ideInfos := []lsp.DiagnosticRelatedInformation{}
 	for _, clangInfo := range clangInfos {
-		ideLocation, inPreprocessed, err := ls.cpp2inoLocation(logger, clangInfo.Location)
+		ideLocation, inPreprocessed, err := ls.clang2IdeLocation(logger, clangInfo.Location)
 		if err != nil {
 			return nil, err
 		}
@@ -203,6 +203,31 @@ func (ls *INOLanguageServer) cland2IdeTextEdits(logger jsonrpc.FunctionLogger, c
 		}
 	}
 	return allIdeTextEdits, nil
+}
+
+func (ls *INOLanguageServer) clang2IdeLocationsArray(logger jsonrpc.FunctionLogger, clangLocations []lsp.Location) ([]lsp.Location, error) {
+	ideLocations := []lsp.Location{}
+	for _, clangLocation := range clangLocations {
+		ideLocation, inPreprocessed, err := ls.clang2IdeLocation(logger, clangLocation)
+		if err != nil {
+			logger.Logf("ERROR converting location %s: %s", clangLocation, err)
+			return nil, err
+		}
+		if inPreprocessed {
+			logger.Logf("ignored in-preprocessed-section location")
+			continue
+		}
+		ideLocations = append(ideLocations, ideLocation)
+	}
+	return ideLocations, nil
+}
+
+func (ls *INOLanguageServer) clang2IdeLocation(logger jsonrpc.FunctionLogger, clangLocation lsp.Location) (lsp.Location, bool, error) {
+	ideURI, ideRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangLocation.URI, clangLocation.Range)
+	return lsp.Location{
+		URI:   ideURI,
+		Range: ideRange,
+	}, inPreprocessed, err
 }
 
 func (ls *INOLanguageServer) clang2IdeSymbolTags(logger jsonrpc.FunctionLogger, clangSymbolTags []lsp.SymbolTag) []lsp.SymbolTag {

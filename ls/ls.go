@@ -432,48 +432,49 @@ func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Con
 	return cppSignatureHelp, nil
 }
 
-func (ls *INOLanguageServer) TextDocumentDefinitionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, p *lsp.DefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) TextDocumentDefinitionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
 
-	inoTextDocPosition := p.TextDocumentPositionParams
-
-	logger.Logf("%s", inoTextDocPosition)
-	cppTextDocPosition, err := ls.ide2ClangTextDocumentPositionParams(logger, inoTextDocPosition)
+	ideTextDocPosition := ideParams.TextDocumentPositionParams
+	clangTextDocPosition, err := ls.ide2ClangTextDocumentPositionParams(logger, ideTextDocPosition)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
 
-	logger.Logf("-> %s", cppTextDocPosition)
-	cppParams := *p
-	cppParams.TextDocumentPositionParams = cppTextDocPosition
-	cppLocations, cppLocationLinks, cppErr, err := ls.Clangd.conn.TextDocumentDefinition(ctx, &cppParams)
+	clangParams := &lsp.DefinitionParams{
+		TextDocumentPositionParams: clangTextDocPosition,
+		WorkDoneProgressParams:     ideParams.WorkDoneProgressParams,
+		PartialResultParams:        ideParams.PartialResultParams,
+	}
+	clangLocations, clangLocationLinks, clangErr, err := ls.Clangd.conn.TextDocumentDefinition(ctx, clangParams)
 	if err != nil {
 		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
-	if cppErr != nil {
-		logger.Logf("clangd response error: %v", cppErr.AsError())
-		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: cppErr.AsError().Error()}
+	if clangErr != nil {
+		logger.Logf("clangd response error: %v", clangErr.AsError())
+		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
 	}
 
-	var inoLocations []lsp.Location
-	if cppLocations != nil {
-		inoLocations, err = ls.cpp2inoLocationArray(logger, cppLocations)
+	var ideLocations []lsp.Location
+	if clangLocations != nil {
+		ideLocations, err = ls.clang2IdeLocationsArray(logger, clangLocations)
 		if err != nil {
+			logger.Logf("Error: %v", err)
 			ls.Close()
 			return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 		}
 	}
 
-	var inoLocationLinks []lsp.LocationLink
-	if cppLocationLinks != nil {
+	var ideLocationLinks []lsp.LocationLink
+	if clangLocationLinks != nil {
 		panic("unimplemented")
 	}
 
-	return inoLocations, inoLocationLinks, nil
+	return ideLocations, ideLocationLinks, nil
 }
 
 func (ls *INOLanguageServer) TextDocumentTypeDefinitionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.TypeDefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
@@ -508,7 +509,7 @@ func (ls *INOLanguageServer) TextDocumentTypeDefinitionReqFromIDE(ctx context.Co
 
 	var inoLocations []lsp.Location
 	if cppLocations != nil {
-		inoLocations, err = ls.cpp2inoLocationArray(logger, cppLocations)
+		inoLocations, err = ls.clang2IdeLocationsArray(logger, cppLocations)
 		if err != nil {
 			ls.Close()
 			return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -552,7 +553,7 @@ func (ls *INOLanguageServer) TextDocumentImplementationReqFromIDE(ctx context.Co
 
 	var inoLocations []lsp.Location
 	if cppLocations != nil {
-		inoLocations, err = ls.cpp2inoLocationArray(logger, cppLocations)
+		inoLocations, err = ls.clang2IdeLocationsArray(logger, cppLocations)
 		if err != nil {
 			ls.Close()
 			return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -1224,23 +1225,6 @@ func (ls *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger jsonr
 	return res, err
 }
 
-func (ls *INOLanguageServer) cpp2inoLocationArray(logger jsonrpc.FunctionLogger, cppLocations []lsp.Location) ([]lsp.Location, error) {
-	inoLocations := []lsp.Location{}
-	for _, cppLocation := range cppLocations {
-		inoLocation, inPreprocessed, err := ls.cpp2inoLocation(logger, cppLocation)
-		if err != nil {
-			logger.Logf("ERROR converting location %s: %s", cppLocation, err)
-			return nil, err
-		}
-		if inPreprocessed {
-			logger.Logf("ignored in-preprocessed-section location")
-			continue
-		}
-		inoLocations = append(inoLocations, inoLocation)
-	}
-	return inoLocations, nil
-}
-
 func (ls *INOLanguageServer) cpp2inoCodeAction(logger jsonrpc.FunctionLogger, codeAction lsp.CodeAction, uri lsp.DocumentURI) lsp.CodeAction {
 	inoCodeAction := lsp.CodeAction{
 		Title:       codeAction.Title,
@@ -1334,14 +1318,6 @@ func (ls *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger,
 	}
 	logger.Logf("    done converting workspaceEdit")
 	return inoWorkspaceEdit
-}
-
-func (ls *INOLanguageServer) cpp2inoLocation(logger jsonrpc.FunctionLogger, cppLocation lsp.Location) (lsp.Location, bool, error) {
-	inoURI, inoRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, cppLocation.URI, cppLocation.Range)
-	return lsp.Location{
-		URI:   inoURI,
-		Range: inoRange,
-	}, inPreprocessed, err
 }
 
 func (ls *INOLanguageServer) cpp2inoTextEdit(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, bool, error) {
