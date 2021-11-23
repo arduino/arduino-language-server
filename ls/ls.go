@@ -153,16 +153,16 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	return ls
 }
 
-func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
 	go func() {
 		defer streams.CatchAndLogPanic()
 		// Unlock goroutines waiting for clangd
 		defer ls.clangdStarted.Broadcast()
 
 		logger := NewLSPFunctionLogger(color.HiCyanString, "INIT --- ")
-		logger.Logf("initializing workbench: %s", inoParams.RootURI)
+		logger.Logf("initializing workbench: %s", ideParams.RootURI)
 
-		ls.sketchRoot = inoParams.RootURI.AsPath()
+		ls.sketchRoot = ideParams.RootURI.AsPath()
 		ls.sketchName = ls.sketchRoot.Base()
 		ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
 
@@ -178,8 +178,8 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 			logger.Logf("ERROR: updating compile_commands: %s", err)
 		}
 
-		if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
-			ls.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
+		if inoCppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
+			ls.sketchMapper = sourcemapper.CreateInoMapper(inoCppContent)
 			ls.sketchMapper.CppText.Version = 1
 		} else {
 			logger.Logf("error starting clang: reading generated cpp file from sketch: %s", err)
@@ -205,17 +205,17 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		// Send initialization command to clangd (1 sec. timeout)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		cppInitializeParams := *inoParams
-		cppInitializeParams.RootPath = ls.buildSketchRoot.String()
-		cppInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
-		if initRes, clangErr, err := ls.Clangd.conn.Initialize(ctx, &cppInitializeParams); err != nil {
+		clangInitializeParams := *ideParams
+		clangInitializeParams.RootPath = ls.buildSketchRoot.String()
+		clangInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
+		if clangInitializeResult, clangErr, err := ls.Clangd.conn.Initialize(ctx, &clangInitializeParams); err != nil {
 			logger.Logf("error initilizing clangd: %v", err)
 			return
 		} else if clangErr != nil {
 			logger.Logf("error initilizing clangd: %v", clangErr.AsError())
 			return
 		} else {
-			logger.Logf("clangd successfully started: %s", string(lsp.EncodeMessage(initRes)))
+			logger.Logf("clangd successfully started: %s", string(lsp.EncodeMessage(clangInitializeResult)))
 		}
 
 		if err := ls.Clangd.conn.Initialized(&lsp.InitializedParams{}); err != nil {
@@ -297,7 +297,7 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 }
 
 func (ls *INOLanguageServer) ShutdownReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
-	ls.Clangd.conn.Shutdown(context.Background())
+	_, _ = ls.Clangd.conn.Shutdown(context.Background())
 	return nil
 }
 
