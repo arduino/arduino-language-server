@@ -132,35 +132,38 @@ func (ls *INOLanguageServer) clang2IdeDiagnosticRelatedInformationArray(logger j
 	return ideInfos, nil
 }
 
-func (ls *INOLanguageServer) clang2IdeDocumentSymbols(logger jsonrpc.FunctionLogger, clangSymbols []lsp.DocumentSymbol, ideRequestedURI lsp.DocumentURI) []lsp.DocumentSymbol {
-	logger.Logf("documentSymbol(%d document symbols)", len(clangSymbols))
-	ideRequestedPath := ideRequestedURI.AsPath().String()
-	logger.Logf("    filtering for requested ino file: %s", ideRequestedPath)
-	if ideRequestedURI.Ext() != ".ino" || len(clangSymbols) == 0 {
-		return clangSymbols
-	}
+func (ls *INOLanguageServer) clang2IdeDocumentSymbols(logger jsonrpc.FunctionLogger, clangSymbols []lsp.DocumentSymbol, clangURI lsp.DocumentURI, origIdeURI lsp.DocumentURI) ([]lsp.DocumentSymbol, error) {
+	logger.Logf("%s (%d document symbols)", clangURI, len(clangSymbols))
 
 	ideSymbols := []lsp.DocumentSymbol{}
 	for _, clangSymbol := range clangSymbols {
-		logger.Logf("    > convert %s %s", clangSymbol.Kind, clangSymbol.Range)
-		if ls.sketchMapper.IsPreprocessedCppLine(clangSymbol.Range.Start.Line) {
-			logger.Logf("      symbol is in the preprocessed section of the sketch.ino.cpp")
+		logger.Logf("  > convert %s %s", clangSymbol.Kind, clangSymbol.Range)
+		ideURI, ideRange, isPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangURI, clangSymbol.Range)
+		if err != nil {
+			return nil, err
+		}
+		if isPreprocessed {
+			logger.Logf("    symbol is in the preprocessed section of the sketch.ino.cpp, skipping")
+			continue
+		}
+		if ideURI != origIdeURI {
+			logger.Logf("    filtering out symbol related to %s", ideURI)
+			continue
+		}
+		ideSelectionURI, ideSelectionRange, isSelectionPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangURI, clangSymbol.SelectionRange)
+		if err != nil {
+			return nil, err
+		}
+		if ideSelectionURI != ideURI || isSelectionPreprocessed {
+			logger.Logf("    ERROR: doc of symbol-selection-range does not match doc of symbol-range")
+			logger.Logf("        range     %s > %s:%s", clangSymbol.Range, ideURI, ideRange)
+			logger.Logf("        selection %s > %s:%s", clangSymbol.SelectionRange, ideSelectionURI, ideSelectionRange)
 			continue
 		}
 
-		idePath, ideRange := ls.sketchMapper.CppToInoRange(clangSymbol.Range)
-		ideSelectionPath, ideSelectionRange := ls.sketchMapper.CppToInoRange(clangSymbol.SelectionRange)
-
-		if idePath != ideSelectionPath {
-			logger.Logf("      ERROR: symbol range and selection belongs to different URI!")
-			logger.Logf("        symbol %s != selection %s", clangSymbol.Range, clangSymbol.SelectionRange)
-			logger.Logf("        %s:%s != %s:%s", idePath, ideRange, ideSelectionPath, ideSelectionRange)
-			continue
-		}
-
-		if idePath != ideRequestedPath {
-			logger.Logf("    skipping symbol related to %s", idePath)
-			continue
+		ideChildren, err := ls.clang2IdeDocumentSymbols(logger, clangSymbol.Children, clangURI, origIdeURI)
+		if err != nil {
+			return nil, err
 		}
 
 		ideSymbols = append(ideSymbols, lsp.DocumentSymbol{
@@ -170,12 +173,12 @@ func (ls *INOLanguageServer) clang2IdeDocumentSymbols(logger jsonrpc.FunctionLog
 			Kind:           clangSymbol.Kind,
 			Range:          ideRange,
 			SelectionRange: ideSelectionRange,
-			Children:       ls.clang2IdeDocumentSymbols(logger, clangSymbol.Children, ideRequestedURI),
+			Children:       ideChildren,
 			Tags:           ls.clang2IdeSymbolTags(logger, clangSymbol.Tags),
 		})
 	}
 
-	return ideSymbols
+	return ideSymbols, nil
 }
 
 func (ls *INOLanguageServer) cland2IdeTextEdits(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangTextEdits []lsp.TextEdit) (map[lsp.DocumentURI][]lsp.TextEdit, error) {

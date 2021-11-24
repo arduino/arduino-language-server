@@ -728,10 +728,9 @@ func (ls *INOLanguageServer) TextDocumentDocumentHighlightReqFromIDE(ctx context
 func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentSymbolParams) ([]lsp.DocumentSymbol, []lsp.SymbolInformation, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
-	ideTextDocument := ideParams.TextDocument
 
 	// Convert request for clang
-	clangTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, ideTextDocument)
+	clangTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, ideParams.TextDocument)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
@@ -757,7 +756,13 @@ func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Co
 	// Convert response for IDE
 	var ideDocSymbols []lsp.DocumentSymbol
 	if clangDocSymbols != nil {
-		ideDocSymbols = ls.clang2IdeDocumentSymbols(logger, clangDocSymbols, ideTextDocument.URI)
+		if s, err := ls.clang2IdeDocumentSymbols(logger, clangDocSymbols, clangParams.TextDocument.URI, ideParams.TextDocument.URI); err != nil {
+			logger.Logf("Error: %s", err)
+			ls.Close()
+			return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+		} else {
+			ideDocSymbols = s
+		}
 	}
 	var ideSymbolsInformation []lsp.SymbolInformation
 	if clangSymbolsInformation != nil {
