@@ -9,6 +9,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.7.0
 	go.bug.st/json v1.15.6
-	go.bug.st/lsp v0.0.0-20211111165110-143dff941d53
+	go.bug.st/lsp v0.0.0-20211124092226-438f5e4ddeb8
 	google.golang.org/grpc v1.42.0
 )

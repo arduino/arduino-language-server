@@ -225,7 +225,67 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 
 		logger.Logf("Done initializing workbench")
 	}()
+	/*
+		Clang 12 capabilities:
 
+		✓	"textDocumentSync": {
+		✓		"openClose": true,
+		✓		"change": 2, (incremental)
+		✓		"save": {}
+		✓	},
+		✓	"completionProvider": {
+		✓		"triggerCharacters": [ ".", "<", ">", ":", "\"", "/" ],
+		✓		"allCommitCharacters": [
+		✓			" ", "\t","(", ")", "[", "]", "{", "}", "<",
+		✓			">", ":", ";", ",", "+", "-", "/", "*", "%",
+		✓			"^", "&", "#", "?", ".", "=", "\"","'",	"|"
+		✓		],
+		✓		"completionItem": {}
+		✓	},
+		✓	"hoverProvider": {},
+		✓	"signatureHelpProvider": {
+		✓		"triggerCharacters": [ "(", ","	]
+		✓	},
+		✓	"declarationProvider": {},
+		✓	"definitionProvider": {},
+		✓	"implementationProvider": {},
+		✓	"referencesProvider": {},
+		✓	"documentHighlightProvider": {},
+		✓	"documentSymbolProvider": {},
+		✓	"codeActionProvider": {
+		✓		"codeActionKinds": [ "quickfix", "refactor", "info"	]
+		✓	},
+		✓	"documentLinkProvider": {},
+		✓	"documentFormattingProvider": {},
+		✓	"documentRangeFormattingProvider": {},
+		✓	"documentOnTypeFormattingProvider": {
+		✓		"firstTriggerCharacter": "\n"
+		✓	},
+		✓	"renameProvider": {
+		✓		"prepareProvider": true
+		✓	},
+		✓	"executeCommandProvider": {
+		✓		"commands": [ "clangd.applyFix", "clangd.applyTweak" ]
+		✓	},
+		✓	"selectionRangeProvider": {},
+		✓	"callHierarchyProvider": {},
+		✓	"semanticTokensProvider": {
+		✓		"legend": {
+		✓			"tokenTypes": [
+		✓				"variable",	"variable", "parameter", "function", "method",
+		✓				"function", "property", "variable", "class", "enum",
+		✓				"enumMember", "type", "dependent", "dependent", "namespace",
+		✓				"typeParameter", "concept", "type", "macro", "comment"
+		✓			],
+		✓			"tokenModifiers": []
+		✓		},
+		✓		"range": false,
+		✓		"full": {
+		✓			"delta": true
+		✓		}
+		✓	},
+		✓	"workspaceSymbolProvider": {}
+	*/
 	resp := &lsp.InitializeResult{
 		Capabilities: lsp.ServerCapabilities{
 			TextDocumentSync: &lsp.TextDocumentSyncOptions{
@@ -236,33 +296,37 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 				},
 			},
 			CompletionProvider: &lsp.CompletionOptions{
+				TriggerCharacters: []string{".", "<", ">", ":", "\"", "/"},
 				AllCommitCharacters: []string{
 					" ", "\t", "(", ")", "[", "]", "{", "}", "<", ">",
 					":", ";", ",", "+", "-", "/", "*", "%", "^", "&",
 					"#", "?", ".", "=", "\"", "'", "|"},
 				ResolveProvider: false,
-				TriggerCharacters: []string{ //".", "\u003e", ":"
-					".", "<", ">", ":", "\"", "/"},
+				CompletionItem:  &lsp.CompletionItemOptions{},
 			},
+			HoverProvider: &lsp.HoverOptions{},
 			SignatureHelpProvider: &lsp.SignatureHelpOptions{
 				TriggerCharacters: []string{"(", ","},
 			},
-			// ReferencesProvider:              &lsp.ReferenceOptions{},
 			// DeclarationProvider:             &lsp.DeclarationRegistrationOptions{},
-			// DocumentLinkProvider:            &lsp.DocumentLinkOptions{ResolveProvider: false},
+			DefinitionProvider: &lsp.DefinitionOptions{},
 			// ImplementationProvider:          &lsp.ImplementationRegistrationOptions{},
-			// SelectionRangeProvider:          &lsp.SelectionRangeRegistrationOptions{},
-			DefinitionProvider:              &lsp.DefinitionOptions{},
-			DocumentHighlightProvider:       &lsp.DocumentHighlightOptions{},
-			DocumentSymbolProvider:          &lsp.DocumentSymbolOptions{},
-			WorkspaceSymbolProvider:         &lsp.WorkspaceSymbolOptions{},
-			CodeActionProvider:              &lsp.CodeActionOptions{ResolveProvider: true},
+			// ReferencesProvider:              &lsp.ReferenceOptions{},
+			DocumentHighlightProvider: &lsp.DocumentHighlightOptions{},
+			DocumentSymbolProvider:    &lsp.DocumentSymbolOptions{},
+			CodeActionProvider: &lsp.CodeActionOptions{
+				CodeActionKinds: []lsp.CodeActionKind{
+					lsp.CodeActionKindQuickFix,
+					lsp.CodeActionKindRefactor,
+					"info",
+				},
+			},
+			// DocumentLinkProvider:            &lsp.DocumentLinkOptions{ResolveProvider: false},
 			DocumentFormattingProvider:      &lsp.DocumentFormattingOptions{},
 			DocumentRangeFormattingProvider: &lsp.DocumentRangeFormattingOptions{},
-			HoverProvider:                   &lsp.HoverOptions{},
+			// SelectionRangeProvider:          &lsp.SelectionRangeRegistrationOptions{},
 			DocumentOnTypeFormattingProvider: &lsp.DocumentOnTypeFormattingOptions{
 				FirstTriggerCharacter: "\n",
-				MoreTriggerCharacter:  []string{},
 			},
 			RenameProvider: &lsp.RenameOptions{
 				// PrepareProvider: true,
@@ -270,22 +334,24 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 			ExecuteCommandProvider: &lsp.ExecuteCommandOptions{
 				Commands: []string{"clangd.applyFix", "clangd.applyTweak"},
 			},
-			// SemanticTokensProvider: &lsp.SemanticTokensRegistrationOptions{
-			// 	SemanticTokensOptions: &lsp.SemanticTokensOptions{
-			// 		Full: &lsp.SemantiTokenFullOptions{
-			// 			Delta: true,
+			// SelectionRangeProvider: &lsp.SelectionRangeOptions{},
+			// CallHierarchyProvider: &lsp.CallHierarchyOptions{},
+			// SemanticTokensProvider: &lsp.SemanticTokensOptions{
+			// 	Legend: lsp.SemanticTokensLegend{
+			// 		TokenTypes: []string{
+			// 			"variable", "variable", "parameter", "function", "method",
+			// 			"function", "property", "variable", "class", "enum",
+			// 			"enumMember", "type", "dependent", "dependent", "namespace",
+			// 			"typeParameter", "concept", "type", "macro", "comment",
 			// 		},
-			// 		Legend: lsp.SemanticTokensLegend{
-			// 			TokenModifiers: []string{},
-			// 			TokenTypes: []string{
-			// 				"variable", "variable", "parameter", "function", "method", "function", "property", "variable",
-			// 				"class", "enum", "enumMember", "type", "dependent", "dependent", "namespace", "typeParameter",
-			// 				"concept", "type", "macro", "comment",
-			// 			},
-			// 		},
-			// 		Range: false,
+			// 		TokenModifiers: []string{},
+			// 	},
+			// 	Range: false,
+			// 	Full: &lsp.SemantiTokenFullOptions{
+			// 		Delta: true,
 			// 	},
 			// },
+			WorkspaceSymbolProvider: &lsp.WorkspaceSymbolOptions{},
 		},
 		ServerInfo: &lsp.InitializeResultServerInfo{
 			Name:    "arduino-language-server",
