@@ -429,8 +429,11 @@ func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Contex
 
 		var ideCommand *lsp.Command
 		if clangItem.Command != nil {
-			c := ls.cpp2inoCommand(logger, *clangItem.Command)
-			ideCommand = &c
+			c := ls.clang2IdeCommand(logger, *clangItem.Command)
+			if c == nil {
+				continue // Skit item with unsupported command convertion
+			}
+			ideCommand = c
 		}
 
 		ideCompletionList.Items = append(ideCompletionList.Items, lsp.CompletionItem{
@@ -771,60 +774,74 @@ func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Co
 	return ideDocSymbols, ideSymbolsInformation, nil
 }
 
-func (ls *INOLanguageServer) TextDocumentCodeActionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, inoParams *lsp.CodeActionParams) ([]lsp.CommandOrCodeAction, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) TextDocumentCodeActionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.CodeActionParams) ([]lsp.CommandOrCodeAction, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
 
-	inoTextDocument := inoParams.TextDocument
-	inoURI := inoTextDocument.URI
-	logger.Logf("--> codeAction(%s:%s)", inoTextDocument, inoParams.Range.Start)
+	ideTextDocument := ideParams.TextDocument
+	ideURI := ideTextDocument.URI
+	logger.Logf("--> codeAction(%s:%s)", ideTextDocument, ideParams.Range.Start)
 
-	cppParams := *inoParams
-	cppTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, inoTextDocument)
+	cppTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, ideTextDocument)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
-	cppParams.TextDocument = cppTextDocument
 
+	clangParams := &lsp.CodeActionParams{
+		TextDocument:           cppTextDocument,
+		WorkDoneProgressParams: ideParams.WorkDoneProgressParams,
+		PartialResultParams:    ideParams.PartialResultParams,
+		Range:                  ideParams.Range,
+		Context:                ideParams.Context,
+	}
 	if cppTextDocument.URI.AsPath().EquivalentTo(ls.buildSketchCpp) {
-		cppParams.Range = ls.sketchMapper.InoToCppLSPRange(inoURI, inoParams.Range)
-		for i, inoDiag := range inoParams.Context.Diagnostics {
-			cppParams.Context.Diagnostics[i].Range = ls.sketchMapper.InoToCppLSPRange(inoURI, inoDiag.Range)
+		clangParams.Range = ls.sketchMapper.InoToCppLSPRange(ideURI, ideParams.Range)
+		for i, inoDiag := range ideParams.Context.Diagnostics {
+			clangParams.Context.Diagnostics[i].Range = ls.sketchMapper.InoToCppLSPRange(ideURI, inoDiag.Range)
 		}
 	}
-	logger.Logf("    --> codeAction(%s:%s)", cppParams.TextDocument, inoParams.Range.Start)
+	logger.Logf("    --> codeAction(%s:%s)", clangParams.TextDocument, ideParams.Range.Start)
 
-	cppResp, cppErr, err := ls.Clangd.conn.TextDocumentCodeAction(ctx, &cppParams)
+	clangCommandsOrCodeActions, clangErr, err := ls.Clangd.conn.TextDocumentCodeAction(ctx, clangParams)
 	if err != nil {
 		logger.Logf("clangd communication error: %v", err)
 		ls.Close()
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
-	if cppErr != nil {
-		logger.Logf("clangd response error: %v", cppErr.AsError())
-		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: cppErr.AsError().Error()}
+	if clangErr != nil {
+		logger.Logf("clangd response error: %v", clangErr.AsError())
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: clangErr.AsError().Error()}
 	}
 
 	// TODO: Create a function for this one?
-	inoResp := []lsp.CommandOrCodeAction{}
-	if cppResp != nil {
-		logger.Logf("    <-- codeAction(%d elements)", len(cppResp))
-		for _, cppItem := range cppResp {
-			inoItem := lsp.CommandOrCodeAction{}
-			switch i := cppItem.Get().(type) {
-			case lsp.Command:
-				logger.Logf("        > Command: %s", i.Title)
-				inoItem.Set(ls.cpp2inoCommand(logger, i))
-			case lsp.CodeAction:
-				logger.Logf("        > CodeAction: %s", i.Title)
-				inoItem.Set(ls.cpp2inoCodeAction(logger, i, inoURI))
-			}
-			inoResp = append(inoResp, inoItem)
-		}
-		logger.Logf("<-- codeAction(%d elements)", len(inoResp))
+	ideCommandsOrCodeActions := []lsp.CommandOrCodeAction{}
+	if clangCommandsOrCodeActions != nil {
+		return ideCommandsOrCodeActions, nil
 	}
-	return inoResp, nil
+	logger.Logf("    <-- codeAction(%d elements)", len(clangCommandsOrCodeActions))
+	for _, clangItem := range clangCommandsOrCodeActions {
+		ideItem := lsp.CommandOrCodeAction{}
+		switch i := clangItem.Get().(type) {
+		case lsp.Command:
+			logger.Logf("        > Command: %s", i.Title)
+			ideCommand := ls.clang2IdeCommand(logger, i)
+			if ideCommand == nil {
+				continue // Skip unsupported command
+			}
+			ideItem.Set(*ideCommand)
+		case lsp.CodeAction:
+			logger.Logf("        > CodeAction: %s", i.Title)
+			ideCodeAction := ls.clang2IdeCodeAction(logger, i, ideURI)
+			if ideCodeAction == nil {
+				continue // Skip unsupported code action
+			}
+			ideItem.Set(*ideCodeAction)
+		}
+		ideCommandsOrCodeActions = append(ideCommandsOrCodeActions, ideItem)
+	}
+	logger.Logf("<-- codeAction(%d elements)", len(ideCommandsOrCodeActions))
+	return ideCommandsOrCodeActions, nil
 }
 
 func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
@@ -1346,39 +1363,47 @@ func (ls *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger jsonr
 	return res, err
 }
 
-func (ls *INOLanguageServer) cpp2inoCodeAction(logger jsonrpc.FunctionLogger, codeAction lsp.CodeAction, uri lsp.DocumentURI) lsp.CodeAction {
-	inoCodeAction := lsp.CodeAction{
-		Title:       codeAction.Title,
-		Kind:        codeAction.Kind,
-		Edit:        ls.cpp2inoWorkspaceEdit(logger, codeAction.Edit),
-		Diagnostics: codeAction.Diagnostics,
+func (ls *INOLanguageServer) clang2IdeCodeAction(logger jsonrpc.FunctionLogger, clangCodeAction lsp.CodeAction, origIdeURI lsp.DocumentURI) *lsp.CodeAction {
+	ideCodeAction := &lsp.CodeAction{
+		Title:       clangCodeAction.Title,
+		Kind:        clangCodeAction.Kind,
+		Diagnostics: clangCodeAction.Diagnostics,
+		IsPreferred: clangCodeAction.IsPreferred,
+		Disabled:    clangCodeAction.Disabled,
+		Edit:        ls.cpp2inoWorkspaceEdit(logger, clangCodeAction.Edit),
 	}
-	if codeAction.Command != nil {
-		inoCommand := ls.cpp2inoCommand(logger, *codeAction.Command)
-		inoCodeAction.Command = &inoCommand
+	if clangCodeAction.Command != nil {
+		inoCommand := ls.clang2IdeCommand(logger, *clangCodeAction.Command)
+		if inoCommand == nil {
+			return nil
+		}
+		ideCodeAction.Command = inoCommand
 	}
-	if uri.Ext() == ".ino" {
-		for i, diag := range inoCodeAction.Diagnostics {
-			_, inoCodeAction.Diagnostics[i].Range = ls.sketchMapper.CppToInoRange(diag.Range)
+	if origIdeURI.Ext() == ".ino" {
+		for i, diag := range ideCodeAction.Diagnostics {
+			_, ideCodeAction.Diagnostics[i].Range = ls.sketchMapper.CppToInoRange(diag.Range)
 		}
 	}
-	return inoCodeAction
+	return ideCodeAction
 }
 
-func (ls *INOLanguageServer) cpp2inoCommand(logger jsonrpc.FunctionLogger, command lsp.Command) lsp.Command {
-	inoCommand := lsp.Command{
-		Title:     command.Title,
-		Command:   command.Command,
-		Arguments: command.Arguments,
-	}
-	if command.Command == "clangd.applyTweak" {
-		for i := range command.Arguments {
+func (ls *INOLanguageServer) clang2IdeCommand(logger jsonrpc.FunctionLogger, clangCommand lsp.Command) *lsp.Command {
+	switch clangCommand.Command {
+	case "clangd.applyTweak":
+		logger.Logf("> Command: clangd.applyTweak")
+		ideCommand := &lsp.Command{
+			Title:     clangCommand.Title,
+			Command:   clangCommand.Command,
+			Arguments: clangCommand.Arguments,
+		}
+		for i := range clangCommand.Arguments {
 			v := struct {
 				TweakID   string          `json:"tweakID"`
 				File      lsp.DocumentURI `json:"file"`
 				Selection lsp.Range       `json:"selection"`
 			}{}
-			if err := json.Unmarshal(command.Arguments[0], &v); err == nil {
+
+			if err := json.Unmarshal(clangCommand.Arguments[0], &v); err == nil {
 				if v.TweakID == "ExtractVariable" {
 					logger.Logf("            > converted clangd ExtractVariable")
 					if v.File.AsPath().EquivalentTo(ls.buildSketchCpp) {
@@ -1393,10 +1418,13 @@ func (ls *INOLanguageServer) cpp2inoCommand(logger jsonrpc.FunctionLogger, comma
 			if err != nil {
 				panic("Internal Error: json conversion of codeAcion command arguments")
 			}
-			inoCommand.Arguments[i] = converted
+			ideCommand.Arguments[i] = converted
 		}
+		return ideCommand
+	default:
+		logger.Logf("ERROR: could not convert Command '%s'", clangCommand.Command)
+		return nil
 	}
-	return inoCommand
 }
 
 func (ls *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger, cppWorkspaceEdit *lsp.WorkspaceEdit) *lsp.WorkspaceEdit {
