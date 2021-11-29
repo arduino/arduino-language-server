@@ -44,7 +44,7 @@ type INOLanguageServer struct {
 	sketchName                string
 	sketchMapper              *sourcemapper.SketchMapper
 	sketchTrackedFilesCount   int
-	trackedIDEDocs            map[string]lsp.TextDocumentItem
+	trackedIdeDocs            map[string]lsp.TextDocumentItem
 	ideInoDocsWithDiagnostics map[lsp.DocumentURI]bool
 	sketchRebuilder           *SketchRebuilder
 }
@@ -115,7 +115,7 @@ func (ls *INOLanguageServer) readUnlock(logger jsonrpc.FunctionLogger) {
 func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *INOLanguageServer {
 	logger := NewLSPFunctionLogger(color.HiWhiteString, "LS: ")
 	ls := &INOLanguageServer{
-		trackedIDEDocs:            map[string]lsp.TextDocumentItem{},
+		trackedIdeDocs:            map[string]lsp.TextDocumentItem{},
 		ideInoDocsWithDiagnostics: map[lsp.DocumentURI]bool{},
 		closing:                   make(chan bool),
 		config:                    config,
@@ -952,7 +952,7 @@ func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.C
 	}
 }
 
-func (ls *INOLanguageServer) InitializedNotifFromIDE(logger jsonrpc.FunctionLogger, params *lsp.InitializedParams) {
+func (ls *INOLanguageServer) InitializedNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.InitializedParams) {
 	logger.Logf("Notification is not propagated to clangd")
 }
 
@@ -962,18 +962,18 @@ func (ls *INOLanguageServer) ExitNotifFromIDE(logger jsonrpc.FunctionLogger) {
 	os.Exit(0)
 }
 
-func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.FunctionLogger, inoParam *lsp.DidOpenTextDocumentParams) {
+func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.FunctionLogger, ideParam *lsp.DidOpenTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
 	ls.triggerRebuild()
 
 	// Add the TextDocumentItem in the tracked files list
-	inoTextDocItem := inoParam.TextDocument
-	ls.trackedIDEDocs[inoTextDocItem.URI.AsPath().String()] = inoTextDocItem
+	ideTextDocItem := ideParam.TextDocument
+	ls.trackedIdeDocs[ideTextDocItem.URI.AsPath().String()] = ideTextDocItem
 
 	// If we are tracking a .ino...
-	if inoTextDocItem.URI.Ext() == ".ino" {
+	if ideTextDocItem.URI.Ext() == ".ino" {
 		ls.sketchTrackedFilesCount++
 		logger.Logf("Increasing .ino tracked files count to %d", ls.sketchTrackedFilesCount)
 
@@ -984,10 +984,10 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 		}
 	}
 
-	if cppItem, err := ls.ino2cppTextDocumentItem(logger, inoTextDocItem); err != nil {
+	if clangTextDocItem, err := ls.ino2cppTextDocumentItem(logger, ideTextDocItem); err != nil {
 		logger.Logf("Error: %s", err)
 	} else if err := ls.Clangd.conn.TextDocumentDidOpen(&lsp.DidOpenTextDocumentParams{
-		TextDocument: cppItem,
+		TextDocument: clangTextDocItem,
 	}); err != nil {
 		// Exit the process and trigger a restart by the client in case of a severe error
 		logger.Logf("Error sending notification to clangd server: %v", err)
@@ -996,32 +996,108 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 	}
 }
 
-func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.FunctionLogger, inoParams *lsp.DidChangeTextDocumentParams) {
+func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.DidChangeTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
 	ls.triggerRebuild()
 
-	logger.Logf("didChange(%s)", inoParams.TextDocument)
-	for _, change := range inoParams.ContentChanges {
+	logger.Logf("didChange(%s)", ideParams.TextDocument)
+	for _, change := range ideParams.ContentChanges {
 		logger.Logf("  > %s", change)
 	}
 
-	if cppParams, err := ls.didChange(logger, inoParams); err != nil {
+	// Clear all RangeLengths: it's a deprecated field and if the byte count is wrong the
+	// source text file will be unloaded from clangd without notice, leading to a "non-added
+	// document" error for all subsequent requests.
+	// https://github.com/clangd/clangd/issues/717#issuecomment-793220007
+	for i := range ideParams.ContentChanges {
+		ideParams.ContentChanges[i].RangeLength = nil
+	}
+
+	ideTextDocIdentifier := ideParams.TextDocument
+
+	// Apply the change to the tracked sketch file.
+	trackedIdeDocID := ideTextDocIdentifier.URI.AsPath().String()
+	if doc, ok := ls.trackedIdeDocs[trackedIdeDocID]; !ok {
+		logger.Logf("Error: %s", &UnknownURI{ideTextDocIdentifier.URI})
+		return
+	} else if updatedDoc, err := textedits.ApplyLSPTextDocumentContentChangeEvent(doc, ideParams); err != nil {
 		logger.Logf("Error: %s", err)
-	} else if cppParams == nil {
-		logger.Logf("Notification is not propagated to clangd")
+		return
 	} else {
-		logger.Logf("to Clang: didChange(%s@%d)", cppParams.TextDocument)
-		for _, change := range cppParams.ContentChanges {
-			logger.Logf("            > %s", change)
+		ls.trackedIdeDocs[trackedIdeDocID] = updatedDoc
+		logger.Logf("Tracked SKETCH file:----------+\n" + updatedDoc.Text + "\n----------------------")
+	}
+
+	// If the file is not part of a .ino flie forward the change as-is to clangd
+	var clangParams *lsp.DidChangeTextDocumentParams
+
+	if ideTextDocIdentifier.URI.Ext() != ".ino" {
+
+		clangTextDocIdentifier, err := ls.ide2ClangVersionedTextDocumentIdentifier(logger, ideTextDocIdentifier)
+		if err != nil {
+			logger.Logf("Error: %s", err)
+			return
 		}
-		if err := ls.Clangd.conn.TextDocumentDidChange(cppParams); err != nil {
-			// Exit the process and trigger a restart by the client in case of a severe error
-			logger.Logf("Connection error with clangd server: %v", err)
-			logger.Logf("Please restart the language server.")
-			ls.Close()
+		clangParams = &lsp.DidChangeTextDocumentParams{
+			TextDocument:   clangTextDocIdentifier,
+			ContentChanges: ideParams.ContentChanges,
 		}
+
+	} else {
+
+		// If changes are applied to a .ino file we increment the global .ino.cpp versioning
+		// for each increment of the single .ino file.
+
+		clangChanges := []lsp.TextDocumentContentChangeEvent{}
+		for _, ideChange := range ideParams.ContentChanges {
+			var clangChangeRange *lsp.Range
+			if ideChange.Range != nil {
+				clangURI, clangRange, err := ls.ide2ClangRange(logger, ideTextDocIdentifier.URI, *ideChange.Range)
+				if err != nil {
+					logger.Logf("Error: %s", err)
+					return
+				}
+				if !ls.clangURIRefersToIno(clangURI) {
+					logger.Logf("Error: change to .ino does not maps to a change in sketch.ino.cpp")
+					return
+				}
+				clangChangeRange = &clangRange
+
+				_ = ls.sketchMapper.ApplyTextChange(ideTextDocIdentifier.URI, ideChange)
+				ls.sketchMapper.DebugLogAll()
+			} else {
+				panic("full-text change in .ino not implemented")
+			}
+			clangChanges = append(clangChanges, lsp.TextDocumentContentChangeEvent{
+				Range:       clangChangeRange,
+				RangeLength: ideChange.RangeLength,
+				Text:        ideChange.Text,
+			})
+		}
+
+		// build a cpp equivalent didChange request
+		clangParams = &lsp.DidChangeTextDocumentParams{
+			ContentChanges: clangChanges,
+			TextDocument: lsp.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: lsp.TextDocumentIdentifier{
+					URI: lsp.NewDocumentURIFromPath(ls.buildSketchCpp),
+				},
+				Version: ls.sketchMapper.CppText.Version,
+			},
+		}
+	}
+
+	logger.Logf("to Clang: didChange(%s@%d)", clangParams.TextDocument)
+	for _, change := range clangParams.ContentChanges {
+		logger.Logf("            > %s", change)
+	}
+	if err := ls.Clangd.conn.TextDocumentDidChange(clangParams); err != nil {
+		// Exit the process and trigger a restart by the client in case of a severe error
+		logger.Logf("Connection error with clangd server: %v", err)
+		logger.Logf("Please restart the language server.")
+		ls.Close()
 	}
 }
 
@@ -1244,8 +1320,8 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 
 func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
 	inoIdentifier := inoDidClose.TextDocument
-	if _, exist := ls.trackedIDEDocs[inoIdentifier.URI.AsPath().String()]; exist {
-		delete(ls.trackedIDEDocs, inoIdentifier.URI.AsPath().String())
+	if _, exist := ls.trackedIdeDocs[inoIdentifier.URI.AsPath().String()]; exist {
+		delete(ls.trackedIdeDocs, inoIdentifier.URI.AsPath().String())
 	} else {
 		logger.Logf("    didClose of untracked document: %s", inoIdentifier.URI)
 		return nil, &UnknownURI{inoIdentifier.URI}
@@ -1282,85 +1358,11 @@ func (ls *INOLanguageServer) ino2cppTextDocumentItem(logger jsonrpc.FunctionLogg
 	} else {
 		cppItem.LanguageID = inoItem.LanguageID
 		inoPath := inoItem.URI.AsPath().String()
-		cppItem.Text = ls.trackedIDEDocs[inoPath].Text
-		cppItem.Version = ls.trackedIDEDocs[inoPath].Version
+		cppItem.Text = ls.trackedIdeDocs[inoPath].Text
+		cppItem.Version = ls.trackedIdeDocs[inoPath].Version
 	}
 
 	return cppItem, nil
-}
-
-func (ls *INOLanguageServer) didChange(logger jsonrpc.FunctionLogger, inoDidChangeParams *lsp.DidChangeTextDocumentParams) (*lsp.DidChangeTextDocumentParams, error) {
-	// Clear all RangeLengths: it's a deprecated field and if the byte count is wrong the
-	// source text file will be unloaded from clangd without notice, leading to a "non-added
-	// document" error for all subsequent requests.
-	// https://github.com/clangd/clangd/issues/717#issuecomment-793220007
-	for i := range inoDidChangeParams.ContentChanges {
-		inoDidChangeParams.ContentChanges[i].RangeLength = nil
-	}
-
-	inoDoc := inoDidChangeParams.TextDocument
-
-	// Apply the change to the tracked sketch file.
-	trackedInoID := inoDoc.URI.AsPath().String()
-	if doc, ok := ls.trackedIDEDocs[trackedInoID]; !ok {
-		return nil, &UnknownURI{inoDoc.URI}
-	} else if updatedDoc, err := textedits.ApplyLSPTextDocumentContentChangeEvent(doc, inoDidChangeParams); err != nil {
-		return nil, err
-	} else {
-		ls.trackedIDEDocs[trackedInoID] = updatedDoc
-	}
-
-	logger.Logf("Tracked SKETCH file:----------+\n" + ls.trackedIDEDocs[trackedInoID].Text + "\n----------------------")
-
-	// If the file is not part of a .ino flie forward the change as-is to clangd
-	if inoDoc.URI.Ext() != ".ino" {
-		if cppDoc, err := ls.ino2cppVersionedTextDocumentIdentifier(logger, inoDidChangeParams.TextDocument); err != nil {
-			return nil, err
-		} else {
-			cppDidChangeParams := *inoDidChangeParams
-			cppDidChangeParams.TextDocument = cppDoc
-			return &cppDidChangeParams, nil
-		}
-	}
-
-	// If changes are applied to a .ino file we increment the global .ino.cpp versioning
-	// for each increment of the single .ino file.
-
-	cppChanges := []lsp.TextDocumentContentChangeEvent{}
-	for _, inoChange := range inoDidChangeParams.ContentChanges {
-		cppChangeRange, ok := ls.sketchMapper.InoToCppLSPRangeOk(inoDoc.URI, *inoChange.Range)
-		if !ok {
-			return nil, errors.Errorf("invalid change range %s:%s", inoDoc.URI, inoChange.Range)
-		}
-
-		_ = ls.sketchMapper.ApplyTextChange(inoDoc.URI, inoChange)
-
-		ls.sketchMapper.DebugLogAll()
-
-		cppChanges = append(cppChanges, lsp.TextDocumentContentChangeEvent{
-			Range:       &cppChangeRange,
-			RangeLength: inoChange.RangeLength,
-			Text:        inoChange.Text,
-		})
-	}
-
-	// build a cpp equivalent didChange request
-	return &lsp.DidChangeTextDocumentParams{
-		ContentChanges: cppChanges,
-		TextDocument: lsp.VersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: lsp.TextDocumentIdentifier{
-				URI: lsp.NewDocumentURIFromPath(ls.buildSketchCpp),
-			},
-			Version: ls.sketchMapper.CppText.Version,
-		},
-	}, nil
-}
-
-func (ls *INOLanguageServer) ino2cppVersionedTextDocumentIdentifier(logger jsonrpc.FunctionLogger, doc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
-	cppURI, err := ls.ide2ClangDocumentURI(logger, doc.URI)
-	res := doc
-	res.URI = cppURI
-	return res, err
 }
 
 func (ls *INOLanguageServer) clang2IdeCodeAction(logger jsonrpc.FunctionLogger, clangCodeAction lsp.CodeAction, origIdeURI lsp.DocumentURI) *lsp.CodeAction {

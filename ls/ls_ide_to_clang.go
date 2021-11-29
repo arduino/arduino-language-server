@@ -12,11 +12,11 @@ func (ls *INOLanguageServer) idePathToIdeURI(logger jsonrpc.FunctionLogger, inoP
 	if inoPath == sourcemapper.NotIno.File {
 		return sourcemapper.NotInoURI, nil
 	}
-	doc, ok := ls.trackedIDEDocs[inoPath]
+	doc, ok := ls.trackedIdeDocs[inoPath]
 	if !ok {
 		logger.Logf("    !!! Unresolved .ino path: %s", inoPath)
 		logger.Logf("    !!! Known doc paths are:")
-		for p := range ls.trackedIDEDocs {
+		for p := range ls.trackedIdeDocs {
 			logger.Logf("    !!! > %s", p)
 		}
 		uri := lsp.NewDocumentURI(inoPath)
@@ -98,4 +98,12 @@ func (ls *INOLanguageServer) ide2ClangRange(logger jsonrpc.FunctionLogger, ideUR
 		}
 	}
 	return clangURI, clangRange, nil
+}
+
+func (ls *INOLanguageServer) ide2ClangVersionedTextDocumentIdentifier(logger jsonrpc.FunctionLogger, ideVersionedDoc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
+	clangURI, err := ls.ide2ClangDocumentURI(logger, ideVersionedDoc.URI)
+	return lsp.VersionedTextDocumentIdentifier{
+		TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: clangURI},
+		Version:                ideVersionedDoc.Version,
+	}, err
 }

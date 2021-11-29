@@ -165,7 +165,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 		Overrides map[string]string `json:"overrides"`
 	}
 	data := overridesFile{Overrides: map[string]string{}}
-	for uri, trackedFile := range ls.trackedIDEDocs {
+	for uri, trackedFile := range ls.trackedIdeDocs {
 		rel, err := paths.New(uri).RelFrom(sketchRoot)
 		if err != nil {
 			ls.readUnlock(logger)
