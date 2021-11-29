@@ -1030,71 +1030,62 @@ func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.Fu
 		logger.Logf("Tracked SKETCH file:----------+\n" + updatedDoc.Text + "\n----------------------")
 	}
 
-	// If the file is not part of a .ino flie forward the change as-is to clangd
+	clangChanges := []lsp.TextDocumentContentChangeEvent{}
+	var clangURI *lsp.DocumentURI
 	var clangParams *lsp.DidChangeTextDocumentParams
+	for _, ideChange := range ideParams.ContentChanges {
+		if ideChange.Range == nil {
+			panic("full-text change not implemented")
+		}
 
-	if ideTextDocIdentifier.URI.Ext() != ".ino" {
-
-		clangTextDocIdentifier, err := ls.ide2ClangVersionedTextDocumentIdentifier(logger, ideTextDocIdentifier)
+		clangRangeURI, clangRange, err := ls.ide2ClangRange(logger, ideTextDocIdentifier.URI, *ideChange.Range)
 		if err != nil {
 			logger.Logf("Error: %s", err)
 			return
 		}
-		clangParams = &lsp.DidChangeTextDocumentParams{
-			TextDocument:   clangTextDocIdentifier,
-			ContentChanges: ideParams.ContentChanges,
+
+		// all changes should refer to the same URI
+		if clangURI == nil {
+			clangURI = &clangRangeURI
+		} else if *clangURI != clangRangeURI {
+			logger.Logf("Error: change maps to %s URI, but %s was expected", clangRangeURI, *clangURI)
+			return
 		}
 
-	} else {
-
-		// If changes are applied to a .ino file we increment the global .ino.cpp versioning
-		// for each increment of the single .ino file.
-
-		clangChanges := []lsp.TextDocumentContentChangeEvent{}
-		for _, ideChange := range ideParams.ContentChanges {
-			var clangChangeRange *lsp.Range
-			if ideChange.Range != nil {
-				clangURI, clangRange, err := ls.ide2ClangRange(logger, ideTextDocIdentifier.URI, *ideChange.Range)
-				if err != nil {
-					logger.Logf("Error: %s", err)
-					return
-				}
-				if !ls.clangURIRefersToIno(clangURI) {
-					logger.Logf("Error: change to .ino does not maps to a change in sketch.ino.cpp")
-					return
-				}
-				clangChangeRange = &clangRange
-
-				_ = ls.sketchMapper.ApplyTextChange(ideTextDocIdentifier.URI, ideChange)
-				ls.sketchMapper.DebugLogAll()
-			} else {
-				panic("full-text change in .ino not implemented")
-			}
-			clangChanges = append(clangChanges, lsp.TextDocumentContentChangeEvent{
-				Range:       clangChangeRange,
-				RangeLength: ideChange.RangeLength,
-				Text:        ideChange.Text,
-			})
+		// If we are applying changes to a .ino, update the sketchmapper
+		if ideTextDocIdentifier.URI.Ext() == ".ino" {
+			_ = ls.sketchMapper.ApplyTextChange(ideTextDocIdentifier.URI, ideChange)
 		}
 
-		// build a cpp equivalent didChange request
-		clangParams = &lsp.DidChangeTextDocumentParams{
-			ContentChanges: clangChanges,
-			TextDocument: lsp.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: lsp.TextDocumentIdentifier{
-					URI: lsp.NewDocumentURIFromPath(ls.buildSketchCpp),
-				},
-				Version: ls.sketchMapper.CppText.Version,
-			},
-		}
+		clangChanges = append(clangChanges, lsp.TextDocumentContentChangeEvent{
+			Range:       &clangRange,
+			RangeLength: ideChange.RangeLength,
+			Text:        ideChange.Text,
+		})
 	}
 
-	logger.Logf("to Clang: didChange(%s@%d)", clangParams.TextDocument)
+	clangVersion := ideTextDocIdentifier.Version
+	if ideTextDocIdentifier.URI.Ext() == ".ino" {
+		// If changes are applied to a .ino file we increment the global .ino.cpp versioning
+		// for each increment of the single .ino file.
+		clangVersion = ls.sketchMapper.CppText.Version
+		ls.sketchMapper.DebugLogAll()
+	}
+
+	// build a cpp equivalent didChange request
+	clangParams = &lsp.DidChangeTextDocumentParams{
+		TextDocument: lsp.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: *clangURI},
+			Version:                clangVersion,
+		},
+		ContentChanges: clangChanges,
+	}
+
+	logger.Logf("to Clang: didChange(%s)", clangParams.TextDocument)
 	for _, change := range clangParams.ContentChanges {
 		logger.Logf("            > %s", change)
 	}
 	if err := ls.Clangd.conn.TextDocumentDidChange(clangParams); err != nil {
-		// Exit the process and trigger a restart by the client in case of a severe error
 		logger.Logf("Connection error with clangd server: %v", err)
 		logger.Logf("Please restart the language server.")
 		ls.Close()
