@@ -217,7 +217,7 @@ func (server *IDELSPServer) Exit(logger jsonrpc.FunctionLogger) {
 }
 
 func (server *IDELSPServer) SetTrace(logger jsonrpc.FunctionLogger, params *lsp.SetTraceParams) {
-	panic("unimplemented")
+	server.ls.SetTraceNotifFromIDE(logger, params)
 }
 
 func (server *IDELSPServer) WindowWorkDoneProgressCancel(logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCancelParams) {

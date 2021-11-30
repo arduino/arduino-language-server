@@ -1223,6 +1223,11 @@ func (ls *INOLanguageServer) WindowWorkDoneProgressCreateReqFromClangd(ctx conte
 	return nil
 }
 
+func (ls *INOLanguageServer) SetTraceNotifFromIDE(logger jsonrpc.FunctionLogger, params *lsp.SetTraceParams) {
+	logger.Logf("Notification level set to: %s", params.Value)
+	ls.Clangd.conn.SetTrace(params)
+}
+
 // Close closes all the json-rpc connections and clean-up temp folders.
 func (ls *INOLanguageServer) Close() {
 	if ls.Clangd != nil {
