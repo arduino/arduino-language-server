@@ -61,6 +61,45 @@ func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.Functio
 	return ideURI, clangRange, false, err
 }
 
+func (ls *INOLanguageServer) clang2IdeDocumentURI(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI) (lsp.DocumentURI, error) {
+	// Sketchbook/Sketch/Sketch.ino      <-> build-path/sketch/Sketch.ino.cpp
+	// Sketchbook/Sketch/AnotherTab.ino  <-> build-path/sketch/Sketch.ino.cpp  (different section from above)
+	if ls.clangURIRefersToIno(clangURI) {
+		// the URI may refer to any .ino, without a range reference pick the first tracked .ino
+		for _, ideDoc := range ls.trackedIdeDocs {
+			if ideDoc.URI.Ext() == ".ino" {
+				logger.Logf("%s -> %s", clangURI, ideDoc.URI)
+				return ideDoc.URI, nil
+			}
+		}
+		return lsp.DocumentURI{}, &UnknownURI{URI: clangURI}
+	}
+
+	// /another/global/path/to/source.cpp <-> /another/global/path/to/source.cpp
+	clangPath := clangURI.AsPath()
+	inside, err := clangPath.IsInsideDir(ls.buildSketchRoot)
+	if err != nil {
+		logger.Logf("ERROR: could not determine if '%s' is inside '%s'", clangURI, ls.buildSketchRoot)
+		return lsp.DocumentURI{}, err
+	}
+	if !inside {
+		ideURI := clangURI
+		logger.Logf("%s -> %s", clangURI, ideURI)
+		return ideURI, nil
+	}
+
+	// Sketchbook/Sketch/AnotherFile.cpp <-> build-path/sketch/AnotherFile.cpp
+	rel, err := ls.buildSketchRoot.RelTo(clangPath)
+	if err != nil {
+		logger.Logf("ERROR: could not transform '%s' into a relative path on '%s': %s", clangURI, ls.buildSketchRoot, err)
+		return lsp.DocumentURI{}, err
+	}
+	idePath := ls.sketchRoot.JoinPath(rel).String()
+	ideURI, err := ls.idePathToIdeURI(logger, idePath)
+	logger.Logf("%s -> %s", clangURI, ideURI)
+	return ideURI, err
+}
+
 func (ls *INOLanguageServer) clang2IdeDocumentHighlight(logger jsonrpc.FunctionLogger, clangHighlight lsp.DocumentHighlight, cppURI lsp.DocumentURI) (lsp.DocumentHighlight, bool, error) {
 	_, ideRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, clangHighlight.Range)
 	if err != nil || inPreprocessed {
@@ -77,6 +116,21 @@ func (ls *INOLanguageServer) clang2IdeDiagnostics(logger jsonrpc.FunctionLogger,
 	// so we collect all of the into a map.
 	allIdeDiagsParams := map[lsp.DocumentURI]*lsp.PublishDiagnosticsParams{}
 
+	// Convert empty diagnostic directly (otherwise they will be missed from the next loop)
+	if len(clangDiagsParams.Diagnostics) == 0 {
+		ideURI, err := ls.clang2IdeDocumentURI(logger, clangDiagsParams.URI)
+		if err != nil {
+			return nil, err
+		}
+		allIdeDiagsParams[ideURI] = &lsp.PublishDiagnosticsParams{
+			URI:         ideURI,
+			Version:     clangDiagsParams.Version,
+			Diagnostics: []lsp.Diagnostic{},
+		}
+		return allIdeDiagsParams, nil
+	}
+
+	// Collect all diagnostics into different sets
 	for _, clangDiagnostic := range clangDiagsParams.Diagnostics {
 		ideURI, ideDiagnostic, inPreprocessed, err := ls.clang2IdeDiagnostic(logger, clangDiagsParams.URI, clangDiagnostic)
 		if err != nil {
