@@ -845,8 +845,8 @@ func (ls *INOLanguageServer) TextDocumentCodeActionReqFromIDE(ctx context.Contex
 }
 
 func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
-	ls.readLock(logger, true)
-	defer ls.readUnlock(logger)
+	ls.writeLock(logger, true)
+	defer ls.writeUnlock(logger)
 
 	ideTextDocument := ideParams.TextDocument
 	ideURI := ideTextDocument.URI
@@ -900,8 +900,8 @@ func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Contex
 }
 
 func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentRangeFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
-	ls.readLock(logger, true)
-	defer ls.readUnlock(logger)
+	ls.writeLock(logger, true)
+	defer ls.writeUnlock(logger)
 
 	ideURI := ideParams.TextDocument.URI
 	clangURI, clangRange, err := ls.ide2ClangRange(logger, ideURI, ideParams.Range)
