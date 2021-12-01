@@ -984,9 +984,29 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 		}
 	}
 
-	if clangTextDocItem, err := ls.ino2cppTextDocumentItem(logger, ideTextDocItem); err != nil {
+	clangURI, _, err := ls.ide2ClangDocumentURI(logger, ideTextDocItem.URI)
+	if err != nil {
 		logger.Logf("Error: %s", err)
-	} else if err := ls.Clangd.conn.TextDocumentDidOpen(&lsp.DidOpenTextDocumentParams{
+		return
+	}
+	clangTextDocItem := lsp.TextDocumentItem{
+		URI: clangURI,
+	}
+	if ls.clangURIRefersToIno(clangURI) {
+		clangTextDocItem.LanguageID = "cpp"
+		clangTextDocItem.Text = ls.sketchMapper.CppText.Text
+		clangTextDocItem.Version = ls.sketchMapper.CppText.Version
+	} else {
+		clangText, err := clangURI.AsPath().ReadFile()
+		if err != nil {
+			logger.Logf("Error opening sketch file %s: %s", clangURI.AsPath(), err)
+		}
+		clangTextDocItem.LanguageID = ideTextDocItem.LanguageID
+		clangTextDocItem.Version = ideTextDocItem.Version
+		clangTextDocItem.Text = string(clangText)
+	}
+
+	if err := ls.Clangd.conn.TextDocumentDidOpen(&lsp.DidOpenTextDocumentParams{
 		TextDocument: clangTextDocItem,
 	}); err != nil {
 		// Exit the process and trigger a restart by the client in case of a severe error
@@ -1092,47 +1112,32 @@ func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.Fu
 	}
 }
 
-func (ls *INOLanguageServer) TextDocumentDidSaveNotifFromIDE(logger jsonrpc.FunctionLogger, inoParams *lsp.DidSaveTextDocumentParams) {
+func (ls *INOLanguageServer) TextDocumentDidSaveNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.DidSaveTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
-	ls.triggerRebuild()
+	// clangd looks in the build directory (where a copy of the preprocessed sketch resides)
+	// so we will not forward notification on saves in the sketch folder.
+	logger.Logf("notification is not forwarded to clang")
 
-	logger.Logf("didSave(%s) hasText=%v", inoParams.TextDocument, inoParams.Text != "")
-	if cppTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, inoParams.TextDocument); err != nil {
-		logger.Logf("--E Error: %s", err)
-	} else if cppTextDocument.URI.AsPath().EquivalentTo(ls.buildSketchCpp) {
-		logger.Logf("    didSave(%s) equals %s", cppTextDocument, ls.buildSketchCpp)
-		logger.Logf("    the notification will be not forwarded to clangd")
-	} else {
-		logger.Logf("LS --> CL NOTIF didSave(%s)", cppTextDocument)
-		if err := ls.Clangd.conn.TextDocumentDidSave(&lsp.DidSaveTextDocumentParams{
-			TextDocument: cppTextDocument,
-			Text:         inoParams.Text,
-		}); err != nil {
-			// Exit the process and trigger a restart by the client in case of a severe error
-			logger.Logf("Connection error with clangd server: %v", err)
-			logger.Logf("Please restart the language server.")
-			ls.Close()
-		}
-	}
+	ls.triggerRebuild()
 }
 
-func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.FunctionLogger, inoParams *lsp.DidCloseTextDocumentParams) {
+func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.DidCloseTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
 	ls.triggerRebuild()
 
-	logger.Logf("didClose(%s)", inoParams.TextDocument)
+	logger.Logf("didClose(%s)", ideParams.TextDocument)
 
-	if cppParams, err := ls.didClose(logger, inoParams); err != nil {
+	if clangParams, err := ls.didClose(logger, ideParams); err != nil {
 		logger.Logf("--E Error: %s", err)
-	} else if cppParams == nil {
+	} else if clangParams == nil {
 		logger.Logf("--X Notification is not propagated to clangd")
 	} else {
-		logger.Logf("--> CL NOTIF didClose(%s)", cppParams.TextDocument)
-		if err := ls.Clangd.conn.TextDocumentDidClose(cppParams); err != nil {
+		logger.Logf("--> CL NOTIF didClose(%s)", clangParams.TextDocument)
+		if err := ls.Clangd.conn.TextDocumentDidClose(clangParams); err != nil {
 			// Exit the process and trigger a restart by the client in case of a severe error
 			logger.Logf("Error sending notification to clangd server: %v", err)
 			logger.Logf("Please restart the language server.")
@@ -1314,8 +1319,8 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 	}
 }
 
-func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
-	inoIdentifier := inoDidClose.TextDocument
+func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, ideParams *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
+	inoIdentifier := ideParams.TextDocument
 	if _, exist := ls.trackedIdeDocs[inoIdentifier.URI.AsPath().String()]; exist {
 		delete(ls.trackedIdeDocs, inoIdentifier.URI.AsPath().String())
 	} else {
@@ -1338,27 +1343,6 @@ func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, inoDidClose
 	return &lsp.DidCloseTextDocumentParams{
 		TextDocument: cppIdentifier,
 	}, err
-}
-
-func (ls *INOLanguageServer) ino2cppTextDocumentItem(logger jsonrpc.FunctionLogger, inoItem lsp.TextDocumentItem) (cppItem lsp.TextDocumentItem, err error) {
-	cppURI, err := ls.ide2ClangDocumentURI(logger, inoItem.URI)
-	if err != nil {
-		return cppItem, err
-	}
-	cppItem.URI = cppURI
-
-	if cppURI.AsPath().EquivalentTo(ls.buildSketchCpp) {
-		cppItem.LanguageID = "cpp"
-		cppItem.Text = ls.sketchMapper.CppText.Text
-		cppItem.Version = ls.sketchMapper.CppText.Version
-	} else {
-		cppItem.LanguageID = inoItem.LanguageID
-		inoPath := inoItem.URI.AsPath().String()
-		cppItem.Text = ls.trackedIdeDocs[inoPath].Text
-		cppItem.Version = ls.trackedIdeDocs[inoPath].Version
-	}
-
-	return cppItem, nil
 }
 
 func (ls *INOLanguageServer) clang2IdeCodeAction(logger jsonrpc.FunctionLogger, clangCodeAction lsp.CodeAction, origIdeURI lsp.DocumentURI) *lsp.CodeAction {

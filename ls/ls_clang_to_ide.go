@@ -49,7 +49,7 @@ func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.Functio
 		return clangURI, clangRange, false, nil
 	}
 
-	// Sketchbook/Sketch/AnotherFile.cpp <-> build-path/sketch/AnotherFile.cpp (same range)
+	// Sketchbook/Sketch/AnotherFile.cpp <-> build-path/sketch/AnotherFile.cpp (one line offset)
 	rel, err := ls.buildSketchRoot.RelTo(clangPath)
 	if err != nil {
 		logger.Logf("ERROR: could not transform '%s' into a relative path on '%s': %s", clangURI, ls.buildSketchRoot, err)
@@ -57,8 +57,14 @@ func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.Functio
 	}
 	idePath := ls.sketchRoot.JoinPath(rel).String()
 	ideURI, err := ls.idePathToIdeURI(logger, idePath)
+	if ideRange.End.Line > 0 {
+		ideRange.End.Line--
+	}
+	if ideRange.Start.Line > 0 {
+		ideRange.Start.Line--
+	}
 	logger.Logf("Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
-	return ideURI, clangRange, false, err
+	return ideURI, ideRange, false, err
 }
 
 func (ls *INOLanguageServer) clang2IdeDocumentURI(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI) (lsp.DocumentURI, error) {
