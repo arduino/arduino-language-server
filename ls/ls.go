@@ -1047,7 +1047,7 @@ func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.Fu
 		return
 	} else {
 		ls.trackedIdeDocs[trackedIdeDocID] = updatedDoc
-		logger.Logf("Tracked SKETCH file:----------+\n" + updatedDoc.Text + "\n----------------------")
+		logger.Logf("-----Tracked SKETCH file-----\n" + updatedDoc.Text + "\n-----------------------------")
 	}
 
 	clangChanges := []lsp.TextDocumentContentChangeEvent{}
@@ -1129,20 +1129,40 @@ func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.Fun
 
 	ls.triggerRebuild()
 
-	logger.Logf("didClose(%s)", ideParams.TextDocument)
-
-	if clangParams, err := ls.didClose(logger, ideParams); err != nil {
-		logger.Logf("--E Error: %s", err)
-	} else if clangParams == nil {
-		logger.Logf("--X Notification is not propagated to clangd")
+	inoIdentifier := ideParams.TextDocument
+	if _, exist := ls.trackedIdeDocs[inoIdentifier.URI.AsPath().String()]; exist {
+		delete(ls.trackedIdeDocs, inoIdentifier.URI.AsPath().String())
 	} else {
-		logger.Logf("--> CL NOTIF didClose(%s)", clangParams.TextDocument)
-		if err := ls.Clangd.conn.TextDocumentDidClose(clangParams); err != nil {
-			// Exit the process and trigger a restart by the client in case of a severe error
-			logger.Logf("Error sending notification to clangd server: %v", err)
-			logger.Logf("Please restart the language server.")
-			ls.Close()
+		logger.Logf("didClose of untracked document: %s", inoIdentifier.URI)
+		return
+	}
+
+	// If we are tracking a .ino...
+	if inoIdentifier.URI.Ext() == ".ino" {
+		ls.sketchTrackedFilesCount--
+		logger.Logf("decreasing .ino tracked files count: %d", ls.sketchTrackedFilesCount)
+
+		// notify clang that sketch.cpp.ino has been closed only once all .ino are closed
+		if ls.sketchTrackedFilesCount != 0 {
+			logger.Logf("--X Notification is not propagated to clangd")
+			return
 		}
+	}
+
+	clangIdentifier, err := ls.ide2ClangTextDocumentIdentifier(logger, inoIdentifier)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+	}
+	clangParams := &lsp.DidCloseTextDocumentParams{
+		TextDocument: clangIdentifier,
+	}
+
+	logger.Logf("--> didClose(%s)", clangParams.TextDocument)
+	if err := ls.Clangd.conn.TextDocumentDidClose(clangParams); err != nil {
+		// Exit the process and trigger a restart by the client in case of a severe error
+		logger.Logf("Error sending notification to clangd server: %v", err)
+		logger.Logf("Please restart the language server.")
+		ls.Close()
 	}
 }
 
@@ -1317,32 +1337,6 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 		logger.Logf("Arduino Data Dir -> %s", res.Directories.Data)
 		return paths.New(res.Directories.Data), nil
 	}
-}
-
-func (ls *INOLanguageServer) didClose(logger jsonrpc.FunctionLogger, ideParams *lsp.DidCloseTextDocumentParams) (*lsp.DidCloseTextDocumentParams, error) {
-	inoIdentifier := ideParams.TextDocument
-	if _, exist := ls.trackedIdeDocs[inoIdentifier.URI.AsPath().String()]; exist {
-		delete(ls.trackedIdeDocs, inoIdentifier.URI.AsPath().String())
-	} else {
-		logger.Logf("    didClose of untracked document: %s", inoIdentifier.URI)
-		return nil, &UnknownURI{inoIdentifier.URI}
-	}
-
-	// If we are tracking a .ino...
-	if inoIdentifier.URI.Ext() == ".ino" {
-		ls.sketchTrackedFilesCount--
-		logger.Logf("    decreasing .ino tracked files count: %d", ls.sketchTrackedFilesCount)
-
-		// notify clang that sketch.cpp.ino has been closed only once all .ino are closed
-		if ls.sketchTrackedFilesCount != 0 {
-			return nil, nil
-		}
-	}
-
-	cppIdentifier, err := ls.ide2ClangTextDocumentIdentifier(logger, inoIdentifier)
-	return &lsp.DidCloseTextDocumentParams{
-		TextDocument: cppIdentifier,
-	}, err
 }
 
 func (ls *INOLanguageServer) clang2IdeCodeAction(logger jsonrpc.FunctionLogger, clangCodeAction lsp.CodeAction, origIdeURI lsp.DocumentURI) *lsp.CodeAction {
