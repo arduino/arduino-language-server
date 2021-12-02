@@ -177,7 +177,14 @@ func (s *SketchMapper) regeneratehMapping() {
 			sourceFile = paths.New(unquoteCppString(tokens[2])).Canonical().String()
 			s.cppToIno[targetLine] = NotIno
 		} else if sourceFile != "" {
-			s.mapLine(sourceFile, sourceLine, targetLine)
+			// Sometimes the Arduino preprocessor fails to interpret correctly the code
+			// and may report a "#line 0" directive leading to a negative sourceLine.
+			// In this rare cases just interpret the source line as a NotIno line.
+			if sourceLine >= 0 {
+				s.mapLine(sourceFile, sourceLine, targetLine)
+			} else {
+				s.cppToIno[targetLine] = NotIno
+			}
 			sourceLine++
 		} else {
 			s.cppToIno[targetLine] = NotIno

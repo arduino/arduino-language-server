@@ -35,7 +35,7 @@ func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.Functio
 		if inPreprocessed {
 			logger.Logf("Range is in PREPROCESSED section of the sketch")
 		}
-		logger.Logf("Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
+		logger.Logf("Range: %s:%s -> %s:%s (.ino)", clangURI, clangRange, ideURI, ideRange)
 		return ideURI, ideRange, inPreprocessed, err
 	}
 
@@ -49,7 +49,7 @@ func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.Functio
 	}
 	if !inside {
 		ideURI := clangURI
-		logger.Logf("Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
+		logger.Logf("Range: %s:%s -> %s:%s (ext file)", clangURI, clangRange, ideURI, ideRange)
 		return clangURI, clangRange, false, nil
 	}
 
@@ -67,7 +67,7 @@ func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.Functio
 	if ideRange.Start.Line > 0 {
 		ideRange.Start.Line--
 	}
-	logger.Logf("Range: %s:%s -> %s:%s", clangURI, clangRange, ideURI, ideRange)
+	logger.Logf("Range: %s:%s -> %s:%s (.cpp/.h)", clangURI, clangRange, ideURI, ideRange)
 	return ideURI, ideRange, false, err
 }
 
