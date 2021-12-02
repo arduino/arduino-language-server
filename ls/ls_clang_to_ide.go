@@ -8,6 +8,10 @@ import (
 	"go.bug.st/lsp/jsonrpc"
 )
 
+func (ls *INOLanguageServer) clangURIRefersToIno(clangURI lsp.DocumentURI) bool {
+	return clangURI.AsPath().EquivalentTo(ls.buildSketchCpp)
+}
+
 func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangRange lsp.Range) (lsp.DocumentURI, lsp.Range, bool, error) {
 	// Sketchbook/Sketch/Sketch.ino      <-> build-path/sketch/Sketch.ino.cpp
 	// Sketchbook/Sketch/AnotherTab.ino  <-> build-path/sketch/Sketch.ino.cpp  (different section from above)

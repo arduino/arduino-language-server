@@ -117,3 +117,63 @@ func (ls *INOLanguageServer) ide2ClangVersionedTextDocumentIdentifier(logger jso
 		Version:                ideVersionedDoc.Version,
 	}, err
 }
+
+func (ls *INOLanguageServer) ide2ClangDiagnosticRelatedInformationArray(logger jsonrpc.FunctionLogger, ideInfos []lsp.DiagnosticRelatedInformation) ([]lsp.DiagnosticRelatedInformation, error) {
+	clangInfos := []lsp.DiagnosticRelatedInformation{}
+	for _, ideInfo := range ideInfos {
+		clangLocation, err := ls.ide2ClangLocation(logger, ideInfo.Location)
+		if err != nil {
+			return nil, err
+		}
+		clangInfos = append(clangInfos, lsp.DiagnosticRelatedInformation{
+			Message:  ideInfo.Message,
+			Location: clangLocation,
+		})
+	}
+	return clangInfos, nil
+}
+
+func (ls *INOLanguageServer) ide2ClangLocation(logger jsonrpc.FunctionLogger, ideLocation lsp.Location) (lsp.Location, error) {
+	clangURI, clangRange, err := ls.ide2ClangRange(logger, ideLocation.URI, ideLocation.Range)
+	return lsp.Location{
+		URI:   clangURI,
+		Range: clangRange,
+	}, err
+}
+
+func (ls *INOLanguageServer) ide2ClangDiagnostic(logger jsonrpc.FunctionLogger, ideURI lsp.DocumentURI, ideDiag lsp.Diagnostic) (lsp.DocumentURI, lsp.Diagnostic, error) {
+	clangURI, clangRange, err := ls.ide2ClangRange(logger, ideURI, ideDiag.Range)
+	if err != nil {
+		return lsp.DocumentURI{}, lsp.Diagnostic{}, err
+	}
+	clangDiagRelatedInfo, err := ls.ide2ClangDiagnosticRelatedInformationArray(logger, ideDiag.RelatedInformation)
+	if err != nil {
+		return lsp.DocumentURI{}, lsp.Diagnostic{}, err
+	}
+	return clangURI, lsp.Diagnostic{
+		Range:              clangRange,
+		RelatedInformation: clangDiagRelatedInfo,
+		Severity:           ideDiag.Severity,
+		Code:               ideDiag.Code,
+		CodeDescription:    ideDiag.CodeDescription,
+		Source:             ideDiag.Source,
+		Message:            ideDiag.Message,
+		Tags:               ideDiag.Tags,
+		Data:               ideDiag.Data,
+	}, nil
+}
+
+func (ls *INOLanguageServer) ide2ClangCodeActionContext(logger jsonrpc.FunctionLogger, ideURI lsp.DocumentURI, ideContext lsp.CodeActionContext) (lsp.CodeActionContext, error) {
+	clangDiagnostics := []lsp.Diagnostic{}
+	for _, ideDiag := range ideContext.Diagnostics {
+		_, clangDiag, err := ls.ide2ClangDiagnostic(logger, ideURI, ideDiag)
+		if err != nil {
+			return lsp.CodeActionContext{}, err
+		}
+		clangDiagnostics = append(clangDiagnostics, clangDiag)
+	}
+	return lsp.CodeActionContext{
+		Diagnostics: clangDiagnostics,
+		Only:        ideContext.Only,
+	}, nil
+}

@@ -512,10 +512,6 @@ func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, lo
 	return &ideResp, nil
 }
 
-func (ls *INOLanguageServer) clangURIRefersToIno(clangURI lsp.DocumentURI) bool {
-	return clangURI.AsPath().EquivalentTo(ls.buildSketchCpp)
-}
-
 func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.SignatureHelpParams) (*lsp.SignatureHelp, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -782,24 +778,23 @@ func (ls *INOLanguageServer) TextDocumentCodeActionReqFromIDE(ctx context.Contex
 	ideURI := ideTextDocument.URI
 	logger.Logf("--> codeAction(%s:%s)", ideTextDocument, ideParams.Range.Start)
 
-	cppTextDocument, err := ls.ide2ClangTextDocumentIdentifier(logger, ideTextDocument)
+	clangURI, clangRange, err := ls.ide2ClangRange(logger, ideURI, ideParams.Range)
 	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
 
+	clangContext, err := ls.ide2ClangCodeActionContext(logger, ideURI, ideParams.Context)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	}
 	clangParams := &lsp.CodeActionParams{
-		TextDocument:           cppTextDocument,
 		WorkDoneProgressParams: ideParams.WorkDoneProgressParams,
 		PartialResultParams:    ideParams.PartialResultParams,
-		Range:                  ideParams.Range,
-		Context:                ideParams.Context,
-	}
-	if cppTextDocument.URI.AsPath().EquivalentTo(ls.buildSketchCpp) {
-		clangParams.Range = ls.sketchMapper.InoToCppLSPRange(ideURI, ideParams.Range)
-		for i, inoDiag := range ideParams.Context.Diagnostics {
-			clangParams.Context.Diagnostics[i].Range = ls.sketchMapper.InoToCppLSPRange(ideURI, inoDiag.Range)
-		}
+		TextDocument:           lsp.TextDocumentIdentifier{URI: clangURI},
+		Range:                  clangRange,
+		Context:                clangContext,
 	}
 	logger.Logf("    --> codeAction(%s:%s)", clangParams.TextDocument, ideParams.Range.Start)
 
