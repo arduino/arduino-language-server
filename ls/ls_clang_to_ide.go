@@ -12,6 +12,11 @@ func (ls *INOLanguageServer) clangURIRefersToIno(clangURI lsp.DocumentURI) bool 
 	return clangURI.AsPath().EquivalentTo(ls.buildSketchCpp)
 }
 
+// Convert Range and DocumentURI from Clang to IDE.
+// Returns:
+// - The IDE DocumentURI and Range
+// - a boolean that is true if the clang range is in the preprocessed area of the sketch
+// - an error
 func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangRange lsp.Range) (lsp.DocumentURI, lsp.Range, bool, error) {
 	// Sketchbook/Sketch/Sketch.ino      <-> build-path/sketch/Sketch.ino.cpp
 	// Sketchbook/Sketch/AnotherTab.ino  <-> build-path/sketch/Sketch.ino.cpp  (different section from above)
@@ -307,4 +312,35 @@ func (ls *INOLanguageServer) clang2IdeSymbolTags(logger jsonrpc.FunctionLogger, 
 func (ls *INOLanguageServer) clang2IdeSymbolsInformation(logger jsonrpc.FunctionLogger, clangSymbolsInformation []lsp.SymbolInformation) []lsp.SymbolInformation {
 	logger.Logf("SymbolInformation (%d elements):", len(clangSymbolsInformation))
 	panic("not implemented")
+}
+
+func (ls *INOLanguageServer) clang2IdeWorkspaceEdit(logger jsonrpc.FunctionLogger, clangWorkspaceEdit *lsp.WorkspaceEdit) (*lsp.WorkspaceEdit, error) {
+	ideChanges := map[lsp.DocumentURI][]lsp.TextEdit{}
+	for clangURI, clangChanges := range clangWorkspaceEdit.Changes {
+		for _, clangTextEdit := range clangChanges {
+			ideURI, ideTextEdit, isPreprocessed, err := ls.clang2IdeTextEdit(logger, clangURI, clangTextEdit)
+			if isPreprocessed {
+				logger.Logf("- ignore edit in preprocessed area")
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			ideChanges[ideURI] = append(ideChanges[ideURI], ideTextEdit)
+		}
+	}
+	ideWorkspaceEdit := &lsp.WorkspaceEdit{
+		Changes:           ideChanges,
+		ChangeAnnotations: clangWorkspaceEdit.ChangeAnnotations,
+	}
+	return ideWorkspaceEdit, nil
+}
+
+func (ls *INOLanguageServer) clang2IdeTextEdit(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangTextEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, bool, error) {
+	ideURI, ideRange, isPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangURI, clangTextEdit.Range)
+	ideTextEdit := lsp.TextEdit{
+		NewText: clangTextEdit.NewText,
+		Range:   ideRange,
+	}
+	return ideURI, ideTextEdit, isPreprocessed, err
 }

@@ -155,7 +155,7 @@ func (server *IDELSPServer) TextDocumentOnTypeFormatting(ctx context.Context, lo
 }
 
 func (server *IDELSPServer) TextDocumentRename(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.RenameParams) (*lsp.WorkspaceEdit, *jsonrpc.ResponseError) {
-	panic("unimplemented")
+	return server.ls.TextDocumentRenameReqFromIDE(ctx, logger, params)
 }
 
 func (server *IDELSPServer) TextDocumentFoldingRange(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.FoldingRangeParams) ([]lsp.FoldingRange, *jsonrpc.ResponseError) {
