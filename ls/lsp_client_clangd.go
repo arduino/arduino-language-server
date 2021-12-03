@@ -141,5 +141,5 @@ func (client *ClangdLSPClient) TelemetryEvent(jsonrpc.FunctionLogger, json.RawMe
 }
 
 func (client *ClangdLSPClient) TextDocumentPublishDiagnostics(logger jsonrpc.FunctionLogger, params *lsp.PublishDiagnosticsParams) {
-	client.ls.PublishDiagnosticsNotifFromClangd(logger, params)
+	go client.ls.PublishDiagnosticsNotifFromClangd(logger, params)
 }
