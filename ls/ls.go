@@ -1246,7 +1246,6 @@ func (ls *INOLanguageServer) TextDocumentRenameReqFromIDE(ctx context.Context, l
 
 	// Check if all edits belongs to the sketch
 	for ideURI := range ideWorkspaceEdit.Changes {
-		go ls.showMessage(logger, lsp.MessageTypeError, "Could not rename symbol, it requires changes outside the sketch.")
 		if !ls.ideURIIsPartOfTheSketch(ideURI) {
 			return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInvalidParams, Message: "Could not rename symbol, it requires changes outside the sketch."}
 		}
