@@ -1243,7 +1243,20 @@ func (ls *INOLanguageServer) TextDocumentRenameReqFromIDE(ctx context.Context, l
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
+
+	// Check if all edits belongs to the sketch
+	for ideURI := range ideWorkspaceEdit.Changes {
+		go ls.showMessage(logger, lsp.MessageTypeError, "Could not rename symbol, it requires changes outside the sketch.")
+		if !ls.ideURIIsPartOfTheSketch(ideURI) {
+			return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInvalidParams, Message: "Could not rename symbol, it requires changes outside the sketch."}
+		}
+	}
 	return ideWorkspaceEdit, nil
+}
+
+func (ls *INOLanguageServer) ideURIIsPartOfTheSketch(ideURI lsp.DocumentURI) bool {
+	res, _ := ideURI.AsPath().IsInsideDir(ls.sketchRoot)
+	return res
 }
 
 func (ls *INOLanguageServer) ProgressNotifFromClangd(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
