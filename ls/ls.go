@@ -1488,6 +1488,25 @@ func (ls *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger,
 
 func (ls *INOLanguageServer) cpp2inoTextEdit(logger jsonrpc.FunctionLogger, cppURI lsp.DocumentURI, cppEdit lsp.TextEdit) (lsp.DocumentURI, lsp.TextEdit, bool, error) {
 	inoURI, inoRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, cppURI, cppEdit.Range)
+
+	if err != nil {
+		if strings.HasPrefix(cppEdit.NewText, "\n") && cppEdit.Range.Start.Line < cppEdit.Range.End.Line {
+			// Special case: the text-edit may start from the very end of a not-ino section and fallthrough
+			// in the .ino section with a '\n...' at the beginning of the replacement text.
+			nextLine := lsp.Position{Line: cppEdit.Range.Start.Line + 1, Character: 0}
+			startOffset, err1 := textedits.GetOffset(ls.sketchMapper.CppText.Text, cppEdit.Range.Start)
+			nextOffset, err2 := textedits.GetOffset(ls.sketchMapper.CppText.Text, nextLine)
+			if err1 == nil && err2 == nil && startOffset+1 == nextOffset {
+				// In this can we can generate an equivalent text-edit that fits entirely in the .ino section
+				// by removing the redundant '\n' and by offsetting the start location to the beginning of the
+				// next line.
+				cppEdit.Range.Start = nextLine
+				cppEdit.NewText = cppEdit.NewText[1:]
+				return ls.cpp2inoTextEdit(logger, cppURI, cppEdit)
+			}
+		}
+	}
+
 	inoEdit := cppEdit
 	inoEdit.Range = inoRange
 	return inoURI, inoEdit, inPreprocessed, err
