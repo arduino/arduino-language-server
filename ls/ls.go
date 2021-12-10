@@ -1326,6 +1326,7 @@ func (ls *INOLanguageServer) CleanUp() {
 }
 
 func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.FunctionLogger) (*paths.Path, error) {
+	var dataDir string
 	if ls.config.CliPath == nil {
 		// Establish a connection with the arduino-cli gRPC server
 		conn, err := grpc.Dial(ls.config.CliDaemonAddress, grpc.WithInsecure(), grpc.WithBlock())
@@ -1341,12 +1342,10 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 		if err != nil {
 			return nil, fmt.Errorf("error getting arduino data dir: %w", err)
 		}
-		var dataDir string
 		if err := json.Unmarshal([]byte(resp.JsonData), &dataDir); err != nil {
 			return nil, fmt.Errorf("error getting arduino data dir: %w", err)
 		}
 		logger.Logf("Arduino Data Dir -> %s", dataDir)
-		return paths.New(dataDir), nil
 	} else {
 		args := []string{ls.config.CliPath.String(),
 			"--config-file", ls.config.CliConfigPath.String(),
@@ -1376,8 +1375,11 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 		}
 		// Return only the build path
 		logger.Logf("Arduino Data Dir -> %s", res.Directories.Data)
-		return paths.New(res.Directories.Data), nil
+		dataDir = res.Directories.Data
 	}
+
+	dataDirPath := paths.New(dataDir)
+	return dataDirPath.Canonical(), nil
 }
 
 func (ls *INOLanguageServer) clang2IdeCodeAction(logger jsonrpc.FunctionLogger, clangCodeAction lsp.CodeAction, origIdeURI lsp.DocumentURI) *lsp.CodeAction {
