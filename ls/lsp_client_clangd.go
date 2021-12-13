@@ -22,6 +22,15 @@ type ClangdLSPClient struct {
 }
 
 func NewClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, ls *INOLanguageServer) *ClangdLSPClient {
+	clangdConfFile := ls.buildPath.Join(".clangd")
+	clangdConf := fmt.Sprintln("Diagnostics:")
+	clangdConf += fmt.Sprintln("  Suppress: [anon_bitfield_qualifiers]")
+	clangdConf += fmt.Sprintln("CompileFlags:")
+	clangdConf += fmt.Sprintln("  Add: -ferror-limit=0")
+	if err := clangdConfFile.WriteFile([]byte(clangdConf)); err != nil {
+		logger.Logf("Error writing clangd configuration: %s", err)
+	}
+
 	// Start clangd
 	args := []string{
 		ls.config.ClangdPath.String(),
