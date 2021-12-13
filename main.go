@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/arduino/arduino-language-server/ls"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
+	"github.com/mattn/go-isatty"
 )
 
 func main() {
@@ -125,6 +127,16 @@ func main() {
 	}
 
 	inoHandler := ls.NewINOLanguageServer(stdio, stdio, config)
+
+	if isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd()) {
+		fmt.Fprint(os.Stderr, `
+arduino-language-server is a language server that provides IDE-like features to editors.
+
+It should be used via an editor plugin rather than invoked directly. For more information, see:
+https://github.com/arduino/arduino-language-server/
+https://microsoft.github.io/language-server-protocol/
+`)
+	}
 
 	// Intercept kill signal
 	c := make(chan os.Signal, 2)
