@@ -62,20 +62,28 @@ go test -v ./...
 ```
 ## Usage
 
-To run the Arduino Language Server you need:
+The language server it's not intended for direct usage by humans via the command line terminal.
+The purpose of this program is to provide C++/.ino language-related functionality to the IDEs so, in general, it's the IDE that talks to the language server via stdin/stdout using the slightly modified JSONRPC protocol defined in the LSP specification.
+
+The prerequisites to run the Arduino Language Server are:
 
 - [Arduino CLI](https://github.com/arduino/arduino-cli)
+- [clangd](we suggest the builds here https://github.com/clangd/clangd/releases)
 
-After building, call:
+To start the language server the IDE must provide the path to Arduino CLI and clangd with the following flags in addition to the target board FQBN:
 
 ```
-./arduino-language-server -cli-config <path-to-cli-config>
+./arduino-language-server \
+ -clangd /usr/local/bin/clangd \
+ -cli /usr/local/bin/arduino-cli \
+ -cli-config $HOME/.arduino15/arduino-cli.yaml \
+ -fqbn arduino:mbed:nanorp2040connect
 ```
-For example:
-```
-./arduino-language-server -cli-config $HOME/.arduino15/arduino-cli.yaml
-```
-Note: If you do not have an Arduino CLI config file, you can create one by running:
+
+The -fqbn flag represents the board you're actually working on (different boards may implement different features/API, if you change board you need to restart the language server with another fqbn).
+The support for the board must be installed with the `arduino-cli core install ...` command before starting the language server.
+
+If you do not have an Arduino CLI config file, you can create one by running:
 ```
 arduino-cli config init
 ```

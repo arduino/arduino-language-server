@@ -6,30 +6,16 @@ import (
 
 	"github.com/arduino/go-paths-helper"
 	"github.com/stretchr/testify/require"
+	"go.bug.st/lsp"
 )
 
 func TestCreateSourceMaps(t *testing.T) {
-	input := `#include <Arduino.h>
-#line 1 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
-#line 1 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
+	sketch := paths.New("testdata/sketch_july2a/sketch_july2a.ino").Canonical()
+	input, err := sketch.ReadFile()
+	require.NoError(t, err)
 
-#line 2 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
-void setup();
-#line 7 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
-void loop();
-#line 2 "/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino"
-void setup() {
-	// put your setup code here, to run once:
-	
-}
-
-void loop() {
-	// put your main code here, to run repeatedly:
-	
-}
-`
 	sourceMap := CreateInoMapper([]byte(input))
-	sketchJuly2a := paths.New("/home/megabug/Workspace/arduino-language-server/handler/sourcemapper/sketch_july2a.ino").Canonical().String()
+	sketchJuly2a := sketch.String()
 	require.EqualValues(t, map[InoLine]int{
 		{sketchJuly2a, 0}:  3,
 		{sketchJuly2a, 1}:  9,
@@ -42,7 +28,7 @@ void loop() {
 		{sketchJuly2a, 8}:  16,
 		{sketchJuly2a, 9}:  17,
 		{sketchJuly2a, 10}: 18,
-	}, sourceMap.toCpp)
+	}, sourceMap.inoToCpp)
 	require.EqualValues(t, map[int]InoLine{
 		0:  NotIno,
 		1:  NotIno,
@@ -63,23 +49,35 @@ void loop() {
 		16: {sketchJuly2a, 8},
 		17: {sketchJuly2a, 9},
 		18: {sketchJuly2a, 10},
-	}, sourceMap.toIno)
+	}, sourceMap.cppToIno)
 	require.EqualValues(t, map[int]InoLine{
 		5: {sketchJuly2a, 1}, // setup
 		7: {sketchJuly2a, 6}, // loop
 	}, sourceMap.cppPreprocessed)
 
-	dumpCppToInoMap(sourceMap.toIno)
-	dumpInoToCppMap(sourceMap.toCpp)
-	dumpCppToInoMap(sourceMap.cppPreprocessed)
-	dumpInoToCppMap(sourceMap.inoPreprocessed)
+	sourceMap.DebugLogAll()
+
+	sourceMap.ApplyTextChange(lsp.NewDocumentURIFromPath(sketch), lsp.TextDocumentContentChangeEvent{
+		Range: &lsp.Range{
+			Start: lsp.Position{Line: 3, Character: 0},
+			End:   lsp.Position{Line: 3, Character: 0},
+		},
+		Text: "// Added line 1\n// Added line 2\n",
+	})
+	sourceMap.DebugLogAll()
+
+	// dumpCppToInoMap(sourceMap.cppToIno)
+	// dumpInoToCppMap(sourceMap.inoToCpp)
+	// dumpCppToInoMap(sourceMap.cppPreprocessed)
+	// dumpInoToCppMap(sourceMap.inoPreprocessed)
 	//sourceMap.addInoLine(InoLine{"sketch_july2a.ino", 0})
-	sourceMap.addInoLine(3)
-	fmt.Println("\nAdded line 13")
-	dumpCppToInoMap(sourceMap.toIno)
-	dumpInoToCppMap(sourceMap.toCpp)
-	dumpCppToInoMap(sourceMap.cppPreprocessed)
-	dumpInoToCppMap(sourceMap.inoPreprocessed)
+	// sourceMap.addInoLine(3)
+	// fmt.Println("\nAdded line 3")
+	// sourceMap.DebugLogAll()
+	// dumpCppToInoMap(sourceMap.cppToIno)
+	// dumpInoToCppMap(sourceMap.inoToCpp)
+	// dumpCppToInoMap(sourceMap.cppPreprocessed)
+	// dumpInoToCppMap(sourceMap.inoPreprocessed)
 }
 
 func TestCreateMultifileSourceMap(t *testing.T) {
@@ -127,7 +125,7 @@ void secondFunction() {
 	ProvaSpazio := paths.New("/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/Prova_Spazio.ino").Canonical().String()
 	SecondTab := paths.New("/home/megabug/Workspace/sketchbook-cores-beta/Prova_Spazio/SecondTab.ino").Canonical().String()
 	sourceMap := CreateInoMapper([]byte(input))
-	require.EqualValues(t, sourceMap.toCpp, map[InoLine]int{
+	require.EqualValues(t, sourceMap.inoToCpp, map[InoLine]int{
 		{ProvaSpazio, 0}:  2,
 		{ProvaSpazio, 1}:  3,
 		{ProvaSpazio, 2}:  4,
@@ -159,7 +157,7 @@ void secondFunction() {
 		{SecondTab, 3}:    40,
 		{SecondTab, 4}:    41,
 	})
-	require.EqualValues(t, sourceMap.toIno, map[int]InoLine{
+	require.EqualValues(t, sourceMap.cppToIno, map[int]InoLine{
 		0:  NotIno,
 		1:  NotIno,
 		2:  {ProvaSpazio, 0},
@@ -209,14 +207,14 @@ void secondFunction() {
 		10: {ProvaSpazio, 22}, // vino
 		12: {SecondTab, 1},    // secondFunction
 	}, sourceMap.cppPreprocessed)
-	dumpCppToInoMap(sourceMap.toIno)
-	dumpInoToCppMap(sourceMap.toCpp)
+	dumpCppToInoMap(sourceMap.cppToIno)
+	dumpInoToCppMap(sourceMap.inoToCpp)
 	dumpCppToInoMap(sourceMap.cppPreprocessed)
 	dumpInoToCppMap(sourceMap.inoPreprocessed)
 	sourceMap.deleteCppLine(21)
 	fmt.Println("\nRemoved line 21")
-	dumpCppToInoMap(sourceMap.toIno)
-	dumpInoToCppMap(sourceMap.toCpp)
+	dumpCppToInoMap(sourceMap.cppToIno)
+	dumpInoToCppMap(sourceMap.inoToCpp)
 	dumpCppToInoMap(sourceMap.cppPreprocessed)
 	dumpInoToCppMap(sourceMap.inoPreprocessed)
 }

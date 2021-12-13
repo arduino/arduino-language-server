@@ -1,17 +1,16 @@
-package handler
+package ls
 
 import (
 	"context"
 	"log"
 	"sync"
 
-	"github.com/arduino/arduino-language-server/lsp"
 	"github.com/arduino/arduino-language-server/streams"
-	"github.com/sourcegraph/jsonrpc2"
+	"go.bug.st/lsp"
 )
 
 type ProgressProxyHandler struct {
-	conn               *jsonrpc2.Conn
+	conn               *lsp.Server
 	mux                sync.Mutex
 	actionRequiredCond *sync.Cond
 	proxies            map[string]*progressProxy
@@ -35,19 +34,20 @@ type progressProxy struct {
 	endReq         *lsp.WorkDoneProgressEnd
 }
 
-func NewProgressProxy(conn *jsonrpc2.Conn) *ProgressProxyHandler {
+func NewProgressProxy(conn *lsp.Server) *ProgressProxyHandler {
 	res := &ProgressProxyHandler{
 		conn:    conn,
 		proxies: map[string]*progressProxy{},
 	}
 	res.actionRequiredCond = sync.NewCond(&res.mux)
-	go res.handlerLoop()
+	go func() {
+		defer streams.CatchAndLogPanic()
+		res.handlerLoop()
+	}()
 	return res
 }
 
 func (p *ProgressProxyHandler) handlerLoop() {
-	defer streams.CatchAndLogPanic()
-
 	p.mux.Lock()
 	defer p.mux.Unlock()
 
@@ -70,24 +70,27 @@ func (p *ProgressProxyHandler) handlerLoop() {
 }
 
 func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
-	ctx := context.Background()
 	switch proxy.currentStatus {
 	case progressProxyNew:
 		p.mux.Unlock()
-		var res lsp.WorkDoneProgressCreateResult
-		err := p.conn.Call(ctx, "window/workDoneProgress/create", &lsp.WorkDoneProgressCreateParams{Token: id}, &res)
-		p.mux.Lock()
-
+		respErr, err := p.conn.WindowWorkDoneProgressCreate(context.Background(), &lsp.WorkDoneProgressCreateParams{
+			Token: lsp.EncodeMessage(id),
+		})
 		if err != nil {
 			log.Printf("ProgressHandler: error creating token %s: %v", id, err)
-		} else {
-			proxy.currentStatus = progressProxyCreated
+			break
 		}
+		if respErr != nil {
+			log.Printf("ProgressHandler: error creating token %s: %v", id, respErr.AsError())
+			break
+		}
+		p.mux.Lock()
+		proxy.currentStatus = progressProxyCreated
 
 	case progressProxyCreated:
-		err := p.conn.Notify(ctx, "$/progress", lsp.ProgressParams{
-			Token: id,
-			Value: lsp.Raw(proxy.beginReq),
+		err := p.conn.Progress(&lsp.ProgressParams{
+			Token: lsp.EncodeMessage(id),
+			Value: lsp.EncodeMessage(proxy.beginReq),
 		})
 
 		proxy.beginReq = nil
@@ -99,9 +102,10 @@ func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 
 	case progressProxyBegin:
 		if proxy.requiredStatus == progressProxyReport {
-			err := p.conn.Notify(ctx, "$/progress", &lsp.ProgressParams{
-				Token: id,
-				Value: lsp.Raw(proxy.reportReq)})
+			err := p.conn.Progress(&lsp.ProgressParams{
+				Token: lsp.EncodeMessage(id),
+				Value: lsp.EncodeMessage(proxy.reportReq),
+			})
 
 			proxy.reportReq = nil
 			if err != nil {
@@ -111,9 +115,9 @@ func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 			}
 
 		} else if proxy.requiredStatus == progressProxyEnd {
-			err := p.conn.Notify(ctx, "$/progress", &lsp.ProgressParams{
-				Token: id,
-				Value: lsp.Raw(proxy.endReq),
+			err := p.conn.Progress(&lsp.ProgressParams{
+				Token: lsp.EncodeMessage(id),
+				Value: lsp.EncodeMessage(proxy.endReq),
 			})
 
 			proxy.endReq = nil

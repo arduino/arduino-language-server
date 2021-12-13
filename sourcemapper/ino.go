@@ -9,17 +9,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/arduino/arduino-language-server/handler/textutils"
-	"github.com/arduino/arduino-language-server/lsp"
 	"github.com/arduino/go-paths-helper"
 	"github.com/pkg/errors"
+	"go.bug.st/lsp"
+	"go.bug.st/lsp/textedits"
 )
 
-// InoMapper is a mapping between the .ino sketch and the preprocessed .cpp file
-type InoMapper struct {
+// SketchMapper is a mapping between the .ino sketch and the preprocessed .cpp file
+type SketchMapper struct {
 	CppText         *SourceRevision
-	toCpp           map[InoLine]int // Converts File.ino:line -> line
-	toIno           map[int]InoLine // Convers line -> File.ino:line
+	inoToCpp        map[InoLine]int // Converts File.ino:line -> line
+	cppToIno        map[int]InoLine // Convers line -> File.ino:line
 	inoPreprocessed map[InoLine]int // map of the lines taken by the preprocessor: File.ino:line -> preprocessed line
 	cppPreprocessed map[int]InoLine // map of the lines added by the preprocessor: preprocessed line -> File.ino:line
 }
@@ -42,27 +42,27 @@ type InoLine struct {
 }
 
 // InoToCppLine converts a source (.ino) line into a target (.cpp) line
-func (s *InoMapper) InoToCppLine(sourceURI lsp.DocumentURI, line int) int {
-	return s.toCpp[InoLine{sourceURI.AsPath().String(), line}]
+func (s *SketchMapper) InoToCppLine(sourceURI lsp.DocumentURI, line int) int {
+	return s.inoToCpp[InoLine{sourceURI.AsPath().String(), line}]
 }
 
 // InoToCppLineOk converts a source (.ino) line into a target (.cpp) line
-func (s *InoMapper) InoToCppLineOk(sourceURI lsp.DocumentURI, line int) (int, bool) {
-	res, ok := s.toCpp[InoLine{sourceURI.AsPath().String(), line}]
+func (s *SketchMapper) InoToCppLineOk(sourceURI lsp.DocumentURI, line int) (int, bool) {
+	res, ok := s.inoToCpp[InoLine{sourceURI.AsPath().String(), line}]
 	return res, ok
 }
 
-// InoToCppLSPRange convert a lsp.Ranger reference to a .ino into a lsp.Range to .cpp
-func (s *InoMapper) InoToCppLSPRange(sourceURI lsp.DocumentURI, r lsp.Range) lsp.Range {
+// InoToCppLSPRange convert a lsp.Range reference to a .ino into a lsp.Range to .cpp
+func (s *SketchMapper) InoToCppLSPRange(sourceURI lsp.DocumentURI, r lsp.Range) lsp.Range {
 	res := r
 	res.Start.Line = s.InoToCppLine(sourceURI, r.Start.Line)
 	res.End.Line = s.InoToCppLine(sourceURI, r.End.Line)
 	return res
 }
 
-// InoToCppLSPRangeOk convert a lsp.Ranger reference to a .ino into a lsp.Range to .cpp and returns
+// InoToCppLSPRangeOk convert a lsp.Range reference to a .ino into a lsp.Range to .cpp and returns
 // true if the conversion is successful or false if the conversion is invalid.
-func (s *InoMapper) InoToCppLSPRangeOk(sourceURI lsp.DocumentURI, r lsp.Range) (lsp.Range, bool) {
+func (s *SketchMapper) InoToCppLSPRangeOk(sourceURI lsp.DocumentURI, r lsp.Range) (lsp.Range, bool) {
 	res := r
 	if l, ok := s.InoToCppLineOk(sourceURI, r.Start.Line); ok {
 		res.Start.Line = l
@@ -78,14 +78,14 @@ func (s *InoMapper) InoToCppLSPRangeOk(sourceURI lsp.DocumentURI, r lsp.Range) (
 }
 
 // CppToInoLine converts a target (.cpp) line into a source.ino:line
-func (s *InoMapper) CppToInoLine(targetLine int) (string, int) {
-	res := s.toIno[targetLine]
+func (s *SketchMapper) CppToInoLine(targetLine int) (string, int) {
+	res := s.cppToIno[targetLine]
 	return res.File, res.Line
 }
 
 // CppToInoRange converts a target (.cpp) lsp.Range into a source.ino:lsp.Range.
 // It will panic if the range spans across multiple ino files.
-func (s *InoMapper) CppToInoRange(cppRange lsp.Range) (string, lsp.Range) {
+func (s *SketchMapper) CppToInoRange(cppRange lsp.Range) (string, lsp.Range) {
 	inoFile, inoRange, err := s.CppToInoRangeOk(cppRange)
 	if err != nil {
 		panic(err.Error())
@@ -105,7 +105,7 @@ func (e AdjustedRangeErr) Error() string {
 // It returns an error if the range spans across multiple ino files.
 // If the range ends on the beginning of a new line in another .ino file, the range
 // is adjusted and AdjustedRangeErr is reported as err: the range may be still valid.
-func (s *InoMapper) CppToInoRangeOk(cppRange lsp.Range) (string, lsp.Range, error) {
+func (s *SketchMapper) CppToInoRangeOk(cppRange lsp.Range) (string, lsp.Range, error) {
 	inoFile, startLine := s.CppToInoLine(cppRange.Start.Line)
 	endInoFile, endLine := s.CppToInoLine(cppRange.End.Line)
 	inoRange := cppRange
@@ -131,36 +131,41 @@ func (s *InoMapper) CppToInoRangeOk(cppRange lsp.Range) (string, lsp.Range, erro
 
 // CppToInoLineOk converts a target (.cpp) line into a source (.ino) line and
 // returns true if the conversion is successful
-func (s *InoMapper) CppToInoLineOk(targetLine int) (string, int, bool) {
-	res, ok := s.toIno[targetLine]
+func (s *SketchMapper) CppToInoLineOk(targetLine int) (string, int, bool) {
+	res, ok := s.cppToIno[targetLine]
 	return res.File, res.Line, ok
 }
 
-// IsPreprocessedCppLine returns true if the give .cpp line is part of the
+// IsPreprocessedCppLine returns true if the given .cpp line is part of the
 // section added by the arduino preprocessor.
-func (s *InoMapper) IsPreprocessedCppLine(cppLine int) bool {
+func (s *SketchMapper) IsPreprocessedCppLine(cppLine int) bool {
 	_, preprocessed := s.cppPreprocessed[cppLine]
-	_, mapsToIno := s.toIno[cppLine]
+	_, mapsToIno := s.cppToIno[cppLine]
 	return preprocessed || !mapsToIno
 }
 
 // CreateInoMapper create a InoMapper from the given target file
-func CreateInoMapper(targetFile []byte) *InoMapper {
-	mapper := &InoMapper{
-		toCpp:           map[InoLine]int{},
-		toIno:           map[int]InoLine{},
-		inoPreprocessed: map[InoLine]int{},
-		cppPreprocessed: map[int]InoLine{},
+func CreateInoMapper(targetFile []byte) *SketchMapper {
+	mapper := &SketchMapper{
 		CppText: &SourceRevision{
 			Version: 1,
 			Text:    string(targetFile),
 		},
 	}
+	mapper.regeneratehMapping()
+	return mapper
+}
+
+func (s *SketchMapper) regeneratehMapping() {
+	s.inoToCpp = map[InoLine]int{}
+	s.cppToIno = map[int]InoLine{}
+	s.inoPreprocessed = map[InoLine]int{}
+	s.cppPreprocessed = map[int]InoLine{}
 
 	sourceFile := ""
 	sourceLine := -1
 	targetLine := 0
-	scanner := bufio.NewScanner(bytes.NewReader(targetFile))
+	scanner := bufio.NewScanner(bytes.NewReader([]byte(s.CppText.Text)))
 	for scanner.Scan() {
 		lineStr := scanner.Text()
 		if strings.HasPrefix(lineStr, "#line") {
@@ -170,27 +175,33 @@ func CreateInoMapper(targetFile []byte) *InoMapper {
 				sourceLine = l - 1
 			}
 			sourceFile = paths.New(unquoteCppString(tokens[2])).Canonical().String()
-			mapper.toIno[targetLine] = NotIno
+			s.cppToIno[targetLine] = NotIno
 		} else if sourceFile != "" {
-			mapper.mapLine(sourceFile, sourceLine, targetLine)
+			// Sometimes the Arduino preprocessor fails to interpret correctly the code
+			// and may report a "#line 0" directive leading to a negative sourceLine.
+			// In this rare cases just interpret the source line as a NotIno line.
+			if sourceLine >= 0 {
+				s.mapLine(sourceFile, sourceLine, targetLine)
+			} else {
+				s.cppToIno[targetLine] = NotIno
+			}
 			sourceLine++
 		} else {
-			mapper.toIno[targetLine] = NotIno
+			s.cppToIno[targetLine] = NotIno
 		}
 		targetLine++
 	}
-	mapper.mapLine(sourceFile, sourceLine, targetLine)
-	return mapper
+	s.mapLine(sourceFile, sourceLine, targetLine)
 }
 
-func (s *InoMapper) mapLine(sourceFile string, sourceLine, targetLine int) {
-	inoLine := InoLine{sourceFile, sourceLine}
-	if line, ok := s.toCpp[inoLine]; ok {
+func (s *SketchMapper) mapLine(inoSourceFile string, inoSourceLine, cppLine int) {
+	inoLine := InoLine{inoSourceFile, inoSourceLine}
+	if line, ok := s.inoToCpp[inoLine]; ok {
 		s.cppPreprocessed[line] = inoLine
 		s.inoPreprocessed[inoLine] = line
 	}
-	s.toCpp[inoLine] = targetLine
-	s.toIno[targetLine] = inoLine
+	s.inoToCpp[inoLine] = cppLine
+	s.cppToIno[cppLine] = inoLine
 }
 
 func unquoteCppString(str string) string {
@@ -205,20 +216,24 @@ func unquoteCppString(str string) string {
 // ApplyTextChange performs the text change and updates both .ino and .cpp files.
 // It returns true if the change is "dirty", this happens when the change alters preprocessed lines
 // and a new preprocessing may be probably required.
-func (s *InoMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDocumentContentChangeEvent) (dirty bool) {
+func (s *SketchMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDocumentContentChangeEvent) (dirty bool) {
 	inoRange := *inoChange.Range
-	cppRange := s.InoToCppLSPRange(inoURI, inoRange)
+	cppRange, ok := s.InoToCppLSPRangeOk(inoURI, inoRange)
+	if !ok {
+		panic("Invalid sketch range " + inoURI.String() + ":" + inoRange.String())
+	}
+	log.Print("Ino Range: ", inoRange, " -> Cpp Range:", cppRange)
 	deletedLines := inoRange.End.Line - inoRange.Start.Line
 
 	// Apply text changes
-	newText, err := textutils.ApplyTextChange(s.CppText.Text, cppRange, inoChange.Text)
+	newText, err := textedits.ApplyTextChange(s.CppText.Text, cppRange, inoChange.Text)
 	if err != nil {
 		panic("error replacing text: " + err.Error())
 	}
 	s.CppText.Text = newText
 	s.CppText.Version++
 
-	if _, is := s.inoPreprocessed[s.toIno[cppRange.Start.Line]]; is {
+	if _, is := s.inoPreprocessed[s.cppToIno[cppRange.Start.Line]]; is {
 		dirty = true
 	}
 
@@ -227,7 +242,7 @@ func (s *InoMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDo
 		dirty = dirty || s.deleteCppLine(cppRange.Start.Line)
 		deletedLines--
 	}
-	addedLines := strings.Count(inoChange.Text, "\n") - 1
+	addedLines := strings.Count(inoChange.Text, "\n")
 	for addedLines > 0 {
 		dirty = dirty || s.addInoLine(cppRange.Start.Line)
 		addedLines--
@@ -235,16 +250,16 @@ func (s *InoMapper) ApplyTextChange(inoURI lsp.DocumentURI, inoChange lsp.TextDo
 	return
 }
 
-func (s *InoMapper) addInoLine(cppLine int) (dirty bool) {
+func (s *SketchMapper) addInoLine(cppLine int) (dirty bool) {
 	preprocessToShiftCpp := map[InoLine]bool{}
 
-	addedInoLine := s.toIno[cppLine]
-	carry := s.toIno[cppLine]
+	addedInoLine := s.cppToIno[cppLine]
+	carry := s.cppToIno[cppLine]
 	carry.Line++
 	for {
-		next, ok := s.toIno[cppLine+1]
-		s.toIno[cppLine+1] = carry
-		s.toCpp[carry] = cppLine + 1
+		next, ok := s.cppToIno[cppLine+1]
+		s.cppToIno[cppLine+1] = carry
+		s.inoToCpp[carry] = cppLine + 1
 		if !ok {
 			break
 		}
@@ -282,23 +297,23 @@ func (s *InoMapper) addInoLine(cppLine int) (dirty bool) {
 		inoPre.Line++
 		s.inoPreprocessed[inoPre] = l
 		s.cppPreprocessed[l] = inoPre
-		s.toIno[l] = inoPre
+		s.cppToIno[l] = inoPre
 	}
 
 	return
 }
 
-func (s *InoMapper) deleteCppLine(line int) (dirty bool) {
-	removed := s.toIno[line]
+func (s *SketchMapper) deleteCppLine(line int) (dirty bool) {
+	removed := s.cppToIno[line]
 	for i := line + 1; ; i++ {
-		shifted, ok := s.toIno[i]
+		shifted, ok := s.cppToIno[i]
 		if !ok {
-			delete(s.toIno, i-1)
+			delete(s.cppToIno, i-1)
 			break
 		}
-		s.toIno[i-1] = shifted
+		s.cppToIno[i-1] = shifted
 		if shifted != NotIno {
-			s.toCpp[shifted] = i - 1
+			s.inoToCpp[shifted] = i - 1
 		}
 	}
 
@@ -310,20 +325,20 @@ func (s *InoMapper) deleteCppLine(line int) (dirty bool) {
 		next := curr
 		next.Line++
 
-		shifted, ok := s.toCpp[next]
+		shifted, ok := s.inoToCpp[next]
 		if !ok {
-			delete(s.toCpp, curr)
+			delete(s.inoToCpp, curr)
 			break
 		}
-		s.toCpp[curr] = shifted
-		s.toIno[shifted] = curr
+		s.inoToCpp[curr] = shifted
+		s.cppToIno[shifted] = curr
 
 		if l, ok := s.inoPreprocessed[next]; ok {
 			s.inoPreprocessed[curr] = l
 			s.cppPreprocessed[l] = curr
 			delete(s.inoPreprocessed, next)
 
-			s.toIno[l] = curr
+			s.cppToIno[l] = curr
 		}
 	}
 	return
@@ -359,11 +374,29 @@ func dumpInoToCppMap(s map[InoLine]int) {
 }
 
 // DebugLogAll dumps the internal status of the mapper
-func (s *InoMapper) DebugLogAll() {
+func (s *SketchMapper) DebugLogAll() {
+	stripFile := func(s string) string {
+		l := strings.LastIndex(s, "/")
+		if l == -1 {
+			return s
+		}
+		return s[l:]
+	}
 	cpp := strings.Split(s.CppText.Text, "\n")
 	log.Printf("  > Current sketchmapper content:")
 	for l, cppLine := range cpp {
 		inoFile, inoLine := s.CppToInoLine(l)
-		log.Printf("  %3d: %-40s : %s:%d", l, cppLine, inoFile, inoLine)
+		cppLine = strings.Replace(cppLine, "\t", "  ", -1)
+		if len(cppLine) > 60 {
+			cppLine = cppLine[:60]
+		}
+
+		cppSource := fmt.Sprintf("%3d: %-60s", l, cppLine)
+		sketchFile := fmt.Sprintf("%s:%d", stripFile(inoFile), inoLine)
+		preprocLine := ""
+		if pr, ok := s.cppPreprocessed[l]; ok {
+			preprocLine = fmt.Sprintf("%s:%d", stripFile(pr.File), pr.Line)
+		}
+		log.Printf("%s | %-25s %-25s", cppSource, sketchFile, preprocLine)
 	}
 }
