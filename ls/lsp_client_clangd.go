@@ -38,7 +38,7 @@ func NewClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 		fmt.Sprintf(`--compile-commands-dir=%s`, ls.buildPath),
 	}
 	if dataFolder != nil {
-		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**")))
+		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**").Canonical()))
 	}
 
 	logger.Logf("    Starting clangd: %s", strings.Join(args, " "))
