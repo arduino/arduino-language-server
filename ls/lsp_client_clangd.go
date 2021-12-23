@@ -22,6 +22,15 @@ type ClangdLSPClient struct {
 }
 
 func NewClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, ls *INOLanguageServer) *ClangdLSPClient {
+	clangdConfFile := ls.buildPath.Join(".clangd")
+	clangdConf := fmt.Sprintln("Diagnostics:")
+	clangdConf += fmt.Sprintln("  Suppress: [anon_bitfield_qualifiers]")
+	clangdConf += fmt.Sprintln("CompileFlags:")
+	clangdConf += fmt.Sprintln("  Add: -ferror-limit=0")
+	if err := clangdConfFile.WriteFile([]byte(clangdConf)); err != nil {
+		logger.Logf("Error writing clangd configuration: %s", err)
+	}
+
 	// Start clangd
 	args := []string{
 		ls.config.ClangdPath.String(),
@@ -29,7 +38,7 @@ func NewClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 		fmt.Sprintf(`--compile-commands-dir=%s`, ls.buildPath),
 	}
 	if dataFolder != nil {
-		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**")))
+		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**").Canonical()))
 	}
 
 	logger.Logf("    Starting clangd: %s", strings.Join(args, " "))
