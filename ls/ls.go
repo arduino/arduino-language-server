@@ -1203,6 +1203,30 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 		}
 	}
 
+	// Try to filter as much bogus errors as possible (due to wrong clang "driver" or missing
+	// support for specific embedded CPU architecture).
+	for _, ideParams := range allIdeParams {
+		n := 0
+		for _, ideDiag := range ideParams.Diagnostics {
+			var code string
+			_ = json.Unmarshal(ideDiag.Code, &code)
+			switch code {
+			case "":
+				// Filter unkown non-string codes
+			case "drv_unknown_argument_with_suggestion":
+				// Skip errors like: "Unknown argument '-mlongcalls'; did you mean '-mlong-calls'?"
+			case "drv_unknown_argument":
+				// Skip errors like: "Unknown argument: '-mtext-section-literals'"
+			default:
+				ideParams.Diagnostics[n] = ideDiag
+				n++
+				continue
+			}
+			logger.Logf("filtered out diagnostic with error-code: %s", ideDiag.Code)
+		}
+		ideParams.Diagnostics = ideParams.Diagnostics[:n]
+	}
+
 	// Push back to IDE the converted diagnostics
 	logger.Logf("diagnostics to IDE:")
 	for _, ideParams := range allIdeParams {
