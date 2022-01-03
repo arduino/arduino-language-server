@@ -961,10 +961,20 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
-	ls.triggerRebuild()
+	ideTextDocItem := ideParam.TextDocument
+	clangURI, _, err := ls.ide2ClangDocumentURI(logger, ideTextDocItem.URI)
+	if err != nil {
+		logger.Logf("Error: %s", err)
+		return
+	}
+
+	if ls.ideURIIsPartOfTheSketch(ideTextDocItem.URI) {
+		if !clangURI.AsPath().Exist() {
+			ls.triggerRebuildAndWait(logger)
+		}
+	}
 
 	// Add the TextDocumentItem in the tracked files list
-	ideTextDocItem := ideParam.TextDocument
 	ls.trackedIdeDocs[ideTextDocItem.URI.AsPath().String()] = ideTextDocItem
 
 	// If we are tracking a .ino...
@@ -979,11 +989,6 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 		}
 	}
 
-	clangURI, _, err := ls.ide2ClangDocumentURI(logger, ideTextDocItem.URI)
-	if err != nil {
-		logger.Logf("Error: %s", err)
-		return
-	}
 	clangTextDocItem := lsp.TextDocumentItem{
 		URI: clangURI,
 	}
@@ -1196,6 +1201,30 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 			}
 			delete(ls.ideInoDocsWithDiagnostics, ideInoURI)
 		}
+	}
+
+	// Try to filter as much bogus errors as possible (due to wrong clang "driver" or missing
+	// support for specific embedded CPU architecture).
+	for _, ideParams := range allIdeParams {
+		n := 0
+		for _, ideDiag := range ideParams.Diagnostics {
+			var code string
+			_ = json.Unmarshal(ideDiag.Code, &code)
+			switch code {
+			case "":
+				// Filter unkown non-string codes
+			case "drv_unknown_argument_with_suggestion":
+				// Skip errors like: "Unknown argument '-mlongcalls'; did you mean '-mlong-calls'?"
+			case "drv_unknown_argument":
+				// Skip errors like: "Unknown argument: '-mtext-section-literals'"
+			default:
+				ideParams.Diagnostics[n] = ideDiag
+				n++
+				continue
+			}
+			logger.Logf("filtered out diagnostic with error-code: %s", ideDiag.Code)
+		}
+		ideParams.Diagnostics = ideParams.Diagnostics[:n]
 	}
 
 	// Push back to IDE the converted diagnostics

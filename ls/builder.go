@@ -27,14 +27,14 @@ import (
 
 type SketchRebuilder struct {
 	ls      *INOLanguageServer
-	trigger chan bool
+	trigger chan chan<- bool
 	cancel  func()
 	mutex   sync.Mutex
 }
 
 func NewSketchBuilder(ls *INOLanguageServer) *SketchRebuilder {
 	res := &SketchRebuilder{
-		trigger: make(chan bool, 1),
+		trigger: make(chan chan<- bool, 1),
 		cancel:  func() {},
 		ls:      ls,
 	}
@@ -45,17 +45,25 @@ func NewSketchBuilder(ls *INOLanguageServer) *SketchRebuilder {
 	return res
 }
 
-func (ls *INOLanguageServer) triggerRebuild() {
-	ls.sketchRebuilder.TriggerRebuild()
+func (ls *INOLanguageServer) triggerRebuildAndWait(logger jsonrpc.FunctionLogger) {
+	completed := make(chan bool)
+	ls.sketchRebuilder.TriggerRebuild(completed)
+	ls.writeUnlock(logger)
+	<-completed
+	ls.writeLock(logger, true)
 }
 
-func (r *SketchRebuilder) TriggerRebuild() {
+func (ls *INOLanguageServer) triggerRebuild() {
+	ls.sketchRebuilder.TriggerRebuild(nil)
+}
+
+func (r *SketchRebuilder) TriggerRebuild(completed chan<- bool) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	r.cancel() // Stop possibly already running builds
 	select {
-	case r.trigger <- true:
+	case r.trigger <- completed:
 	default:
 	}
 }
@@ -63,7 +71,7 @@ func (r *SketchRebuilder) TriggerRebuild() {
 func (r *SketchRebuilder) rebuilderLoop() {
 	logger := NewLSPFunctionLogger(color.HiMagentaString, "SKETCH REBUILD: ")
 	for {
-		<-r.trigger
+		completed := <-r.trigger
 
 		for {
 			// Concede a 200ms delay to accumulate bursts of changes
@@ -90,6 +98,9 @@ func (r *SketchRebuilder) rebuilderLoop() {
 
 		cancel()
 		r.ls.progressHandler.End("arduinoLanguageServerRebuild", &lsp.WorkDoneProgressEnd{Message: "done"})
+		if completed != nil {
+			close(completed)
+		}
 	}
 }
 
