@@ -363,7 +363,13 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 }
 
 func (ls *INOLanguageServer) ShutdownReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
+	done := make(chan bool)
+	go func() {
+		ls.progressHandler.Shutdown()
+		close(done)
+	}()
 	_, _ = ls.Clangd.conn.Shutdown(context.Background())
+	<-done
 	return nil
 }
 

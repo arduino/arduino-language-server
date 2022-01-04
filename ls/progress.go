@@ -196,3 +196,27 @@ func (p *ProgressProxyHandler) End(id string, req *lsp.WorkDoneProgressEnd) {
 	proxy.requiredStatus = progressProxyEnd
 	p.actionRequiredCond.Broadcast()
 }
+
+func (p *ProgressProxyHandler) Shutdown() {
+	p.mux.Lock()
+	defer p.mux.Unlock()
+
+	for id, proxy := range p.proxies {
+		err := p.conn.Progress(&lsp.ProgressParams{
+			Token: lsp.EncodeMessage(id),
+			Value: lsp.EncodeMessage(&lsp.WorkDoneProgressEnd{
+				Message: "Shutdown",
+			}),
+		})
+
+		proxy.endReq = nil
+		if err != nil {
+			log.Printf("ProgressHandler: error sending begin req token %s: %v", id, err)
+		} else {
+			proxy.currentStatus = progressProxyEnd
+			proxy.requiredStatus = progressProxyEnd
+		}
+	}
+
+	p.actionRequiredCond.Broadcast()
+}
