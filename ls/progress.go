@@ -109,7 +109,7 @@ func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 
 			proxy.reportReq = nil
 			if err != nil {
-				log.Printf("ProgressHandler: error sending begin req token %s: %v", id, err)
+				log.Printf("ProgressHandler: error sending report req token %s: %v", id, err)
 			} else {
 				proxy.requiredStatus = progressProxyBegin
 			}
@@ -122,7 +122,7 @@ func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 
 			proxy.endReq = nil
 			if err != nil {
-				log.Printf("ProgressHandler: error sending begin req token %s: %v", id, err)
+				log.Printf("ProgressHandler: error sending end req token %s: %v", id, err)
 			} else {
 				proxy.currentStatus = progressProxyEnd
 			}
@@ -211,7 +211,7 @@ func (p *ProgressProxyHandler) Shutdown() {
 
 		proxy.endReq = nil
 		if err != nil {
-			log.Printf("ProgressHandler: error sending begin req token %s: %v", id, err)
+			log.Printf("ProgressHandler: error sending end req token %s: %v", id, err)
 		} else {
 			proxy.currentStatus = progressProxyEnd
 			proxy.requiredStatus = progressProxyEnd
