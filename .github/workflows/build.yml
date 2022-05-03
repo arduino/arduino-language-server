@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download Workflow Artifact [GitHub Actions]
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: build-artifacts
           path: build-artifacts
