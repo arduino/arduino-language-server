@@ -48,7 +48,7 @@ jobs:
         run: 7z a "${{ github.workspace }}/${{ env.BUILD_OUTPUT_DIRECTORY }}/archive/${{ env.EXECUTABLE_NAME }}_${{ runner.OS }}_amd64.zip" "${{ github.workspace }}/${{ env.BUILD_OUTPUT_DIRECTORY }}/${{ runner.OS }}_amd64/*"
 
       - name: Upload Workflow Artifact [GitHub Actions]
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: build-artifacts
           # this makes the artifact a .zip of the .zip archive, which is currently necessary to preserve the executable file permissions
