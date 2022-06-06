@@ -3,6 +3,7 @@ package ls
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/fatih/color"
 	"go.bug.st/json"
@@ -13,6 +14,10 @@ type LSPLogger struct {
 	IncomingPrefix, OutgoingPrefix string
 	HiColor, LoColor               func(format string, a ...interface{}) string
 	ErrorColor                     func(format string, a ...interface{}) string
+}
+
+func init() {
+	log.SetFlags(log.Lmicroseconds)
 }
 
 func (l *LSPLogger) LogOutgoingRequest(id string, method string, params json.RawMessage) {
@@ -57,6 +62,12 @@ func (l *LSPLogger) LogIncomingNotification(method string, params json.RawMessag
 		colorFunc: l.HiColor,
 		prefix:    fmt.Sprintf("%s       %s", spaces[:len(l.IncomingPrefix)], method),
 	}
+}
+func (l *LSPLogger) LogIncomingDataDelay(delay time.Duration) {
+	log.Printf("IN Elapsed: %v", delay)
+}
+func (l *LSPLogger) LogOutgoingDataDelay(delay time.Duration) {
+	log.Printf("OUT Elapsed: %v", delay)
 }
 
 type LSPFunctionLogger struct {
