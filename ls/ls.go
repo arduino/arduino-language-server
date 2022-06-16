@@ -1388,7 +1388,7 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 			"dump",
 			"--format", "json",
 		}
-		cmd, err := executils.NewProcess(args...)
+		cmd, err := executils.NewProcess(nil, args...)
 		if err != nil {
 			return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 		}

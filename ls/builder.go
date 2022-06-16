@@ -267,7 +267,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 			//"--clean",
 			sketchRoot.String(),
 		}
-		cmd, err := executils.NewProcess(args...)
+		cmd, err := executils.NewProcess(nil, args...)
 		if err != nil {
 			return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 		}
