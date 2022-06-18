@@ -39,7 +39,7 @@ In order to ease code reviews and have your contributions merged faster, here is
 
 - Create small PRs that are narrowly focused on addressing a single concern.
 - Write tests for the code you wrote.
-- Open your PR against the master branch.
+- Open your PR against the `main` branch.
 - Maintain clean commit history and use meaningful commit messages. PRs with messy commit history are difficult to review and require a lot of work to be merged.
 - Your PR must pass all CI tests before we will merge it. If you're seeing an error and don't think it's your fault, it may not be! The reviewer will help you if there are test failures that seem not related to the change you are making.
 
