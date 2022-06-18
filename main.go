@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
+	"path"
 
 	"github.com/arduino/arduino-language-server/ls"
 	"github.com/arduino/arduino-language-server/streams"
@@ -75,6 +77,15 @@ func main() {
 			log.Fatal("ArduinoCLI daemon address and instance number must be set.")
 		}
 	} else {
+		if *cliConfigPath == "" {
+			if user, _ := user.Current(); user != nil {
+				candidate := path.Join(user.HomeDir, ".arduino15/arduino-cli.yaml")
+				if _, err := os.Stat(candidate); err == nil {
+					*cliConfigPath = candidate
+					log.Printf("ArduinoCLI config file found at %s\n", candidate)
+				}
+			}
+		}
 		if *cliConfigPath == "" {
 			log.Fatal("Path to ArduinoCLI config file must be set.")
 		}
