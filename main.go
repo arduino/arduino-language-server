@@ -7,6 +7,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/exec"
 	"os/signal"
 
 	"github.com/arduino/arduino-language-server/ls"
@@ -68,15 +69,32 @@ func main() {
 		log.SetOutput(os.Stderr)
 	}
 
-	if *cliPath != "" {
+	if *cliDaemonAddress != "" || *cliDaemonInstanceNumber != -1 {
+		// if one is set, both must be set
+		if *cliDaemonAddress == "" || *cliDaemonInstanceNumber == -1 {
+			log.Fatal("ArduinoCLI daemon address and instance number must be set.")
+		}
+	} else {
 		if *cliConfigPath == "" {
 			log.Fatal("Path to ArduinoCLI config file must be set.")
 		}
-	} else if *cliDaemonAddress == "" || *cliDaemonInstanceNumber == -1 {
-		log.Fatal("ArduinoCLI daemon address and instance number must be set.")
+		if *cliPath == "" {
+			bin, _ := exec.LookPath("arduino-cli")
+			if bin == "" {
+				log.Fatal("Path to ArduinoCLI must be set.")
+			}
+			log.Printf("arduino-cli found at %s\n", bin)
+			*cliPath = bin
+		}
 	}
+
 	if *clangdPath == "" {
-		log.Fatal("Path to Clangd must be set.")
+		bin, _ := exec.LookPath("clangd")
+		if bin == "" {
+			log.Fatal("Path to Clangd must be set.")
+		}
+		log.Printf("clangd found at %s\n", bin)
+		*clangdPath = bin
 	}
 
 	config := &ls.Config{
