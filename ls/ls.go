@@ -39,6 +39,7 @@ type INOLanguageServer struct {
 	buildPath                 *paths.Path
 	buildSketchRoot           *paths.Path
 	buildSketchCpp            *paths.Path
+	fullBuildPath             *paths.Path
 	sketchRoot                *paths.Path
 	sketchName                string
 	sketchMapper              *sourcemapper.SketchMapper
@@ -129,9 +130,16 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 		ls.buildSketchRoot = ls.buildPath.Join("sketch")
 	}
 
+	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
+		log.Fatalf("Could not create temp folder: %s", err)
+	} else {
+		ls.fullBuildPath = tmp.Canonical()
+	}
+
 	logger.Logf("Initial board configuration: %s", ls.config.Fqbn)
 	logger.Logf("Language server build path: %s", ls.buildPath)
 	logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
+	logger.Logf("Language server FULL build path: %s", ls.fullBuildPath)
 
 	ls.IDE = NewIDELSPServer(logger, stdin, stdout, ls)
 	ls.progressHandler = NewProgressProxy(ls.IDE.conn)
@@ -158,7 +166,7 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		ls.sketchName = ls.sketchRoot.Base()
 		ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
 
-		if success, err := ls.generateBuildEnvironment(context.Background(), logger); err != nil {
+		if success, err := ls.generateBuildEnvironment(context.Background(), true, logger); err != nil {
 			logger.Logf("error starting clang: %s", err)
 			return
 		} else if !success {
@@ -1160,6 +1168,24 @@ func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.Fun
 	}
 }
 
+func (ls *INOLanguageServer) FullBuildCompletedFromIDE(logger jsonrpc.FunctionLogger, params *DidCompleteBuildParams) {
+	ls.writeLock(logger, true)
+	defer ls.writeUnlock(logger)
+
+	ls.CopyFullBuildResults(logger, params.BuildOutputUri.AsPath())
+	ls.triggerRebuild()
+}
+
+func (ls *INOLanguageServer) CopyFullBuildResults(logger jsonrpc.FunctionLogger, buildPath *paths.Path) {
+	fromCache := buildPath.Join("libraries.cache")
+	toCache := ls.buildPath.Join("libraries.cache")
+	if err := fromCache.CopyTo(toCache); err != nil {
+		logger.Logf("ERROR: updating libraries.cache: %s", err)
+	} else {
+		logger.Logf("Updated 'libraries.cache'. Copied: %v to %v", fromCache, toCache)
+	}
+}
+
 func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.FunctionLogger, clangParams *lsp.PublishDiagnosticsParams) {
 	ls.readLock(logger, false)
 	defer ls.readUnlock(logger)
@@ -1342,6 +1368,10 @@ func (ls *INOLanguageServer) CleanUp() {
 	if ls.buildPath != nil {
 		ls.buildPath.RemoveAll()
 		ls.buildPath = nil
+	}
+	if ls.fullBuildPath != nil {
+		ls.fullBuildPath.RemoveAll()
+		ls.fullBuildPath = nil
 	}
 }
 
