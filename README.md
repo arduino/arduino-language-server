@@ -70,7 +70,7 @@ The prerequisites to run the Arduino Language Server are:
 - [Arduino CLI](https://github.com/arduino/arduino-cli)
 - [clangd](https://github.com/clangd/clangd/releases)
 
-To start the language server the IDE must provide the path to Arduino CLI and clangd with the following flags in addition to the target board FQBN:
+To start the language server the IDE may provide the path to Arduino CLI and clangd with the following flags in addition to the target board FQBN:
 
 ```
 ./arduino-language-server \
