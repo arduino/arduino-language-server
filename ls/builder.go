@@ -92,7 +92,7 @@ func (r *SketchRebuilder) rebuilderLoop() {
 		r.cancel = cancel
 		r.mutex.Unlock()
 
-		if err := r.doRebuild(ctx, logger); err != nil {
+		if err := r.doRebuild(ctx, false, logger); err != nil {
 			logger.Logf("Error: %s", err)
 		}
 
@@ -104,10 +104,16 @@ func (r *SketchRebuilder) rebuilderLoop() {
 	}
 }
 
-func (r *SketchRebuilder) doRebuild(ctx context.Context, logger jsonrpc.FunctionLogger) error {
+func (r *SketchRebuilder) doRebuild(ctx context.Context, fullRebuild bool, logger jsonrpc.FunctionLogger) error {
 	ls := r.ls
+	var buildPath *paths.Path
+	if fullRebuild {
+		buildPath = ls.fullBuildPath
+	} else {
+		buildPath = ls.buildPath
+	}
 
-	if success, err := ls.generateBuildEnvironment(ctx, logger); err != nil {
+	if success, err := ls.generateBuildEnvironment(ctx, fullRebuild, buildPath, logger); err != nil {
 		return err
 	} else if !success {
 		return fmt.Errorf("build failed")
@@ -123,9 +129,7 @@ func (r *SketchRebuilder) doRebuild(ctx context.Context, logger jsonrpc.Function
 	default:
 	}
 
-	if err := ls.buildPath.Join("compile_commands.json").CopyTo(ls.compileCommandsDir.Join("compile_commands.json")); err != nil {
-		logger.Logf("ERROR: updating compile_commands: %s", err)
-	}
+	ls.CopyBuildResults(logger, buildPath, fullRebuild)
 
 	if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
 		oldVesrion := ls.sketchMapper.CppText.Version
@@ -166,11 +170,10 @@ func (r *SketchRebuilder) doRebuild(ctx context.Context, logger jsonrpc.Function
 	return nil
 }
 
-func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logger jsonrpc.FunctionLogger) (bool, error) {
+func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullBuild bool, buildPath *paths.Path, logger jsonrpc.FunctionLogger) (bool, error) {
 	// Extract all build information from language server status
 	ls.readLock(logger, false)
 	sketchRoot := ls.sketchRoot
-	buildPath := ls.buildPath
 	config := ls.config
 	type overridesFile struct {
 		Overrides map[string]string `json:"overrides"`
@@ -204,6 +207,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 			BuildPath:                     buildPath.String(),
 			CreateCompilationDatabaseOnly: true,
 			Verbose:                       true,
+			SkipLibrariesDiscovery:        !fullBuild,
 		}
 		compileReqJson, _ := json.MarshalIndent(compileReq, "", "  ")
 		logger.Logf("Running build with: %s", string(compileReqJson))
@@ -264,9 +268,12 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, logge
 			"--source-override", overridesJSON.String(),
 			"--build-path", buildPath.String(),
 			"--format", "json",
-			//"--clean",
-			sketchRoot.String(),
 		}
+		if !fullBuild {
+			args = append(args, "--skip-libraries-discovery")
+		}
+		args = append(args, sketchRoot.String())
+
 		cmd, err := executils.NewProcess(nil, args...)
 		if err != nil {
 			return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)

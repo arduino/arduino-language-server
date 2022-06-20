@@ -40,6 +40,7 @@ type INOLanguageServer struct {
 	buildPath                 *paths.Path
 	buildSketchRoot           *paths.Path
 	buildSketchCpp            *paths.Path
+	fullBuildPath             *paths.Path
 	sketchRoot                *paths.Path
 	sketchName                string
 	sketchMapper              *sourcemapper.SketchMapper
@@ -136,9 +137,16 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 		ls.buildSketchRoot = ls.buildPath.Join("sketch")
 	}
 
+	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
+		log.Fatalf("Could not create temp folder: %s", err)
+	} else {
+		ls.fullBuildPath = tmp.Canonical()
+	}
+
 	logger.Logf("Initial board configuration: %s", ls.config.Fqbn)
 	logger.Logf("Language server build path: %s", ls.buildPath)
 	logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
+	logger.Logf("Language server FULL build path: %s", ls.fullBuildPath)
 	logger.Logf("Language server compile-commands: %s", ls.compileCommandsDir.Join("compile_commands.json"))
 
 	ls.IDE = NewIDELSPServer(logger, stdin, stdout, ls)
@@ -166,7 +174,7 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		ls.sketchName = ls.sketchRoot.Base()
 		ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
 
-		if success, err := ls.generateBuildEnvironment(context.Background(), logger); err != nil {
+		if success, err := ls.generateBuildEnvironment(context.Background(), true, ls.buildPath, logger); err != nil {
 			logger.Logf("error starting clang: %s", err)
 			return
 		} else if !success {
@@ -1169,6 +1177,23 @@ func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.Fun
 		logger.Logf("Error sending notification to clangd server: %v", err)
 		logger.Logf("Please restart the language server.")
 		ls.Close()
+	}
+}
+
+func (ls *INOLanguageServer) FullBuildCompletedFromIDE(logger jsonrpc.FunctionLogger, params *FullBuildResult) {
+	ls.writeLock(logger, true)
+	defer ls.writeUnlock(logger)
+	ls.CopyBuildResults(logger, params.BuildPath, true)
+}
+
+func (ls *INOLanguageServer) CopyBuildResults(logger jsonrpc.FunctionLogger, buildPath *paths.Path, fullRebuild bool) {
+	if err := buildPath.Join("compile_commands.json").CopyTo(ls.compileCommandsDir.Join("compile_commands.json")); err != nil {
+		logger.Logf("ERROR: updating compile_commands: %s", err)
+	}
+	if fullRebuild {
+		if err := buildPath.Join("libraries.cache").CopyTo(ls.compileCommandsDir.Join("libraries.cache")); err != nil {
+			logger.Logf("ERROR: updating libraires.cache: %s", err)
+		}
 	}
 }
 

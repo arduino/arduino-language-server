@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/arduino/go-paths-helper"
 	"github.com/fatih/color"
 	"go.bug.st/json"
 	"go.bug.st/lsp"
@@ -20,6 +21,7 @@ func NewIDELSPServer(logger jsonrpc.FunctionLogger, in io.Reader, out io.Writer,
 		ls: ls,
 	}
 	server.conn = lsp.NewServer(in, out, server)
+	server.conn.RegisterCustomNotification("arduino/buildCompleted", server.ArduinoBuildCompleted)
 	server.conn.SetLogger(&LSPLogger{
 		IncomingPrefix: "IDE --> LS",
 		OutgoingPrefix: "IDE <-- LS",
@@ -266,4 +268,18 @@ func (server *IDELSPServer) TextDocumentDidSave(logger jsonrpc.FunctionLogger, p
 
 func (server *IDELSPServer) TextDocumentDidClose(logger jsonrpc.FunctionLogger, params *lsp.DidCloseTextDocumentParams) {
 	server.ls.TextDocumentDidCloseNotifFromIDE(logger, params)
+}
+
+// FullBuildResult is a custom notification from the Arduino IDE, sent
+type FullBuildResult struct {
+	BuildPath *paths.Path `json:"build_path"`
+}
+
+func (server *IDELSPServer) ArduinoBuildCompleted(logger jsonrpc.FunctionLogger, raw json.RawMessage) {
+	var params FullBuildResult
+	if err := json.Unmarshal(raw, &params); err != nil {
+		logger.Logf("ERROR decoding FullBuildResult: %s", err)
+	} else {
+		server.ls.FullBuildCompletedFromIDE(logger, &params)
+	}
 }
