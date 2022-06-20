@@ -2,6 +2,9 @@ module github.com/arduino/arduino-language-server
 
 go 1.18
 
+// this is the skip_lib_search_result branch, it must be removed once merged upstream
+replace github.com/arduino/arduino-cli => github.com/cmaglie/arduino-cli v0.0.0-20220619203318-250e9e54d2de
+
 require (
 	github.com/arduino/arduino-cli v0.0.0-20220614161710-813cfe73a466
 	github.com/arduino/go-paths-helper v1.7.0
@@ -9,7 +12,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.7.0
 	go.bug.st/json v1.15.6
-	go.bug.st/lsp v0.0.0-20220608135618-8a2f8eb9ad1b
+	go.bug.st/lsp v0.0.0-20220620105243-bee2b5136003
 	google.golang.org/grpc v1.42.0
 )
 
