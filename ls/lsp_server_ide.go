@@ -229,7 +229,14 @@ func (server *IDELSPServer) WorkspaceDidChangeWorkspaceFolders(logger jsonrpc.Fu
 }
 
 func (server *IDELSPServer) WorkspaceDidChangeConfiguration(logger jsonrpc.FunctionLogger, params *lsp.DidChangeConfigurationParams) {
-	panic("unimplemented")
+	// At least one LSP client, Eglot, sends this by default when
+	// first connecting, even if the otions are empty.
+	// https://github.com/joaotavora/eglot/blob/e835996e16610d0ded6d862214b3b452b8803ea8/eglot.el#L1080
+	//
+	// Since ALS doesn’t have any workspace configuration yet,
+	// ignore it.
+	return
+
 }
 
 func (server *IDELSPServer) WorkspaceDidChangeWatchedFiles(logger jsonrpc.FunctionLogger, params *lsp.DidChangeWatchedFilesParams) {
