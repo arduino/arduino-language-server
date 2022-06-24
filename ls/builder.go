@@ -25,18 +25,24 @@ import (
 	"google.golang.org/grpc"
 )
 
+type rebuildSketchParams struct {
+	trigger     chan chan<- bool
+	fullRebuild bool
+}
+
 type SketchRebuilder struct {
-	ls      *INOLanguageServer
-	trigger chan chan<- bool
-	cancel  func()
-	mutex   sync.Mutex
+	ls     *INOLanguageServer
+	params *rebuildSketchParams
+	cancel func()
+	mutex  sync.Mutex
 }
 
 func NewSketchBuilder(ls *INOLanguageServer) *SketchRebuilder {
+	p := rebuildSketchParams{trigger: make(chan chan<- bool, 1), fullRebuild: false}
 	res := &SketchRebuilder{
-		trigger: make(chan chan<- bool, 1),
-		cancel:  func() {},
-		ls:      ls,
+		params: &p,
+		cancel: func() {},
+		ls:     ls,
 	}
 	go func() {
 		defer streams.CatchAndLogPanic()
@@ -45,25 +51,26 @@ func NewSketchBuilder(ls *INOLanguageServer) *SketchRebuilder {
 	return res
 }
 
-func (ls *INOLanguageServer) triggerRebuildAndWait(logger jsonrpc.FunctionLogger) {
+func (ls *INOLanguageServer) triggerRebuildAndWait(logger jsonrpc.FunctionLogger, fullRebuild bool) {
 	completed := make(chan bool)
-	ls.sketchRebuilder.TriggerRebuild(completed)
+	ls.sketchRebuilder.TriggerRebuild(completed, fullRebuild)
 	ls.writeUnlock(logger)
 	<-completed
 	ls.writeLock(logger, true)
 }
 
-func (ls *INOLanguageServer) triggerRebuild() {
-	ls.sketchRebuilder.TriggerRebuild(nil)
+func (ls *INOLanguageServer) triggerRebuild(fullRebuild bool) {
+	ls.sketchRebuilder.TriggerRebuild(nil, fullRebuild)
 }
 
-func (r *SketchRebuilder) TriggerRebuild(completed chan<- bool) {
+func (r *SketchRebuilder) TriggerRebuild(completed chan<- bool, fullRebuild bool) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	r.cancel() // Stop possibly already running builds
+	r.params.fullRebuild = fullRebuild
 	select {
-	case r.trigger <- completed:
+	case r.params.trigger <- completed:
 	default:
 	}
 }
@@ -71,12 +78,12 @@ func (r *SketchRebuilder) TriggerRebuild(completed chan<- bool) {
 func (r *SketchRebuilder) rebuilderLoop() {
 	logger := NewLSPFunctionLogger(color.HiMagentaString, "SKETCH REBUILD: ")
 	for {
-		completed := <-r.trigger
+		completed := <-r.params.trigger
 
 		for {
 			// Concede a 200ms delay to accumulate bursts of changes
 			select {
-			case <-r.trigger:
+			case <-r.params.trigger:
 				continue
 			case <-time.After(time.Second):
 			}
@@ -88,11 +95,12 @@ func (r *SketchRebuilder) rebuilderLoop() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		r.mutex.Lock()
-		logger.Logf("Sketch rebuild started")
+		fullRebuild := r.params.fullRebuild
+		logger.Logf("Sketch rebuild started. Full-rebuild: %v", fullRebuild)
 		r.cancel = cancel
 		r.mutex.Unlock()
 
-		if err := r.doRebuild(ctx, false, logger); err != nil {
+		if err := r.doRebuild(ctx, fullRebuild, logger); err != nil {
 			logger.Logf("Error: %s", err)
 		}
 
@@ -132,9 +140,9 @@ func (r *SketchRebuilder) doRebuild(ctx context.Context, fullRebuild bool, logge
 	ls.CopyBuildResults(logger, buildPath, fullRebuild)
 
 	if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
-		oldVesrion := ls.sketchMapper.CppText.Version
+		oldVersion := ls.sketchMapper.CppText.Version
 		ls.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
-		ls.sketchMapper.CppText.Version = oldVesrion + 1
+		ls.sketchMapper.CppText.Version = oldVersion + 1
 		ls.sketchMapper.DebugLogAll()
 	} else {
 		return errors.WithMessage(err, "reading generated cpp file from sketch")
@@ -147,7 +155,7 @@ func (r *SketchRebuilder) doRebuild(ctx context.Context, fullRebuild bool, logge
 		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
 	}
 	if err := ls.Clangd.conn.TextDocumentDidSave(didSaveParams); err != nil {
-		logger.Logf("error reinitilizing clangd:", err)
+		logger.Logf("error reinitializing clangd:", err)
 		return err
 	}
 
@@ -163,7 +171,7 @@ func (r *SketchRebuilder) doRebuild(ctx context.Context, fullRebuild bool, logge
 		},
 	}
 	if err := ls.Clangd.conn.TextDocumentDidChange(didChangeParams); err != nil {
-		logger.Logf("error reinitilizing clangd:", err)
+		logger.Logf("error reinitializing clangd:", err)
 		return err
 	}
 

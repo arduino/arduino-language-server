@@ -217,10 +217,10 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		clangInitializeParams.RootPath = ls.buildSketchRoot.String()
 		clangInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
 		if clangInitializeResult, clangErr, err := ls.Clangd.conn.Initialize(ctx, &clangInitializeParams); err != nil {
-			logger.Logf("error initilizing clangd: %v", err)
+			logger.Logf("error initializing clangd: %v", err)
 			return
 		} else if clangErr != nil {
-			logger.Logf("error initilizing clangd: %v", clangErr.AsError())
+			logger.Logf("error initializing clangd: %v", clangErr.AsError())
 			return
 		} else {
 			logger.Logf("clangd successfully started: %s", string(lsp.EncodeMessage(clangInitializeResult)))
@@ -355,7 +355,7 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 			// 		TokenModifiers: []string{},
 			// 	},
 			// 	Range: false,
-			// 	Full: &lsp.SemantiTokenFullOptions{
+			// 	Full: &lsp.SemanticTokenFullOptions{
 			// 		Delta: true,
 			// 	},
 			// },
@@ -445,7 +445,7 @@ func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Contex
 		if clangItem.Command != nil {
 			c := ls.clang2IdeCommand(logger, *clangItem.Command)
 			if c == nil {
-				continue // Skit item with unsupported command convertion
+				continue // Skit item with unsupported command conversion
 			}
 			ideCommand = c
 		}
@@ -603,7 +603,7 @@ func (ls *INOLanguageServer) TextDocumentDefinitionReqFromIDE(ctx context.Contex
 
 func (ls *INOLanguageServer) TextDocumentTypeDefinitionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.TypeDefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
 	// XXX: This capability is not advertised in the initialization message (clangd
-	// does not advetise it either, so maybe we should just not implement it)
+	// does not advertise it either, so maybe we should just not implement it)
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
 
@@ -982,9 +982,10 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 		return
 	}
 
+	// TODO: trigger `fullRebuild` if mail sketch file?
 	if ls.ideURIIsPartOfTheSketch(ideTextDocItem.URI) {
 		if !clangURI.AsPath().Exist() {
-			ls.triggerRebuildAndWait(logger)
+			ls.triggerRebuildAndWait(logger, true)
 		}
 	}
 
@@ -1034,7 +1035,7 @@ func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.Fu
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
-	ls.triggerRebuild()
+	ls.triggerRebuild(false)
 
 	logger.Logf("didChange(%s)", ideParams.TextDocument)
 	for _, change := range ideParams.ContentChanges {
@@ -1134,14 +1135,14 @@ func (ls *INOLanguageServer) TextDocumentDidSaveNotifFromIDE(logger jsonrpc.Func
 	// so we will not forward notification on saves in the sketch folder.
 	logger.Logf("notification is not forwarded to clang")
 
-	ls.triggerRebuild()
+	ls.triggerRebuild(false)
 }
 
 func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.DidCloseTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
-	ls.triggerRebuild()
+	ls.triggerRebuild(false)
 
 	inoIdentifier := ideParams.TextDocument
 	if _, exist := ls.trackedIdeDocs[inoIdentifier.URI.AsPath().String()]; exist {
@@ -1180,10 +1181,10 @@ func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.Fun
 	}
 }
 
-func (ls *INOLanguageServer) FullBuildCompletedFromIDE(logger jsonrpc.FunctionLogger, params *FullBuildResult) {
+func (ls *INOLanguageServer) FullBuildCompletedFromIDE(logger jsonrpc.FunctionLogger, params *DidCompleteBuildParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
-	ls.CopyBuildResults(logger, params.BuildPath, true)
+	ls.CopyBuildResults(logger, params.BuildOutputUri.AsPath(), true)
 }
 
 func (ls *INOLanguageServer) CopyBuildResults(logger jsonrpc.FunctionLogger, buildPath *paths.Path, fullRebuild bool) {
@@ -1192,8 +1193,9 @@ func (ls *INOLanguageServer) CopyBuildResults(logger jsonrpc.FunctionLogger, bui
 	}
 	if fullRebuild {
 		if err := buildPath.Join("libraries.cache").CopyTo(ls.compileCommandsDir.Join("libraries.cache")); err != nil {
-			logger.Logf("ERROR: updating libraires.cache: %s", err)
+			logger.Logf("ERROR: updating libraries.cache: %s", err)
 		}
+		ls.triggerRebuildAndWait(logger, false)
 	}
 }
 
@@ -1221,7 +1223,7 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 			ls.ideInoDocsWithDiagnostics[ideInoURI] = true
 		}
 
-		// .. and cleanup all previouse diagnostics that are no longer valid...
+		// .. and cleanup all previous diagnostics that are no longer valid...
 		for ideInoURI := range ls.ideInoDocsWithDiagnostics {
 			if _, ok := allIdeParams[ideInoURI]; ok {
 				continue
@@ -1243,7 +1245,7 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 			_ = json.Unmarshal(ideDiag.Code, &code)
 			switch code {
 			case "":
-				// Filter unkown non-string codes
+				// Filter unknown non-string codes
 			case "drv_unknown_argument_with_suggestion":
 				// Skip errors like: "Unknown argument '-mlongcalls'; did you mean '-mlong-calls'?"
 			case "drv_unknown_argument":
@@ -1321,7 +1323,7 @@ func (ls *INOLanguageServer) ideURIIsPartOfTheSketch(ideURI lsp.DocumentURI) boo
 func (ls *INOLanguageServer) ProgressNotifFromClangd(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
 	var token string
 	if err := json.Unmarshal(progress.Token, &token); err != nil {
-		logger.Logf("error decoding progess token: %s", err)
+		logger.Logf("error decoding progress token: %s", err)
 		return
 	}
 	switch value := progress.TryToDecodeWellKnownValues().(type) {
@@ -1495,7 +1497,7 @@ func (ls *INOLanguageServer) clang2IdeCommand(logger jsonrpc.FunctionLogger, cla
 
 			converted, err := json.Marshal(v)
 			if err != nil {
-				panic("Internal Error: json conversion of codeAcion command arguments")
+				panic("Internal Error: json conversion of codeAction command arguments")
 			}
 			ideCommand.Arguments[i] = converted
 		}
@@ -1521,7 +1523,7 @@ func (ls *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger,
 			continue
 		}
 
-		// ...otherwise convert edits to the sketch.ino.cpp into multilpe .ino edits
+		// ...otherwise convert edits to the sketch.ino.cpp into multiple .ino edits
 		for _, edit := range edits {
 			inoURI, inoRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, editURI, edit.Range)
 			if err != nil {
