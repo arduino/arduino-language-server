@@ -1188,14 +1188,21 @@ func (ls *INOLanguageServer) FullBuildCompletedFromIDE(logger jsonrpc.FunctionLo
 }
 
 func (ls *INOLanguageServer) CopyBuildResults(logger jsonrpc.FunctionLogger, buildPath *paths.Path, fullRebuild bool) {
-	if err := buildPath.Join("compile_commands.json").CopyTo(ls.compileCommandsDir.Join("compile_commands.json")); err != nil {
+	fromCommands := buildPath.Join("compile_commands.json")
+	toCommands := ls.compileCommandsDir.Join("compile_commands.json")
+	if err := fromCommands.CopyTo(toCommands); err != nil {
 		logger.Logf("ERROR: updating compile_commands: %s", err)
+	} else {
+		logger.Logf("Updated 'compile_commands'. Copied: %v to %v", fromCommands, toCommands)
 	}
 	if fullRebuild {
-		if err := buildPath.Join("libraries.cache").CopyTo(ls.compileCommandsDir.Join("libraries.cache")); err != nil {
+		fromCache := buildPath.Join("libraries.cache")
+		toCache := ls.compileCommandsDir.Join("libraries.cache")
+		if err := fromCache.CopyTo(toCache); err != nil {
 			logger.Logf("ERROR: updating libraries.cache: %s", err)
+		} else {
+			logger.Logf("Updated 'libraries.cache'. Copied: %v to %v", fromCache, toCache)
 		}
-		ls.triggerRebuildAndWait(logger, false)
 	}
 }
 
