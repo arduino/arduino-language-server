@@ -36,7 +36,6 @@ type INOLanguageServer struct {
 	closing                   chan bool
 	clangdStarted             *sync.Cond
 	dataMux                   sync.RWMutex
-	compileCommandsDir        *paths.Path
 	buildPath                 *paths.Path
 	buildSketchRoot           *paths.Path
 	buildSketchCpp            *paths.Path
@@ -126,12 +125,6 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
 		log.Fatalf("Could not create temp folder: %s", err)
 	} else {
-		ls.compileCommandsDir = tmp.Canonical()
-	}
-
-	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
-		log.Fatalf("Could not create temp folder: %s", err)
-	} else {
 		ls.buildPath = tmp.Canonical()
 		ls.buildSketchRoot = ls.buildPath.Join("sketch")
 	}
@@ -139,7 +132,6 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	logger.Logf("Initial board configuration: %s", ls.config.Fqbn)
 	logger.Logf("Language server build path: %s", ls.buildPath)
 	logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
-	logger.Logf("Language server compile-commands: %s", ls.compileCommandsDir.Join("compile_commands.json"))
 
 	ls.IDE = NewIDELSPServer(logger, stdin, stdout, ls)
 	ls.progressHandler = NewProgressProxy(ls.IDE.conn)
@@ -172,10 +164,6 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		} else if !success {
 			logger.Logf("bootstrap build failed!")
 			return
-		}
-
-		if err := ls.buildPath.Join("compile_commands.json").CopyTo(ls.compileCommandsDir.Join("compile_commands.json")); err != nil {
-			logger.Logf("ERROR: updating compile_commands: %s", err)
 		}
 
 		if inoCppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
@@ -1341,9 +1329,6 @@ func (ls *INOLanguageServer) Close() {
 	}
 	if ls.buildPath != nil {
 		ls.buildPath.RemoveAll()
-	}
-	if ls.compileCommandsDir != nil {
-		ls.compileCommandsDir.RemoveAll()
 	}
 }
 
