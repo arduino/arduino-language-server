@@ -128,9 +128,9 @@ func (r *SketchRebuilder) doRebuild(ctx context.Context, logger jsonrpc.Function
 	}
 
 	if cppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
-		oldVesrion := ls.sketchMapper.CppText.Version
+		oldVersion := ls.sketchMapper.CppText.Version
 		ls.sketchMapper = sourcemapper.CreateInoMapper(cppContent)
-		ls.sketchMapper.CppText.Version = oldVesrion + 1
+		ls.sketchMapper.CppText.Version = oldVersion + 1
 		ls.sketchMapper.DebugLogAll()
 	} else {
 		return errors.WithMessage(err, "reading generated cpp file from sketch")
@@ -143,7 +143,7 @@ func (r *SketchRebuilder) doRebuild(ctx context.Context, logger jsonrpc.Function
 		TextDocument: lsp.TextDocumentIdentifier{URI: cppURI},
 	}
 	if err := ls.Clangd.conn.TextDocumentDidSave(didSaveParams); err != nil {
-		logger.Logf("error reinitilizing clangd:", err)
+		logger.Logf("error reinitializing clangd:", err)
 		return err
 	}
 
@@ -159,7 +159,7 @@ func (r *SketchRebuilder) doRebuild(ctx context.Context, logger jsonrpc.Function
 		},
 	}
 	if err := ls.Clangd.conn.TextDocumentDidChange(didChangeParams); err != nil {
-		logger.Logf("error reinitilizing clangd:", err)
+		logger.Logf("error reinitializing clangd:", err)
 		return err
 	}
 
