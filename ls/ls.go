@@ -154,17 +154,20 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 }
 
 func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
+	ls.writeLock(logger, false)
+	ls.sketchRoot = ideParams.RootURI.AsPath()
+	ls.sketchName = ls.sketchRoot.Base()
+	ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
+	ls.writeUnlock(logger)
+
 	go func() {
 		defer streams.CatchAndLogPanic()
-		// Unlock goroutines waiting for clangd
+
+		// Unlock goroutines waiting for clangd at the end of the initialization.
 		defer ls.clangdStarted.Broadcast()
 
 		logger := NewLSPFunctionLogger(color.HiCyanString, "INIT --- ")
 		logger.Logf("initializing workbench: %s", ideParams.RootURI)
-
-		ls.sketchRoot = ideParams.RootURI.AsPath()
-		ls.sketchName = ls.sketchRoot.Base()
-		ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
 
 		if success, err := ls.generateBuildEnvironment(context.Background(), true, logger); err != nil {
 			logger.Logf("error starting clang: %s", err)
