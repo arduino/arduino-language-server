@@ -282,6 +282,10 @@ type DidCompleteBuildParams struct {
 }
 
 func (server *IDELSPServer) ArduinoBuildCompleted(logger jsonrpc.FunctionLogger, raw json.RawMessage) {
+	if !server.ls.config.SkipLibrariesDiscoveryOnRebuild {
+		return
+	}
+
 	var params DidCompleteBuildParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		logger.Logf("ERROR decoding DidCompleteBuildParams: %s", err)

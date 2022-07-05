@@ -106,7 +106,7 @@ func (r *SketchRebuilder) rebuilderLoop() {
 
 func (r *SketchRebuilder) doRebuildArduinoPreprocessedSketch(ctx context.Context, logger jsonrpc.FunctionLogger) error {
 	ls := r.ls
-	if success, err := ls.generateBuildEnvironment(ctx, false, logger); err != nil {
+	if success, err := ls.generateBuildEnvironment(ctx, !r.ls.config.SkipLibrariesDiscoveryOnRebuild, logger); err != nil {
 		return err
 	} else if !success {
 		return fmt.Errorf("build failed")
