@@ -209,7 +209,8 @@ func (ls *INOLanguageServer) clang2IdeDocumentSymbols(logger jsonrpc.FunctionLog
 		logger.Logf("  > convert %s %s", clangSymbol.Kind, clangSymbol.Range)
 		ideURI, ideRange, isPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangURI, clangSymbol.Range)
 		if err != nil {
-			return nil, err
+			logger.Logf("    filtering out invalid symbol range: %s", err)
+			continue
 		}
 		if isPreprocessed {
 			logger.Logf("    symbol is in the preprocessed section of the sketch.ino.cpp, skipping")
@@ -221,7 +222,8 @@ func (ls *INOLanguageServer) clang2IdeDocumentSymbols(logger jsonrpc.FunctionLog
 		}
 		ideSelectionURI, ideSelectionRange, isSelectionPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangURI, clangSymbol.SelectionRange)
 		if err != nil {
-			return nil, err
+			logger.Logf("    filtering out invalid symbol selection-range: %s", err)
+			continue
 		}
 		if ideSelectionURI != ideURI || isSelectionPreprocessed {
 			logger.Logf("    ERROR: doc of symbol-selection-range does not match doc of symbol-range")
@@ -232,7 +234,8 @@ func (ls *INOLanguageServer) clang2IdeDocumentSymbols(logger jsonrpc.FunctionLog
 
 		ideChildren, err := ls.clang2IdeDocumentSymbols(logger, clangSymbol.Children, clangURI, origIdeURI)
 		if err != nil {
-			return nil, err
+			logger.Logf("    filtering out invalid document-symbol: %s", err)
+			continue
 		}
 
 		ideSymbols = append(ideSymbols, lsp.DocumentSymbol{
