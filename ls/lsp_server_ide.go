@@ -20,6 +20,7 @@ func NewIDELSPServer(logger jsonrpc.FunctionLogger, in io.Reader, out io.Writer,
 		ls: ls,
 	}
 	server.conn = lsp.NewServer(in, out, server)
+	server.conn.RegisterCustomNotification("ino/didCompleteBuild", server.ArduinoBuildCompleted)
 	server.conn.SetLogger(&LSPLogger{
 		IncomingPrefix: "IDE --> LS",
 		OutgoingPrefix: "IDE <-- LS",
@@ -273,4 +274,22 @@ func (server *IDELSPServer) TextDocumentDidSave(logger jsonrpc.FunctionLogger, p
 
 func (server *IDELSPServer) TextDocumentDidClose(logger jsonrpc.FunctionLogger, params *lsp.DidCloseTextDocumentParams) {
 	server.ls.TextDocumentDidCloseNotifFromIDE(logger, params)
+}
+
+// DidCompleteBuildParams is a custom notification from the Arduino IDE, sent
+type DidCompleteBuildParams struct {
+	BuildOutputUri *lsp.DocumentURI `json:"buildOutputUri"`
+}
+
+func (server *IDELSPServer) ArduinoBuildCompleted(logger jsonrpc.FunctionLogger, raw json.RawMessage) {
+	if !server.ls.config.SkipLibrariesDiscoveryOnRebuild {
+		return
+	}
+
+	var params DidCompleteBuildParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		logger.Logf("ERROR decoding DidCompleteBuildParams: %s", err)
+	} else {
+		server.ls.FullBuildCompletedFromIDE(logger, &params)
+	}
 }

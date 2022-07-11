@@ -36,10 +36,10 @@ type INOLanguageServer struct {
 	closing                   chan bool
 	clangdStarted             *sync.Cond
 	dataMux                   sync.RWMutex
-	compileCommandsDir        *paths.Path
 	buildPath                 *paths.Path
 	buildSketchRoot           *paths.Path
 	buildSketchCpp            *paths.Path
+	fullBuildPath             *paths.Path
 	sketchRoot                *paths.Path
 	sketchName                string
 	sketchMapper              *sourcemapper.SketchMapper
@@ -51,14 +51,15 @@ type INOLanguageServer struct {
 
 // Config describes the language server configuration.
 type Config struct {
-	Fqbn              string
-	CliPath           *paths.Path
-	CliConfigPath     *paths.Path
-	ClangdPath        *paths.Path
-	CliDaemonAddress  string
-	CliInstanceNumber int
-	FormatterConf     *paths.Path
-	EnableLogging     bool
+	Fqbn                            string
+	CliPath                         *paths.Path
+	CliConfigPath                   *paths.Path
+	ClangdPath                      *paths.Path
+	CliDaemonAddress                string
+	CliInstanceNumber               int
+	FormatterConf                   *paths.Path
+	EnableLogging                   bool
+	SkipLibrariesDiscoveryOnRebuild bool
 }
 
 var yellow = color.New(color.FgHiYellow)
@@ -126,20 +127,20 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
 		log.Fatalf("Could not create temp folder: %s", err)
 	} else {
-		ls.compileCommandsDir = tmp.Canonical()
+		ls.buildPath = tmp.Canonical()
+		ls.buildSketchRoot = ls.buildPath.Join("sketch")
 	}
 
 	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
 		log.Fatalf("Could not create temp folder: %s", err)
 	} else {
-		ls.buildPath = tmp.Canonical()
-		ls.buildSketchRoot = ls.buildPath.Join("sketch")
+		ls.fullBuildPath = tmp.Canonical()
 	}
 
 	logger.Logf("Initial board configuration: %s", ls.config.Fqbn)
 	logger.Logf("Language server build path: %s", ls.buildPath)
 	logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
-	logger.Logf("Language server compile-commands: %s", ls.compileCommandsDir.Join("compile_commands.json"))
+	logger.Logf("Language server FULL build path: %s", ls.fullBuildPath)
 
 	ls.IDE = NewIDELSPServer(logger, stdin, stdout, ls)
 	ls.progressHandler = NewProgressProxy(ls.IDE.conn)
@@ -154,28 +155,27 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 }
 
 func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
+	ls.writeLock(logger, false)
+	ls.sketchRoot = ideParams.RootURI.AsPath()
+	ls.sketchName = ls.sketchRoot.Base()
+	ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
+	ls.writeUnlock(logger)
+
 	go func() {
 		defer streams.CatchAndLogPanic()
-		// Unlock goroutines waiting for clangd
+
+		// Unlock goroutines waiting for clangd at the end of the initialization.
 		defer ls.clangdStarted.Broadcast()
 
 		logger := NewLSPFunctionLogger(color.HiCyanString, "INIT --- ")
 		logger.Logf("initializing workbench: %s", ideParams.RootURI)
 
-		ls.sketchRoot = ideParams.RootURI.AsPath()
-		ls.sketchName = ls.sketchRoot.Base()
-		ls.buildSketchCpp = ls.buildSketchRoot.Join(ls.sketchName + ".ino.cpp")
-
-		if success, err := ls.generateBuildEnvironment(context.Background(), logger); err != nil {
+		if success, err := ls.generateBuildEnvironment(context.Background(), true, logger); err != nil {
 			logger.Logf("error starting clang: %s", err)
 			return
 		} else if !success {
 			logger.Logf("bootstrap build failed!")
 			return
-		}
-
-		if err := ls.buildPath.Join("compile_commands.json").CopyTo(ls.compileCommandsDir.Join("compile_commands.json")); err != nil {
-			logger.Logf("ERROR: updating compile_commands: %s", err)
 		}
 
 		if inoCppContent, err := ls.buildSketchCpp.ReadFile(); err == nil {
@@ -209,10 +209,10 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		clangInitializeParams.RootPath = ls.buildSketchRoot.String()
 		clangInitializeParams.RootURI = lsp.NewDocumentURIFromPath(ls.buildSketchRoot)
 		if clangInitializeResult, clangErr, err := ls.Clangd.conn.Initialize(ctx, &clangInitializeParams); err != nil {
-			logger.Logf("error initilizing clangd: %v", err)
+			logger.Logf("error initializing clangd: %v", err)
 			return
 		} else if clangErr != nil {
-			logger.Logf("error initilizing clangd: %v", clangErr.AsError())
+			logger.Logf("error initializing clangd: %v", clangErr.AsError())
 			return
 		} else {
 			logger.Logf("clangd successfully started: %s", string(lsp.EncodeMessage(clangInitializeResult)))
@@ -347,7 +347,7 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 			// 		TokenModifiers: []string{},
 			// 	},
 			// 	Range: false,
-			// 	Full: &lsp.SemantiTokenFullOptions{
+			// 	Full: &lsp.SemanticTokenFullOptions{
 			// 		Delta: true,
 			// 	},
 			// },
@@ -437,7 +437,7 @@ func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Contex
 		if clangItem.Command != nil {
 			c := ls.clang2IdeCommand(logger, *clangItem.Command)
 			if c == nil {
-				continue // Skit item with unsupported command convertion
+				continue // Skit item with unsupported command conversion
 			}
 			ideCommand = c
 		}
@@ -595,7 +595,7 @@ func (ls *INOLanguageServer) TextDocumentDefinitionReqFromIDE(ctx context.Contex
 
 func (ls *INOLanguageServer) TextDocumentTypeDefinitionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.TypeDefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
 	// XXX: This capability is not advertised in the initialization message (clangd
-	// does not advetise it either, so maybe we should just not implement it)
+	// does not advertise it either, so maybe we should just not implement it)
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
 
@@ -1172,6 +1172,24 @@ func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.Fun
 	}
 }
 
+func (ls *INOLanguageServer) FullBuildCompletedFromIDE(logger jsonrpc.FunctionLogger, params *DidCompleteBuildParams) {
+	ls.writeLock(logger, true)
+	defer ls.writeUnlock(logger)
+
+	ls.CopyFullBuildResults(logger, params.BuildOutputUri.AsPath())
+	ls.triggerRebuild()
+}
+
+func (ls *INOLanguageServer) CopyFullBuildResults(logger jsonrpc.FunctionLogger, buildPath *paths.Path) {
+	fromCache := buildPath.Join("libraries.cache")
+	toCache := ls.buildPath.Join("libraries.cache")
+	if err := fromCache.CopyTo(toCache); err != nil {
+		logger.Logf("ERROR: updating libraries.cache: %s", err)
+	} else {
+		logger.Logf("Updated 'libraries.cache'. Copied: %v to %v", fromCache, toCache)
+	}
+}
+
 func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.FunctionLogger, clangParams *lsp.PublishDiagnosticsParams) {
 	ls.readLock(logger, false)
 	defer ls.readUnlock(logger)
@@ -1196,7 +1214,7 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 			ls.ideInoDocsWithDiagnostics[ideInoURI] = true
 		}
 
-		// .. and cleanup all previouse diagnostics that are no longer valid...
+		// .. and cleanup all previous diagnostics that are no longer valid...
 		for ideInoURI := range ls.ideInoDocsWithDiagnostics {
 			if _, ok := allIdeParams[ideInoURI]; ok {
 				continue
@@ -1218,7 +1236,7 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 			_ = json.Unmarshal(ideDiag.Code, &code)
 			switch code {
 			case "":
-				// Filter unkown non-string codes
+				// Filter unknown non-string codes
 			case "drv_unknown_argument_with_suggestion":
 				// Skip errors like: "Unknown argument '-mlongcalls'; did you mean '-mlong-calls'?"
 			case "drv_unknown_argument":
@@ -1296,7 +1314,7 @@ func (ls *INOLanguageServer) ideURIIsPartOfTheSketch(ideURI lsp.DocumentURI) boo
 func (ls *INOLanguageServer) ProgressNotifFromClangd(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
 	var token string
 	if err := json.Unmarshal(progress.Token, &token); err != nil {
-		logger.Logf("error decoding progess token: %s", err)
+		logger.Logf("error decoding progress token: %s", err)
 		return
 	}
 	switch value := progress.TryToDecodeWellKnownValues().(type) {
@@ -1342,9 +1360,6 @@ func (ls *INOLanguageServer) Close() {
 	if ls.buildPath != nil {
 		ls.buildPath.RemoveAll()
 	}
-	if ls.compileCommandsDir != nil {
-		ls.compileCommandsDir.RemoveAll()
-	}
 }
 
 // CloseNotify returns a channel that is closed when the InoHandler is closed
@@ -1357,6 +1372,10 @@ func (ls *INOLanguageServer) CleanUp() {
 	if ls.buildPath != nil {
 		ls.buildPath.RemoveAll()
 		ls.buildPath = nil
+	}
+	if ls.fullBuildPath != nil {
+		ls.fullBuildPath.RemoveAll()
+		ls.fullBuildPath = nil
 	}
 }
 
@@ -1470,7 +1489,7 @@ func (ls *INOLanguageServer) clang2IdeCommand(logger jsonrpc.FunctionLogger, cla
 
 			converted, err := json.Marshal(v)
 			if err != nil {
-				panic("Internal Error: json conversion of codeAcion command arguments")
+				panic("Internal Error: json conversion of codeAction command arguments")
 			}
 			ideCommand.Arguments[i] = converted
 		}
@@ -1496,7 +1515,7 @@ func (ls *INOLanguageServer) cpp2inoWorkspaceEdit(logger jsonrpc.FunctionLogger,
 			continue
 		}
 
-		// ...otherwise convert edits to the sketch.ino.cpp into multilpe .ino edits
+		// ...otherwise convert edits to the sketch.ino.cpp into multiple .ino edits
 		for _, edit := range edits {
 			inoURI, inoRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, editURI, edit.Range)
 			if err != nil {

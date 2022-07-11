@@ -3,14 +3,14 @@ module github.com/arduino/arduino-language-server
 go 1.18
 
 require (
-	github.com/arduino/arduino-cli v0.0.0-20220614161710-813cfe73a466
+	github.com/arduino/arduino-cli v0.0.0-20220711135540-a5466d017f77
 	github.com/arduino/go-paths-helper v1.7.0
 	github.com/fatih/color v1.13.0
 	github.com/mattn/go-isatty v0.0.14
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.7.0
 	go.bug.st/json v1.15.6
-	go.bug.st/lsp v0.0.0-20220608135618-8a2f8eb9ad1b
+	go.bug.st/lsp v0.0.0-20220701124835-c1977441be8c
 	google.golang.org/grpc v1.42.0
 )
 
@@ -19,6 +19,8 @@ require (
 	github.com/arduino/go-win32-utils v0.0.0-20180330194947-ed041402e83b // indirect
 	github.com/codeclysm/extract/v3 v3.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/djherbis/buffer v1.1.0 // indirect
+	github.com/djherbis/nio/v3 v3.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/h2non/filetype v1.0.8 // indirect

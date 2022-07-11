@@ -50,6 +50,9 @@ func main() {
 	cliDaemonInstanceNumber := flag.Int(
 		"cli-daemon-instance", -1,
 		"Instance number of the Arduino CLI daemon")
+	skipLibrariesDiscoveryOnRebuild := flag.Bool(
+		"skip-libraries-discovery-on-rebuild", false,
+		"Skip libraries discovery on rebuild, it will make rebuilds faster but it will fail if the used libraries changes.")
 	flag.Parse()
 
 	if *loggingBasePath != "" {
@@ -111,14 +114,15 @@ func main() {
 	}
 
 	config := &ls.Config{
-		Fqbn:              *fqbn,
-		ClangdPath:        paths.New(*clangdPath),
-		EnableLogging:     *enableLogging,
-		CliPath:           paths.New(*cliPath),
-		CliConfigPath:     paths.New(*cliConfigPath),
-		FormatterConf:     paths.New(*formatFilePath),
-		CliDaemonAddress:  *cliDaemonAddress,
-		CliInstanceNumber: *cliDaemonInstanceNumber,
+		Fqbn:                            *fqbn,
+		ClangdPath:                      paths.New(*clangdPath),
+		EnableLogging:                   *enableLogging,
+		CliPath:                         paths.New(*cliPath),
+		CliConfigPath:                   paths.New(*cliConfigPath),
+		FormatterConf:                   paths.New(*formatFilePath),
+		CliDaemonAddress:                *cliDaemonAddress,
+		CliInstanceNumber:               *cliDaemonInstanceNumber,
+		SkipLibrariesDiscoveryOnRebuild: *skipLibrariesDiscoveryOnRebuild,
 	}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
