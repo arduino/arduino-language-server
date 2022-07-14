@@ -53,6 +53,9 @@ func main() {
 	skipLibrariesDiscoveryOnRebuild := flag.Bool(
 		"skip-libraries-discovery-on-rebuild", false,
 		"Skip libraries discovery on rebuild, it will make rebuilds faster but it will fail if the used libraries changes.")
+	noRealTimeDiagnostics := flag.Bool(
+		"no-real-time-diagnostics", false,
+		"Disable real time diagnostics")
 	flag.Parse()
 
 	if *loggingBasePath != "" {
@@ -123,6 +126,7 @@ func main() {
 		CliDaemonAddress:                *cliDaemonAddress,
 		CliInstanceNumber:               *cliDaemonInstanceNumber,
 		SkipLibrariesDiscoveryOnRebuild: *skipLibrariesDiscoveryOnRebuild,
+		DisableRealTimeDiagnostics:      *noRealTimeDiagnostics,
 	}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
