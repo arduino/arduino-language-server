@@ -60,6 +60,7 @@ type Config struct {
 	FormatterConf                   *paths.Path
 	EnableLogging                   bool
 	SkipLibrariesDiscoveryOnRebuild bool
+	DisableRealTimeDiagnostics      bool
 }
 
 var yellow = color.New(color.FgHiYellow)
@@ -1191,6 +1192,11 @@ func (ls *INOLanguageServer) CopyFullBuildResults(logger jsonrpc.FunctionLogger,
 }
 
 func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.FunctionLogger, clangParams *lsp.PublishDiagnosticsParams) {
+	if ls.config.DisableRealTimeDiagnostics {
+		logger.Logf("Ignored by configuration")
+		return
+	}
+
 	ls.readLock(logger, false)
 	defer ls.readUnlock(logger)
 
