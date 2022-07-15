@@ -356,7 +356,7 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		},
 		ServerInfo: &lsp.InitializeResultServerInfo{
 			Name:    "arduino-language-server",
-			Version: "0.7.0",
+			Version: "0.7.1",
 		},
 	}
 	logger.Logf("initialization parameters: %s", string(lsp.EncodeMessage(resp)))
