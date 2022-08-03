@@ -1,3 +1,4 @@
 .old
 build.sh
 arduino-language-server*
+/node_modules/
