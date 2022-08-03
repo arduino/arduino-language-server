@@ -3,6 +3,44 @@ version: "3"
 includes:
   dist: ./DistTasks.yml
 
+vars:
+  PROJECT_NAME: "arduino-language-server"
+  DIST_DIR: "dist"
+  # Path of the project's primary Go module:
+  DEFAULT_GO_MODULE_PATH: ./
+  DEFAULT_GO_PACKAGES:
+    sh: |
+      echo $(cd {{default "./" .GO_MODULE_PATH}} && go list ./... | tr '\n' ' ' || echo '"ERROR: Unable to discover Go packages"')
+  # build vars
+  COMMIT:
+    sh: echo "$(git log --no-show-signature -n 1 --format=%h)"
+  TIMESTAMP:
+    sh: echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  TIMESTAMP_SHORT:
+    sh: echo "{{now | date "20060102"}}"
+  TAG:
+    sh: echo "$(git tag --points-at=HEAD 2> /dev/null | head -n1)"
+  VERSION: "{{if .NIGHTLY}}nightly-{{.TIMESTAMP_SHORT}}{{else if .TAG}}{{.TAG}}{{else}}{{.PACKAGE_NAME_PREFIX}}git-snapshot{{end}}"
+  CONFIGURATION_PACKAGE: "github.com/arduino/arduino-language-server/version"
+  LDFLAGS: >-
+    -ldflags
+    '
+    -X {{.CONFIGURATION_PACKAGE}}.versionString={{.VERSION}}
+    -X {{.CONFIGURATION_PACKAGE}}.commit={{.COMMIT}}
+    -X {{.CONFIGURATION_PACKAGE}}.date={{.TIMESTAMP}}
+    '
+  # test vars
+  GOFLAGS: "-timeout 10m -v -coverpkg=./... -covermode=atomic"
+  TEST_VERSION: "0.0.0-test.preview"
+  TEST_COMMIT: "deadbeef"
+  TEST_LDFLAGS: >-
+    -ldflags
+    '
+    -X {{.CONFIGURATION_PACKAGE}}.versionString={{.TEST_VERSION}}
+    -X {{.CONFIGURATION_PACKAGE}}.commit={{.TEST_COMMIT}}
+    -X {{.CONFIGURATION_PACKAGE}}.date={{.TIMESTAMP}}
+    '
+
 tasks:
   docs:generate:
     desc: Create all generated documentation content
@@ -320,39 +358,3 @@ tasks:
       - task: poetry:install-deps
     cmds:
       - poetry run mkdocs serve
-
-vars:
-  PROJECT_NAME: "arduino-language-server"
-  DIST_DIR: "dist"
-  DEFAULT_GO_PACKAGES:
-    sh: |
-      echo $(cd {{default "./" .GO_MODULE_PATH}} && go list ./... | tr '\n' ' ' || echo '"ERROR: Unable to discover Go packages"')
-  # build vars
-  COMMIT:
-    sh: echo "$(git log --no-show-signature -n 1 --format=%h)"
-  TIMESTAMP:
-    sh: echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  TIMESTAMP_SHORT:
-    sh: echo "{{now | date "20060102"}}"
-  TAG:
-    sh: echo "$(git tag --points-at=HEAD 2> /dev/null | head -n1)"
-  VERSION: "{{if .NIGHTLY}}nightly-{{.TIMESTAMP_SHORT}}{{else if .TAG}}{{.TAG}}{{else}}{{.PACKAGE_NAME_PREFIX}}git-snapshot{{end}}"
-  CONFIGURATION_PACKAGE: "github.com/arduino/arduino-language-server/version"
-  LDFLAGS: >-
-    -ldflags
-    '
-    -X {{.CONFIGURATION_PACKAGE}}.versionString={{.VERSION}}
-    -X {{.CONFIGURATION_PACKAGE}}.commit={{.COMMIT}}
-    -X {{.CONFIGURATION_PACKAGE}}.date={{.TIMESTAMP}}
-    '
-  # test vars
-  GOFLAGS: "-timeout 10m -v -coverpkg=./... -covermode=atomic"
-  TEST_VERSION: "0.0.0-test.preview"
-  TEST_COMMIT: "deadbeef"
-  TEST_LDFLAGS: >-
-    -ldflags
-    '
-    -X {{.CONFIGURATION_PACKAGE}}.versionString={{.TEST_VERSION}}
-    -X {{.CONFIGURATION_PACKAGE}}.commit={{.TEST_COMMIT}}
-    -X {{.CONFIGURATION_PACKAGE}}.date={{.TIMESTAMP}}
-    '
