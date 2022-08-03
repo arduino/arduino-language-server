@@ -94,9 +94,8 @@ func (ls *INOLanguageServer) ide2ClangRange(logger jsonrpc.FunctionLogger, ideUR
 	if ls.clangURIRefersToIno(clangURI) {
 		if clangRange, ok := ls.sketchMapper.InoToCppLSPRangeOk(ideURI, ideRange); ok {
 			return clangURI, clangRange, nil
-		} else {
-			return lsp.DocumentURI{}, lsp.Range{}, fmt.Errorf("invalid range %s:%s: could not be mapped to Arduino-preprocessed sketck.ino.cpp", ideURI, ideRange)
 		}
+		return lsp.DocumentURI{}, lsp.Range{}, fmt.Errorf("invalid range %s:%s: could not be mapped to Arduino-preprocessed sketck.ino.cpp", ideURI, ideRange)
 	} else if inSketch {
 		// Convert other sketch file ranges (.cpp/.h)
 		clangRange := ideRange

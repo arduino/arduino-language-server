@@ -155,6 +155,7 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	return ls
 }
 
+// InitializeReqFromIDE initializes a new request from the IDE
 func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
 	ls.writeLock(logger, false)
 	ls.sketchRoot = ideParams.RootURI.AsPath()
@@ -363,6 +364,7 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 	return resp, nil
 }
 
+// ShutdownReqFromIDE executes a shutdown request from the IDE
 func (ls *INOLanguageServer) ShutdownReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
 	done := make(chan bool)
 	go func() {
@@ -374,6 +376,7 @@ func (ls *INOLanguageServer) ShutdownReqFromIDE(ctx context.Context, logger json
 	return nil
 }
 
+// TextDocumentCompletionReqFromIDE handles a text document completion request received from the IDE
 func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.CompletionParams) (*lsp.CompletionList, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -468,6 +471,7 @@ func (ls *INOLanguageServer) TextDocumentCompletionReqFromIDE(ctx context.Contex
 	return ideCompletionList, nil
 }
 
+// TextDocumentHoverReqFromIDE handles a text document hover request received from the IDE
 func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.HoverParams) (*lsp.Hover, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -519,6 +523,7 @@ func (ls *INOLanguageServer) TextDocumentHoverReqFromIDE(ctx context.Context, lo
 	return &ideResp, nil
 }
 
+// TextDocumentSignatureHelpReqFromIDE handles a text document signature help request received from the IDE
 func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.SignatureHelpParams) (*lsp.SignatureHelp, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -550,6 +555,7 @@ func (ls *INOLanguageServer) TextDocumentSignatureHelpReqFromIDE(ctx context.Con
 	return ideSignatureHelp, nil
 }
 
+// TextDocumentDefinitionReqFromIDE handles a text document definition request received from the IDE
 func (ls *INOLanguageServer) TextDocumentDefinitionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -594,6 +600,7 @@ func (ls *INOLanguageServer) TextDocumentDefinitionReqFromIDE(ctx context.Contex
 	return ideLocations, ideLocationLinks, nil
 }
 
+// TextDocumentTypeDefinitionReqFromIDE handles a text document type definition request received from the IDE
 func (ls *INOLanguageServer) TextDocumentTypeDefinitionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.TypeDefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
 	// XXX: This capability is not advertised in the initialization message (clangd
 	// does not advertise it either, so maybe we should just not implement it)
@@ -640,6 +647,7 @@ func (ls *INOLanguageServer) TextDocumentTypeDefinitionReqFromIDE(ctx context.Co
 	return ideLocations, ideLocationLinks, nil
 }
 
+// TextDocumentImplementationReqFromIDE handles a text document implementation request received from the IDE
 func (ls *INOLanguageServer) TextDocumentImplementationReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.ImplementationParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -684,6 +692,7 @@ func (ls *INOLanguageServer) TextDocumentImplementationReqFromIDE(ctx context.Co
 	return ideLocations, inoLocationLinks, nil
 }
 
+// TextDocumentDocumentHighlightReqFromIDE handles a text document highlight request received from the IDE
 func (ls *INOLanguageServer) TextDocumentDocumentHighlightReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentHighlightParams) ([]lsp.DocumentHighlight, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -731,6 +740,7 @@ func (ls *INOLanguageServer) TextDocumentDocumentHighlightReqFromIDE(ctx context
 	return ideHighlights, nil
 }
 
+// TextDocumentDocumentSymbolReqFromIDE handles a text document symbol request received from the IDE
 func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentSymbolParams) ([]lsp.DocumentSymbol, []lsp.SymbolInformation, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -762,13 +772,13 @@ func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Co
 	// Convert response for IDE
 	var ideDocSymbols []lsp.DocumentSymbol
 	if clangDocSymbols != nil {
-		if s, err := ls.clang2IdeDocumentSymbols(logger, clangDocSymbols, clangParams.TextDocument.URI, ideParams.TextDocument.URI); err != nil {
+		s, err := ls.clang2IdeDocumentSymbols(logger, clangDocSymbols, clangParams.TextDocument.URI, ideParams.TextDocument.URI)
+		if err != nil {
 			logger.Logf("Error: %s", err)
 			ls.Close()
 			return nil, nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
-		} else {
-			ideDocSymbols = s
 		}
+		ideDocSymbols = s
 	}
 	var ideSymbolsInformation []lsp.SymbolInformation
 	if clangSymbolsInformation != nil {
@@ -777,6 +787,7 @@ func (ls *INOLanguageServer) TextDocumentDocumentSymbolReqFromIDE(ctx context.Co
 	return ideDocSymbols, ideSymbolsInformation, nil
 }
 
+// TextDocumentCodeActionReqFromIDE handles a text document code action request received from the IDE
 func (ls *INOLanguageServer) TextDocumentCodeActionReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.CodeActionParams) ([]lsp.CommandOrCodeAction, *jsonrpc.ResponseError) {
 	ls.readLock(logger, true)
 	defer ls.readUnlock(logger)
@@ -846,6 +857,7 @@ func (ls *INOLanguageServer) TextDocumentCodeActionReqFromIDE(ctx context.Contex
 	return ideCommandsOrCodeActions, nil
 }
 
+// TextDocumentFormattingReqFromIDE handles a text document formatting request received from the IDE
 func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
@@ -860,12 +872,12 @@ func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Contex
 	}
 	clangURI := clangTextDocument.URI
 
-	if cleanup, err := ls.createClangdFormatterConfig(logger, clangURI); err != nil {
+	cleanup, err := ls.createClangdFormatterConfig(logger, clangURI)
+	if err != nil {
 		logger.Logf("Error: %s", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
-	} else {
-		defer cleanup()
 	}
+	defer cleanup()
 
 	clangParams := &lsp.DocumentFormattingParams{
 		WorkDoneProgressParams: ideParams.WorkDoneProgressParams,
@@ -894,13 +906,14 @@ func (ls *INOLanguageServer) TextDocumentFormattingReqFromIDE(ctx context.Contex
 	}
 
 	// Edits may span over multiple .ino files, filter only the edits relative to the currently displayed file
-	if inoEdits, ok := ideEdits[ideURI]; !ok {
+	inoEdits, ok := ideEdits[ideURI]
+	if !ok {
 		return []lsp.TextEdit{}, nil
-	} else {
-		return inoEdits, nil
 	}
+	return inoEdits, nil
 }
 
+// TextDocumentRangeFormattingReqFromIDE handles a text document range formatting request received from the IDE
 func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.DocumentRangeFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
@@ -918,12 +931,12 @@ func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.C
 		Range:                  clangRange,
 	}
 
-	if cleanup, e := ls.createClangdFormatterConfig(logger, clangURI); e != nil {
+	cleanup, e := ls.createClangdFormatterConfig(logger, clangURI)
+	if e != nil {
 		logger.Logf("cannot create formatter config file: %v", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
-	} else {
-		defer cleanup()
 	}
+	defer cleanup()
 
 	clangEdits, clangErr, err := ls.Clangd.conn.TextDocumentRangeFormatting(ctx, clangParams)
 	if err != nil {
@@ -947,23 +960,26 @@ func (ls *INOLanguageServer) TextDocumentRangeFormattingReqFromIDE(ctx context.C
 	}
 
 	// Edits may span over multiple .ino files, filter only the edits relative to the currently displayed file
-	if inoEdits, ok := sketchEdits[ideURI]; !ok {
+	inoEdits, ok := sketchEdits[ideURI]
+	if !ok {
 		return []lsp.TextEdit{}, nil
-	} else {
-		return inoEdits, nil
 	}
+	return inoEdits, nil
 }
 
+// InitializedNotifFromIDE initializes a notification from the IDE
 func (ls *INOLanguageServer) InitializedNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.InitializedParams) {
 	logger.Logf("Notification is not propagated to clangd")
 }
 
+// ExitNotifFromIDE logs an exit notification from the IDE
 func (ls *INOLanguageServer) ExitNotifFromIDE(logger jsonrpc.FunctionLogger) {
 	ls.Clangd.conn.Exit()
 	logger.Logf("Arduino Language Server is shutting down.")
 	os.Exit(0)
 }
 
+// TextDocumentDidOpenNotifFromIDE handles a notification from the IDE that TextDocument is open
 func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.FunctionLogger, ideParam *lsp.DidOpenTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
@@ -1023,6 +1039,7 @@ func (ls *INOLanguageServer) TextDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 	}
 }
 
+// TextDocumentDidChangeNotifFromIDE handles a notification from the IDE that TextDocument changed
 func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.DidChangeTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
@@ -1119,6 +1136,7 @@ func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.Fu
 	}
 }
 
+// TextDocumentDidSaveNotifFromIDE handles a notification from the IDE that TextDocument has been saved
 func (ls *INOLanguageServer) TextDocumentDidSaveNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.DidSaveTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
@@ -1130,6 +1148,7 @@ func (ls *INOLanguageServer) TextDocumentDidSaveNotifFromIDE(logger jsonrpc.Func
 	ls.triggerRebuild()
 }
 
+// TextDocumentDidCloseNotifFromIDE handles a notification from the IDE that TextDocument has been closed
 func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.DidCloseTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
@@ -1173,14 +1192,16 @@ func (ls *INOLanguageServer) TextDocumentDidCloseNotifFromIDE(logger jsonrpc.Fun
 	}
 }
 
+// FullBuildCompletedFromIDE receives a full build from the IDE and copies the results
 func (ls *INOLanguageServer) FullBuildCompletedFromIDE(logger jsonrpc.FunctionLogger, params *DidCompleteBuildParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
-	ls.CopyFullBuildResults(logger, params.BuildOutputUri.AsPath())
+	ls.CopyFullBuildResults(logger, params.BuildOutputURI.AsPath())
 	ls.triggerRebuild()
 }
 
+// CopyFullBuildResults copies the results of a full build in the LS workspace
 func (ls *INOLanguageServer) CopyFullBuildResults(logger jsonrpc.FunctionLogger, buildPath *paths.Path) {
 	fromCache := buildPath.Join("libraries.cache")
 	toCache := ls.buildPath.Join("libraries.cache")
@@ -1191,6 +1212,7 @@ func (ls *INOLanguageServer) CopyFullBuildResults(logger jsonrpc.FunctionLogger,
 	}
 }
 
+// PublishDiagnosticsNotifFromClangd publishes a diagnostics if notified from Clangd
 func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.FunctionLogger, clangParams *lsp.PublishDiagnosticsParams) {
 	if ls.config.DisableRealTimeDiagnostics {
 		logger.Logf("Ignored by configuration")
@@ -1271,6 +1293,7 @@ func (ls *INOLanguageServer) PublishDiagnosticsNotifFromClangd(logger jsonrpc.Fu
 	}
 }
 
+// TextDocumentRenameReqFromIDE handles a request from the IDE to rename TextDocument
 func (ls *INOLanguageServer) TextDocumentRenameReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.RenameParams) (*lsp.WorkspaceEdit, *jsonrpc.ResponseError) {
 	ls.writeLock(logger, false)
 	defer ls.writeUnlock(logger)
@@ -1348,6 +1371,7 @@ func (ls *INOLanguageServer) WindowWorkDoneProgressCreateReqFromClangd(ctx conte
 	return nil
 }
 
+// SetTraceNotifFromIDE gets a notification from the IDE to Set Trace to parameters
 func (ls *INOLanguageServer) SetTraceNotifFromIDE(logger jsonrpc.FunctionLogger, params *lsp.SetTraceParams) {
 	logger.Logf("Notification level set to: %s", params.Value)
 	ls.Clangd.conn.SetTrace(params)

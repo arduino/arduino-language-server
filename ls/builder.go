@@ -32,6 +32,7 @@ type SketchRebuilder struct {
 	mutex   sync.Mutex
 }
 
+// NewSketchBuilder makes a new SketchRebuilder and returns its pointer
 func NewSketchBuilder(ls *INOLanguageServer) *SketchRebuilder {
 	res := &SketchRebuilder{
 		trigger: make(chan chan<- bool, 1),
@@ -57,6 +58,7 @@ func (ls *INOLanguageServer) triggerRebuild() {
 	ls.sketchRebuilder.TriggerRebuild(nil)
 }
 
+// TriggerRebuild schedule a sketch rebuild (it will be executed asynchronously)
 func (r *SketchRebuilder) TriggerRebuild(completed chan<- bool) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -207,8 +209,8 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 			Verbose:                       true,
 			SkipLibrariesDiscovery:        !fullBuild,
 		}
-		compileReqJson, _ := json.MarshalIndent(compileReq, "", "  ")
-		logger.Logf("Running build with: %s", string(compileReqJson))
+		compileReqJSON, _ := json.MarshalIndent(compileReq, "", "  ")
+		logger.Logf("Running build with: %s", string(compileReqJSON))
 
 		compRespStream, err := client.Compile(context.Background(), compileReq)
 		if err != nil {

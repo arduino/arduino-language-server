@@ -34,6 +34,7 @@ type progressProxy struct {
 	endReq         *lsp.WorkDoneProgressEnd
 }
 
+// NewProgressProxy creates a new ProgressProxyHandler and returns its pointer
 func NewProgressProxy(conn *lsp.Server) *ProgressProxyHandler {
 	res := &ProgressProxyHandler{
 		conn:    conn,
