@@ -1,0 +1,74 @@
+# Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/check-taskfiles.md
+name: Check Taskfiles
+
+env:
+  # See: https://github.com/actions/setup-node/#readme
+  NODE_VERSION: 16.x
+
+# See: https://docs.github.com/actions/using-workflows/events-that-trigger-workflows
+on:
+  push:
+    paths:
+      - ".github/workflows/check-taskfiles.ya?ml"
+      - "package.json"
+      - "package-lock.json"
+      - "**/Taskfile.ya?ml"
+      - "**/DistTasks.ya?ml"
+  pull_request:
+    paths:
+      - ".github/workflows/check-taskfiles.ya?ml"
+      - "package.json"
+      - "package-lock.json"
+      - "**/Taskfile.ya?ml"
+      - "**/DistTasks.ya?ml"
+  schedule:
+    # Run every Tuesday at 8 AM UTC to catch breakage resulting from changes to the JSON schema.
+    - cron: "0 8 * * TUE"
+  workflow_dispatch:
+  repository_dispatch:
+
+jobs:
+  validate:
+    name: Validate ${{ matrix.file }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        file:
+          - ./**/Taskfile.yml
+          - ./**/DistTasks.yml
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download JSON schema for Taskfiles
+        id: download-schema
+        uses: carlosperate/download-file-action@v1
+        with:
+          # See: https://github.com/SchemaStore/schemastore/blob/master/src/schemas/json/taskfile.json
+          file-url: https://json.schemastore.org/taskfile.json
+          location: ${{ runner.temp }}/taskfile-schema
+
+      - name: Install JSON schema validator
+        run: npm install
+
+      - name: Validate ${{ matrix.file }}
+        run: |
+          # See: https://github.com/ajv-validator/ajv-cli#readme
+          npx \
+            --package=ajv-cli \
+            --package=ajv-formats \
+            ajv validate \
+              --all-errors \
+              --strict=false \
+              -c ajv-formats \
+              -s "${{ steps.download-schema.outputs.file-path }}" \
+              -d "${{ matrix.file }}"
