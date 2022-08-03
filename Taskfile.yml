@@ -44,11 +44,6 @@ vars:
 tasks:
   docs:generate:
     desc: Create all generated documentation content
-    deps:
-      - task: go:cli-docs
-      - task: protoc:docs
-    cmds:
-      - task: general:format-prettier
 
   # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-dependencies-task/Taskfile.yml
   general:cache-dep-licenses:
