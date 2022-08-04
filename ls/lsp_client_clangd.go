@@ -108,7 +108,7 @@ func (client *clangdLSPClient) WindowShowDocument(context.Context, jsonrpc.Funct
 
 // WindowWorkDoneProgressCreate is not implemented
 func (client *clangdLSPClient) WindowWorkDoneProgressCreate(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
-	return client.ls.WindowWorkDoneProgressCreateReqFromClangd(ctx, logger, params)
+	return client.ls.windowWorkDoneProgressCreateReqFromClangd(ctx, logger, params)
 }
 
 // ClientRegisterCapability is not implemented
@@ -143,7 +143,7 @@ func (client *clangdLSPClient) WorkspaceCodeLensRefresh(context.Context, jsonrpc
 
 // Progress sends a Progress notification
 func (client *clangdLSPClient) Progress(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
-	client.ls.ProgressNotifFromClangd(logger, progress)
+	client.ls.progressNotifFromClangd(logger, progress)
 }
 
 // LogTrace is not implemented
@@ -168,5 +168,5 @@ func (client *clangdLSPClient) TelemetryEvent(jsonrpc.FunctionLogger, json.RawMe
 
 // TextDocumentPublishDiagnostics sends a notification to Publish Dignostics
 func (client *clangdLSPClient) TextDocumentPublishDiagnostics(logger jsonrpc.FunctionLogger, params *lsp.PublishDiagnosticsParams) {
-	go client.ls.PublishDiagnosticsNotifFromClangd(logger, params)
+	go client.ls.publishDiagnosticsNotifFromClangd(logger, params)
 }

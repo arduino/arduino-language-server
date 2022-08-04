@@ -40,12 +40,12 @@ func (server *IDELSPServer) Run() {
 
 // Initialize sends an initilize request
 func (server *IDELSPServer) Initialize(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
-	return server.ls.InitializeReqFromIDE(ctx, logger, params)
+	return server.ls.initializeReqFromIDE(ctx, logger, params)
 }
 
 // Shutdown sends a shutdown request
 func (server *IDELSPServer) Shutdown(ctx context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
-	return server.ls.ShutdownReqFromIDE(ctx, logger)
+	return server.ls.shutdownReqFromIDE(ctx, logger)
 }
 
 // WorkspaceSymbol is not implemented
@@ -80,7 +80,7 @@ func (server *IDELSPServer) TextDocumentWillSaveWaitUntil(ctx context.Context, l
 
 // TextDocumentCompletion is not implemented
 func (server *IDELSPServer) TextDocumentCompletion(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.CompletionParams) (*lsp.CompletionList, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentCompletionReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentCompletionReqFromIDE(ctx, logger, params)
 }
 
 // CompletionItemResolve is not implemented
@@ -90,12 +90,12 @@ func (server *IDELSPServer) CompletionItemResolve(ctx context.Context, logger js
 
 // TextDocumentHover sends a request to hover a text document
 func (server *IDELSPServer) TextDocumentHover(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.HoverParams) (*lsp.Hover, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentHoverReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentHoverReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentSignatureHelp requests help for text document signature
 func (server *IDELSPServer) TextDocumentSignatureHelp(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.SignatureHelpParams) (*lsp.SignatureHelp, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentSignatureHelpReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentSignatureHelpReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentDeclaration is not implemented
@@ -105,17 +105,17 @@ func (server *IDELSPServer) TextDocumentDeclaration(ctx context.Context, logger 
 
 // TextDocumentDefinition sends a request to define a text document
 func (server *IDELSPServer) TextDocumentDefinition(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.DefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentDefinitionReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentDefinitionReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentTypeDefinition sends a request to define a type for the text document
 func (server *IDELSPServer) TextDocumentTypeDefinition(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.TypeDefinitionParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentTypeDefinitionReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentTypeDefinitionReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentImplementation sends a request to implement a text document
 func (server *IDELSPServer) TextDocumentImplementation(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.ImplementationParams) ([]lsp.Location, []lsp.LocationLink, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentImplementationReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentImplementationReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentReferences is not implemented
@@ -125,17 +125,17 @@ func (server *IDELSPServer) TextDocumentReferences(ctx context.Context, logger j
 
 // TextDocumentDocumentHighlight sends a request to highlight a text document
 func (server *IDELSPServer) TextDocumentDocumentHighlight(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.DocumentHighlightParams) ([]lsp.DocumentHighlight, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentDocumentHighlightReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentDocumentHighlightReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentDocumentSymbol sends a request for text document symbol
 func (server *IDELSPServer) TextDocumentDocumentSymbol(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.DocumentSymbolParams) ([]lsp.DocumentSymbol, []lsp.SymbolInformation, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentDocumentSymbolReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentDocumentSymbolReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentCodeAction sends a request for text document code action
 func (server *IDELSPServer) TextDocumentCodeAction(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.CodeActionParams) ([]lsp.CommandOrCodeAction, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentCodeActionReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentCodeActionReqFromIDE(ctx, logger, params)
 }
 
 // CodeActionResolve is not implemented
@@ -175,12 +175,12 @@ func (server *IDELSPServer) TextDocumentColorPresentation(ctx context.Context, l
 
 // TextDocumentFormatting sends a request to format a text document
 func (server *IDELSPServer) TextDocumentFormatting(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.DocumentFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentFormattingReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentFormattingReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentRangeFormatting sends a request to format the range a text document
 func (server *IDELSPServer) TextDocumentRangeFormatting(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.DocumentRangeFormattingParams) ([]lsp.TextEdit, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentRangeFormattingReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentRangeFormattingReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentOnTypeFormatting is not implemented
@@ -190,7 +190,7 @@ func (server *IDELSPServer) TextDocumentOnTypeFormatting(ctx context.Context, lo
 
 // TextDocumentRename sends a request to rename a text document
 func (server *IDELSPServer) TextDocumentRename(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.RenameParams) (*lsp.WorkspaceEdit, *jsonrpc.ResponseError) {
-	return server.ls.TextDocumentRenameReqFromIDE(ctx, logger, params)
+	return server.ls.textDocumentRenameReqFromIDE(ctx, logger, params)
 }
 
 // TextDocumentFoldingRange is not implemented
@@ -257,17 +257,17 @@ func (server *IDELSPServer) Progress(logger jsonrpc.FunctionLogger, params *lsp.
 
 // Initialized sends an initialized notification
 func (server *IDELSPServer) Initialized(logger jsonrpc.FunctionLogger, params *lsp.InitializedParams) {
-	server.ls.InitializedNotifFromIDE(logger, params)
+	server.ls.initializedNotifFromIDE(logger, params)
 }
 
 // Exit sends an exit notification
 func (server *IDELSPServer) Exit(logger jsonrpc.FunctionLogger) {
-	server.ls.ExitNotifFromIDE(logger)
+	server.ls.exitNotifFromIDE(logger)
 }
 
 // SetTrace sends a set trace notification
 func (server *IDELSPServer) SetTrace(logger jsonrpc.FunctionLogger, params *lsp.SetTraceParams) {
-	server.ls.SetTraceNotifFromIDE(logger, params)
+	server.ls.setTraceNotifFromIDE(logger, params)
 }
 
 // WindowWorkDoneProgressCancel is not implemented
@@ -314,12 +314,12 @@ func (server *IDELSPServer) WorkspaceDidDeleteFiles(logger jsonrpc.FunctionLogge
 
 // TextDocumentDidOpen sends a notification the a text document is open
 func (server *IDELSPServer) TextDocumentDidOpen(logger jsonrpc.FunctionLogger, params *lsp.DidOpenTextDocumentParams) {
-	server.ls.TextDocumentDidOpenNotifFromIDE(logger, params)
+	server.ls.textDocumentDidOpenNotifFromIDE(logger, params)
 }
 
 // TextDocumentDidChange sends a notification the a text document has changed
 func (server *IDELSPServer) TextDocumentDidChange(logger jsonrpc.FunctionLogger, params *lsp.DidChangeTextDocumentParams) {
-	server.ls.TextDocumentDidChangeNotifFromIDE(logger, params)
+	server.ls.textDocumentDidChangeNotifFromIDE(logger, params)
 }
 
 // TextDocumentWillSave is not implemented
@@ -329,12 +329,12 @@ func (server *IDELSPServer) TextDocumentWillSave(logger jsonrpc.FunctionLogger, 
 
 // TextDocumentDidSave sends a notification the a text document has been saved
 func (server *IDELSPServer) TextDocumentDidSave(logger jsonrpc.FunctionLogger, params *lsp.DidSaveTextDocumentParams) {
-	server.ls.TextDocumentDidSaveNotifFromIDE(logger, params)
+	server.ls.textDocumentDidSaveNotifFromIDE(logger, params)
 }
 
 // TextDocumentDidClose sends a notification the a text document has been closed
 func (server *IDELSPServer) TextDocumentDidClose(logger jsonrpc.FunctionLogger, params *lsp.DidCloseTextDocumentParams) {
-	server.ls.TextDocumentDidCloseNotifFromIDE(logger, params)
+	server.ls.textDocumentDidCloseNotifFromIDE(logger, params)
 }
 
 // DidCompleteBuildParams is a custom notification from the Arduino IDE, sent
@@ -352,6 +352,6 @@ func (server *IDELSPServer) ArduinoBuildCompleted(logger jsonrpc.FunctionLogger,
 	if err := json.Unmarshal(raw, &params); err != nil {
 		logger.Logf("ERROR decoding DidCompleteBuildParams: %s", err)
 	} else {
-		server.ls.FullBuildCompletedFromIDE(logger, &params)
+		server.ls.fullBuildCompletedFromIDE(logger, &params)
 	}
 }
