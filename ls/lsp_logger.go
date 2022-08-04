@@ -104,6 +104,7 @@ func NewLSPFunctionLogger(colofFunction func(format string, a ...interface{}) st
 	}
 }
 
+// Logf logs the given message
 func (l *FunctionLogger) Logf(format string, a ...interface{}) {
 	log.Print(l.colorFunc(l.prefix+": "+format, a...))
 }

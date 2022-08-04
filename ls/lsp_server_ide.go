@@ -342,6 +342,7 @@ type DidCompleteBuildParams struct {
 	BuildOutputURI *lsp.DocumentURI `json:"buildOutputUri"`
 }
 
+// ArduinoBuildCompleted handles "buildComplete" messages from the IDE
 func (server *IDELSPServer) ArduinoBuildCompleted(logger jsonrpc.FunctionLogger, raw json.RawMessage) {
 	if !server.ls.config.SkipLibrariesDiscoveryOnRebuild {
 		return

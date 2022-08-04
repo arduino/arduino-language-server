@@ -1340,6 +1340,7 @@ func (ls *INOLanguageServer) ideURIIsPartOfTheSketch(ideURI lsp.DocumentURI) boo
 	return res
 }
 
+// ProgressNotifFromClangd handles a progress request from clangd
 func (ls *INOLanguageServer) ProgressNotifFromClangd(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
 	var token string
 	if err := json.Unmarshal(progress.Token, &token); err != nil {
@@ -1361,6 +1362,7 @@ func (ls *INOLanguageServer) ProgressNotifFromClangd(logger jsonrpc.FunctionLogg
 	}
 }
 
+// WindowWorkDoneProgressCreateReqFromClangd handles a progress create request from clangd
 func (ls *INOLanguageServer) WindowWorkDoneProgressCreateReqFromClangd(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
 	var token string
 	if err := json.Unmarshal(params.Token, &token); err != nil {
