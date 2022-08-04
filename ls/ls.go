@@ -1064,7 +1064,7 @@ func (ls *INOLanguageServer) TextDocumentDidChangeNotifFromIDE(logger jsonrpc.Fu
 	// Apply the change to the tracked sketch file.
 	trackedIdeDocID := ideTextDocIdentifier.URI.AsPath().String()
 	if doc, ok := ls.trackedIdeDocs[trackedIdeDocID]; !ok {
-		logger.Logf("Error: %s", &UnknownURI{ideTextDocIdentifier.URI})
+		logger.Logf("Error: %s", &UnknownURIError{ideTextDocIdentifier.URI})
 		return
 	} else if updatedDoc, err := textedits.ApplyLSPTextDocumentContentChangeEvent(doc, ideParams); err != nil {
 		logger.Logf("Error: %s", err)
@@ -1598,10 +1598,11 @@ func (ls *INOLanguageServer) cpp2inoTextEdit(logger jsonrpc.FunctionLogger, cppU
 	return inoURI, inoEdit, inPreprocessed, err
 }
 
-type UnknownURI struct {
+// UnknownURIError is an error when an URI is not recognized
+type UnknownURIError struct {
 	URI lsp.DocumentURI
 }
 
-func (e *UnknownURI) Error() string {
+func (e *UnknownURIError) Error() string {
 	return "Document is not available: " + e.URI.String()
 }

@@ -87,7 +87,7 @@ func (ls *INOLanguageServer) clang2IdeDocumentURI(logger jsonrpc.FunctionLogger,
 				return ideDoc.URI, nil
 			}
 		}
-		return lsp.DocumentURI{}, &UnknownURI{URI: clangURI}
+		return lsp.DocumentURI{}, &UnknownURIError{URI: clangURI}
 	}
 
 	// /another/global/path/to/source.cpp <-> /another/global/path/to/source.cpp

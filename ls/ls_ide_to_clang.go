@@ -20,7 +20,7 @@ func (ls *INOLanguageServer) idePathToIdeURI(logger jsonrpc.FunctionLogger, inoP
 			logger.Logf("    !!! > %s", p)
 		}
 		uri := lsp.NewDocumentURI(inoPath)
-		return uri, &UnknownURI{uri}
+		return uri, &UnknownURIError{uri}
 	}
 	return doc.URI, nil
 }
@@ -44,7 +44,7 @@ func (ls *INOLanguageServer) ide2ClangDocumentURI(logger jsonrpc.FunctionLogger,
 	inside, err := idePath.IsInsideDir(ls.sketchRoot)
 	if err != nil {
 		logger.Logf("ERROR: could not determine if '%s' is inside '%s'", idePath, ls.sketchRoot)
-		return lsp.NilURI, false, &UnknownURI{ideURI}
+		return lsp.NilURI, false, &UnknownURIError{ideURI}
 	}
 	if !inside {
 		clangURI := ideURI
