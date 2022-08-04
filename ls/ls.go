@@ -30,7 +30,7 @@ import (
 type INOLanguageServer struct {
 	config *Config
 	IDE    *IDELSPServer
-	Clangd *ClangdLSPClient
+	Clangd *clangdLSPClient
 
 	progressHandler           *ProgressProxyHandler
 	closing                   chan bool
@@ -196,7 +196,7 @@ func (ls *INOLanguageServer) InitializeReqFromIDE(ctx context.Context, logger js
 		}
 
 		// Start clangd
-		ls.Clangd = NewClangdLSPClient(logger, dataFolder, ls)
+		ls.Clangd = newClangdLSPClient(logger, dataFolder, ls)
 		go func() {
 			defer streams.CatchAndLogPanic()
 			ls.Clangd.Run()
