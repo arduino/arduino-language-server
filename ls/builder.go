@@ -25,16 +25,16 @@ import (
 	"google.golang.org/grpc"
 )
 
-type SketchRebuilder struct {
+type sketchRebuilder struct {
 	ls      *INOLanguageServer
 	trigger chan chan<- bool
 	cancel  func()
 	mutex   sync.Mutex
 }
 
-// NewSketchBuilder makes a new SketchRebuilder and returns its pointer
-func NewSketchBuilder(ls *INOLanguageServer) *SketchRebuilder {
-	res := &SketchRebuilder{
+// newSketchBuilder makes a new SketchRebuilder and returns its pointer
+func newSketchBuilder(ls *INOLanguageServer) *sketchRebuilder {
+	res := &sketchRebuilder{
 		trigger: make(chan chan<- bool, 1),
 		cancel:  func() {},
 		ls:      ls,
@@ -59,7 +59,7 @@ func (ls *INOLanguageServer) triggerRebuild() {
 }
 
 // TriggerRebuild schedule a sketch rebuild (it will be executed asynchronously)
-func (r *SketchRebuilder) TriggerRebuild(completed chan<- bool) {
+func (r *sketchRebuilder) TriggerRebuild(completed chan<- bool) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -70,7 +70,7 @@ func (r *SketchRebuilder) TriggerRebuild(completed chan<- bool) {
 	}
 }
 
-func (r *SketchRebuilder) rebuilderLoop() {
+func (r *sketchRebuilder) rebuilderLoop() {
 	logger := NewLSPFunctionLogger(color.HiMagentaString, "SKETCH REBUILD: ")
 	for {
 		completed := <-r.trigger
@@ -106,7 +106,7 @@ func (r *SketchRebuilder) rebuilderLoop() {
 	}
 }
 
-func (r *SketchRebuilder) doRebuildArduinoPreprocessedSketch(ctx context.Context, logger jsonrpc.FunctionLogger) error {
+func (r *sketchRebuilder) doRebuildArduinoPreprocessedSketch(ctx context.Context, logger jsonrpc.FunctionLogger) error {
 	ls := r.ls
 	if success, err := ls.generateBuildEnvironment(ctx, !r.ls.config.SkipLibrariesDiscoveryOnRebuild, logger); err != nil {
 		return err

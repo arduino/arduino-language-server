@@ -46,7 +46,7 @@ type INOLanguageServer struct {
 	sketchTrackedFilesCount   int
 	trackedIdeDocs            map[string]lsp.TextDocumentItem
 	ideInoDocsWithDiagnostics map[lsp.DocumentURI]bool
-	sketchRebuilder           *SketchRebuilder
+	sketchRebuilder           *sketchRebuilder
 }
 
 // Config describes the language server configuration.
@@ -123,7 +123,7 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 		config:                    config,
 	}
 	ls.clangdStarted = sync.NewCond(&ls.dataMux)
-	ls.sketchRebuilder = NewSketchBuilder(ls)
+	ls.sketchRebuilder = newSketchBuilder(ls)
 
 	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
 		log.Fatalf("Could not create temp folder: %s", err)
