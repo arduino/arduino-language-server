@@ -9,7 +9,7 @@ import (
 	"go.bug.st/lsp"
 )
 
-type ProgressProxyHandler struct {
+type progressProxyHandler struct {
 	conn               *lsp.Server
 	mux                sync.Mutex
 	actionRequiredCond *sync.Cond
@@ -34,9 +34,9 @@ type progressProxy struct {
 	endReq         *lsp.WorkDoneProgressEnd
 }
 
-// NewProgressProxy creates a new ProgressProxyHandler and returns its pointer
-func NewProgressProxy(conn *lsp.Server) *ProgressProxyHandler {
-	res := &ProgressProxyHandler{
+// newProgressProxy creates a new ProgressProxyHandler and returns its pointer
+func newProgressProxy(conn *lsp.Server) *progressProxyHandler {
+	res := &progressProxyHandler{
 		conn:    conn,
 		proxies: map[string]*progressProxy{},
 	}
@@ -48,7 +48,7 @@ func NewProgressProxy(conn *lsp.Server) *ProgressProxyHandler {
 	return res
 }
 
-func (p *ProgressProxyHandler) handlerLoop() {
+func (p *progressProxyHandler) handlerLoop() {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 
@@ -70,7 +70,7 @@ func (p *ProgressProxyHandler) handlerLoop() {
 	}
 }
 
-func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
+func (p *progressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 	switch proxy.currentStatus {
 	case progressProxyNew:
 		p.mux.Unlock()
@@ -132,7 +132,7 @@ func (p *ProgressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 	}
 }
 
-func (p *ProgressProxyHandler) Create(id string) {
+func (p *progressProxyHandler) Create(id string) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 
@@ -148,7 +148,7 @@ func (p *ProgressProxyHandler) Create(id string) {
 	p.actionRequiredCond.Broadcast()
 }
 
-func (p *ProgressProxyHandler) Begin(id string, req *lsp.WorkDoneProgressBegin) {
+func (p *progressProxyHandler) Begin(id string, req *lsp.WorkDoneProgressBegin) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 
@@ -168,7 +168,7 @@ func (p *ProgressProxyHandler) Begin(id string, req *lsp.WorkDoneProgressBegin) 
 	p.actionRequiredCond.Broadcast()
 }
 
-func (p *ProgressProxyHandler) Report(id string, req *lsp.WorkDoneProgressReport) {
+func (p *progressProxyHandler) Report(id string, req *lsp.WorkDoneProgressReport) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 
@@ -184,7 +184,7 @@ func (p *ProgressProxyHandler) Report(id string, req *lsp.WorkDoneProgressReport
 	p.actionRequiredCond.Broadcast()
 }
 
-func (p *ProgressProxyHandler) End(id string, req *lsp.WorkDoneProgressEnd) {
+func (p *progressProxyHandler) End(id string, req *lsp.WorkDoneProgressEnd) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 
@@ -198,7 +198,7 @@ func (p *ProgressProxyHandler) End(id string, req *lsp.WorkDoneProgressEnd) {
 	p.actionRequiredCond.Broadcast()
 }
 
-func (p *ProgressProxyHandler) Shutdown() {
+func (p *progressProxyHandler) Shutdown() {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 

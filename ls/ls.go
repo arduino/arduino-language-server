@@ -32,7 +32,7 @@ type INOLanguageServer struct {
 	IDE    *IDELSPServer
 	Clangd *clangdLSPClient
 
-	progressHandler           *ProgressProxyHandler
+	progressHandler           *progressProxyHandler
 	closing                   chan bool
 	clangdStarted             *sync.Cond
 	dataMux                   sync.RWMutex
@@ -144,7 +144,7 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	logger.Logf("Language server FULL build path: %s", ls.fullBuildPath)
 
 	ls.IDE = NewIDELSPServer(logger, stdin, stdout, ls)
-	ls.progressHandler = NewProgressProxy(ls.IDE.conn)
+	ls.progressHandler = newProgressProxy(ls.IDE.conn)
 	go func() {
 		defer streams.CatchAndLogPanic()
 		ls.IDE.Run()
