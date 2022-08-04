@@ -4,6 +4,7 @@
 
 [![Check Taskfiles status](https://github.com/arduino/arduino-language-server/actions/workflows/check-taskfiles.yml/badge.svg)](https://github.com/arduino/arduino-language-server/actions/workflows/check-taskfiles.yml)
 [![Check Go status](https://github.com/arduino/arduino-language-server/actions/workflows/check-go-task.yml/badge.svg)](https://github.com/arduino/arduino-language-server/actions/workflows/check-go-task.yml)
+[![Check Markdown status](https://github.com/arduino/arduino-language-server/actions/workflows/check-markdown-task.yml/badge.svg)](https://github.com/arduino/arduino-language-server/actions/workflows/check-markdown-task.yml)
 
 The **Arduino Language Server** is the tool that powers the autocompletion of the new [Arduino IDE 2][arduino-ide-repo]. It implements the standard [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) so it can be used with other IDEs as well.
 
@@ -63,6 +64,7 @@ To run tests:
 ```
 go test -v ./...
 ```
+
 ## Usage
 
 The language server it's not intended for direct usage by humans via the command line terminal.
@@ -87,6 +89,7 @@ The -fqbn flag represents the board you're actually working on (different boards
 The support for the board must be installed with the `arduino-cli core install ...` command before starting the language server.
 
 If you do not have an Arduino CLI config file, you can create one by running:
+
 ```
 arduino-cli config init
 ```
@@ -98,7 +101,6 @@ This open source code was written by the Arduino team and is maintained on a dai
 ## License
 
 The code contained in this repository is licensed under the terms of the Apache 2.0 license. If you have questions about licensing please contact us at [license@arduino.cc](mailto:license@arduino.cc).
-
 
 [arduino-ide-repo]: https://github.com/arduino/arduino-ide
 [go-install]: https://golang.org/doc/install
