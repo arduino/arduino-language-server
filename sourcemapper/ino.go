@@ -30,6 +30,7 @@ var NotIno = InoLine{"/not-ino", 0}
 // NotInoURI is the DocumentURI that do not belongs to an .ino file
 var NotInoURI, _ = lsp.NewDocumentURIFromURL("file:///not-ino")
 
+// SourceRevision is a source code tagged with a version number
 type SourceRevision struct {
 	Version int
 	Text    string
