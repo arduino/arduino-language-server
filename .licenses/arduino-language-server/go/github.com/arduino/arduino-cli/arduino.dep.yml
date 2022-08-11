@@ -4,7 +4,7 @@ version: v0.0.0-20220711135540-a5466d017f77
 type: go
 summary: 
 homepage: https://pkg.go.dev/github.com/arduino/arduino-cli/arduino
-license: gpl-3.0
+license: gpl-3.0-only
 licenses:
 - sources: arduino-cli@v0.0.0-20220711135540-a5466d017f77/LICENSE.txt
   text: |2
