@@ -1,0 +1,16 @@
+---
+name: go.bug.st/json
+version: v1.15.6
+type: go
+summary: Package json implements encoding and decoding of JSON as defined in RFC 7159.
+homepage: https://pkg.go.dev/go.bug.st/json
+license: bsd-3-clause
+licenses:
+- sources: LICENSE
+  text: |2+
+
+    See: https://github.com/golang/go/blob/master/LICENSE
+
+- sources: README.md
+  text: 'The license is the same from the Golang source code: https://github.com/golang/go/blob/master/LICENSE'
+notices: []

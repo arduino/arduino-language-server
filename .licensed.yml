@@ -1,0 +1,68 @@
+# See: https://github.com/github/licensed/blob/master/docs/configuration.md
+sources:
+  go: true
+
+apps:
+  - source_path: ./
+
+# Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-dependencies/Apache-2.0/.licensed.yml
+allowed:
+  # Based on https://www.apache.org/legal/resolved.html#category-a
+  - apache-2.0
+  - apache-1.1
+  - php-3.01
+  # "MX4J License" - no SPDX ID
+  - bsd-2-clause
+  - bsd-2-clause-netbsd # Deprecated ID for `bsd-2-clause`
+  - bsd-2-clause-views
+  - bsd-2-clause-freebsd # Deprecated ID for `bsd-2-clause-views`
+  - bsd-3-clause
+  - bsd-3-clause-clear
+  # "DOM4J License" - no SPDX ID
+  - postgresql
+  # "Eclipse Distribution License 1.0" - no SPDX ID
+  - mit
+  - x11
+  - isc
+  - smlnj
+  - standardml-nj # Deprecated ID for `smlnj`
+  # "Cup Parser Generator" - no SPDX ID
+  - icu
+  - ncsa
+  - w3c
+  # "W3C Community Contributor License Agreement" - no SPDX ID
+  - xnet
+  - zlib
+  # "FSF autoconf license" - no SPDX ID
+  - afl-3.0
+  # "Service+Component+Architecture+Specifications" - no SPDX ID
+  # "OOXML XSD ECMA License"
+  - ms-pl
+  - cc-pddc
+  - psf-2.0
+  # "Python Imaging Library Software License"
+  - apafml
+  - bsl-1.0
+  - ogl-uk-3.0
+  - wtfpl
+  - unicode-tou
+  - zpl-2.0
+  # "ACE license" - no SPDX ID
+  - upl-1.0
+  # "Open Grid Forum License" - no SPDX ID
+  # 'Google "Additional IP Rights Grant (Patents)" file' - no SPDX ID
+  - unlicense
+  - hpnd
+  - mulanpsl-2.0
+  - cc0-1.0
+  # Based on individual license text
+  - lgpl-2.0-or-later
+  - lgpl-2.0+ # Deprecated ID for `lgpl-2.0-or-later`
+  - lgpl-2.1-only
+  - lgpl-2.1 # Deprecated ID for `lgpl-2.1-only`
+  - lgpl-2.1-or-later
+  - lgpl-2.1+ # Deprecated ID for `lgpl-2.1-or-later`
+  - lgpl-3.0-only
+  - lgpl-3.0 # Deprecated ID for `lgpl-3.0-only`
+  - lgpl-3.0-or-later
+  - lgpl-3.0+ # Deprecated ID for `lgpl-3.0-or-later`
