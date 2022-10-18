@@ -140,6 +140,7 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	}
 
 	logger.Logf("Initial board configuration: %s", ls.config.Fqbn)
+	logger.Logf("%s", globals.VersionInfo.String())
 	logger.Logf("Language server build path: %s", ls.buildPath)
 	logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
 	logger.Logf("Language server FULL build path: %s", ls.fullBuildPath)
