@@ -14,6 +14,7 @@ import (
 
 	"github.com/arduino/arduino-cli/executils"
 	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/settings/v1"
+	"github.com/arduino/arduino-language-server/globals"
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
@@ -139,6 +140,7 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	}
 
 	logger.Logf("Initial board configuration: %s", ls.config.Fqbn)
+	logger.Logf("%s", globals.VersionInfo.String())
 	logger.Logf("Language server build path: %s", ls.buildPath)
 	logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
 	logger.Logf("Language server FULL build path: %s", ls.fullBuildPath)
@@ -356,7 +358,7 @@ func (ls *INOLanguageServer) initializeReqFromIDE(ctx context.Context, logger js
 		},
 		ServerInfo: &lsp.InitializeResultServerInfo{
 			Name:    "arduino-language-server",
-			Version: "0.7.2",
+			Version: globals.VersionInfo.VersionString,
 		},
 	}
 	logger.Logf("initialization parameters: %s", string(lsp.EncodeMessage(resp)))
