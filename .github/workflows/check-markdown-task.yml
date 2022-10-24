@@ -77,7 +77,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Initialize markdownlint-cli problem matcher
-        uses: xt0rted/markdownlint-problem-matcher@v1
+        uses: xt0rted/markdownlint-problem-matcher@v2
 
       - name: Install Task
         uses: arduino/setup-task@v1
