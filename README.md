@@ -102,7 +102,7 @@ This open source code was written by the Arduino team and is maintained on a dai
 
 ## License
 
-The code contained in this repository is licensed under the terms of the Apache 2.0 license. If you have questions about licensing please contact us at [license@arduino.cc](mailto:license@arduino.cc).
+The code contained in this repository is licensed under the terms of the GNU Affero General Public License version 3 license. If you have questions about licensing please contact us at [license@arduino.cc](mailto:license@arduino.cc).
 
 [arduino-ide-repo]: https://github.com/arduino/arduino-ide
 [go-install]: https://golang.org/doc/install

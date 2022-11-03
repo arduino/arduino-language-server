@@ -4,7 +4,7 @@ name: Check License
 env:
   EXPECTED_LICENSE_FILENAME: LICENSE.txt
   # SPDX identifier: https://spdx.org/licenses/
-  EXPECTED_LICENSE_TYPE: Apache-2.0
+  EXPECTED_LICENSE_TYPE: AGPL-3.0
 
 # See: https://docs.github.com/actions/using-workflows/events-that-trigger-workflows
 on:
