@@ -155,6 +155,5 @@ https://microsoft.github.io/language-server-protocol/
 	case <-c:
 		log.Println("INTERRUPTED")
 	}
-	inoHandler.CleanUp()
 	inoHandler.Close()
 }
