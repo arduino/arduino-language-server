@@ -977,8 +977,8 @@ func (ls *INOLanguageServer) initializedNotifFromIDE(logger jsonrpc.FunctionLogg
 
 func (ls *INOLanguageServer) exitNotifFromIDE(logger jsonrpc.FunctionLogger) {
 	ls.Clangd.conn.Exit()
-	logger.Logf("Arduino Language Server is shutting down.")
-	os.Exit(0)
+	logger.Logf("Arduino Language Server is exiting.")
+	ls.Close()
 }
 
 func (ls *INOLanguageServer) textDocumentDidOpenNotifFromIDE(logger jsonrpc.FunctionLogger, ideParam *lsp.DidOpenTextDocumentParams) {
@@ -1383,24 +1383,17 @@ func (ls *INOLanguageServer) Close() {
 	}
 	if ls.buildPath != nil {
 		ls.buildPath.RemoveAll()
-	}
-}
-
-// CloseNotify returns a channel that is closed when the InoHandler is closed
-func (ls *INOLanguageServer) CloseNotify() <-chan bool {
-	return ls.closing
-}
-
-// CleanUp performs cleanup of the workspace and temp files create by the language server
-func (ls *INOLanguageServer) CleanUp() {
-	if ls.buildPath != nil {
-		ls.buildPath.RemoveAll()
 		ls.buildPath = nil
 	}
 	if ls.fullBuildPath != nil {
 		ls.fullBuildPath.RemoveAll()
 		ls.fullBuildPath = nil
 	}
+}
+
+// CloseNotify returns a channel that is closed when the InoHandler is closed
+func (ls *INOLanguageServer) CloseNotify() <-chan bool {
+	return ls.closing
 }
 
 func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.FunctionLogger) (*paths.Path, error) {
