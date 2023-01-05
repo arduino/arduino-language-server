@@ -20,7 +20,7 @@ jobs:
     strategy:
       matrix:
         config:
-          - os: ubuntu-18.04
+          - os: ubuntu-latest
             ExecutableSuffix: ''
             Exports: ''
           - os: macos-latest
