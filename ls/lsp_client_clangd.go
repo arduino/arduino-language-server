@@ -51,6 +51,7 @@ func newClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 	args := []string{
 		ls.config.ClangdPath.String(),
 		"-log=verbose",
+		"-pch-storage=memory",
 		fmt.Sprintf(`--compile-commands-dir=%s`, ls.buildPath),
 	}
 	if dataFolder != nil {
