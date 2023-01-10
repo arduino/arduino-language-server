@@ -1,12 +1,12 @@
 ---
 name: go.bug.st/lsp/textedits
-version: v0.0.0-20220701124835-c1977441be8c
+version: v0.1.1
 type: go
-summary: 
+summary:
 homepage: https://pkg.go.dev/go.bug.st/lsp/textedits
 license: bsd-3-clause
 licenses:
-- sources: lsp@v0.0.0-20220701124835-c1977441be8c/LICENSE
+- sources: lsp@v0.1.1/LICENSE
   text: |2+
 
     Copyright (c) 2021, Cristian Maglie.
@@ -42,3 +42,4 @@ licenses:
     POSSIBILITY OF SUCH DAMAGE.
 
 notices: []
+...
