@@ -10,7 +10,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.7.0
 	go.bug.st/json v1.15.6
-	go.bug.st/lsp v0.0.0-20220701124835-c1977441be8c
+	go.bug.st/lsp v0.1.1
 	google.golang.org/grpc v1.42.0
 )
 
