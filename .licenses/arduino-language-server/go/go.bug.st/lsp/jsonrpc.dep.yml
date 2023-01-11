@@ -1,12 +1,12 @@
 ---
 name: go.bug.st/lsp/jsonrpc
-version: v0.1.1
+version: v0.1.2
 type: go
 summary:
 homepage: https://pkg.go.dev/go.bug.st/lsp/jsonrpc
 license: bsd-3-clause
 licenses:
-- sources: lsp@v0.1.1/LICENSE
+- sources: lsp@v0.1.2/LICENSE
   text: |2+
 
     Copyright (c) 2021, Cristian Maglie.
