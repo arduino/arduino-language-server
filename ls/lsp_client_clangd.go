@@ -60,7 +60,12 @@ func newClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 	logger.Logf("    Starting clangd: %s", strings.Join(args, " "))
 	var clangdStdin io.WriteCloser
 	var clangdStdout, clangdStderr io.ReadCloser
-	if clangdCmd, err := executils.NewProcess(nil, args...); err != nil {
+	var extraEnv []string
+	if ls.tempDir != nil {
+		extraEnv = append(extraEnv, "TMPDIR="+ls.tempDir.String()) // For unix-based systems
+		extraEnv = append(extraEnv, "TMP="+ls.tempDir.String())    // For Windows
+	}
+	if clangdCmd, err := executils.NewProcess(extraEnv, args...); err != nil {
 		panic("starting clangd: " + err.Error())
 	} else if cin, err := clangdCmd.StdinPipe(); err != nil {
 		panic("getting clangd stdin: " + err.Error())
