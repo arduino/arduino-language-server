@@ -54,6 +54,7 @@ type INOLanguageServer struct {
 	removeTempMutex           sync.Mutex
 	clangdStarted             *sync.Cond
 	dataMux                   sync.RWMutex
+	tempDir                   *paths.Path
 	buildPath                 *paths.Path
 	buildSketchRoot           *paths.Path
 	buildSketchCpp            *paths.Path
@@ -146,18 +147,21 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
 		log.Fatalf("Could not create temp folder: %s", err)
 	} else {
-		ls.buildPath = tmp.Canonical()
-		ls.buildSketchRoot = ls.buildPath.Join("sketch")
+		ls.tempDir = tmp.Canonical()
 	}
-
-	if tmp, err := paths.MkTempDir("", "arduino-language-server"); err != nil {
+	ls.buildPath = ls.tempDir.Join("build")
+	ls.buildSketchRoot = ls.buildPath.Join("sketch")
+	if err := ls.buildPath.MkdirAll(); err != nil {
 		log.Fatalf("Could not create temp folder: %s", err)
-	} else {
-		ls.fullBuildPath = tmp.Canonical()
+	}
+	ls.fullBuildPath = ls.tempDir.Join("fullbuild")
+	if err := ls.fullBuildPath.MkdirAll(); err != nil {
+		log.Fatalf("Could not create temp folder: %s", err)
 	}
 
 	logger.Logf("Initial board configuration: %s", ls.config.Fqbn)
 	logger.Logf("%s", globals.VersionInfo.String())
+	logger.Logf("Language server temp directory: %s", ls.tempDir)
 	logger.Logf("Language server build path: %s", ls.buildPath)
 	logger.Logf("Language server build sketch root: %s", ls.buildSketchRoot)
 	logger.Logf("Language server FULL build path: %s", ls.fullBuildPath)
@@ -1378,14 +1382,7 @@ func (ls *INOLanguageServer) removeTemporaryFiles(logger jsonrpc.FunctionLogger)
 	ls.removeTempMutex.Lock()
 	defer ls.removeTempMutex.Unlock()
 
-	args := []string{"remove-temp-files"}
-	if ls.buildPath != nil {
-		args = append(args, ls.buildPath.String())
-	}
-	if ls.fullBuildPath != nil {
-		args = append(args, ls.fullBuildPath.String())
-	}
-	if len(args) == 1 {
+	if ls.tempDir == nil {
 		// Nothing to remove
 		return
 	}
@@ -1396,7 +1393,7 @@ func (ls *INOLanguageServer) removeTemporaryFiles(logger jsonrpc.FunctionLogger)
 		logger.Logf("Error getting current working directory: %s", err)
 		return
 	}
-	cmd := exec.Command(os.Args[0], args...)
+	cmd := exec.Command(os.Args[0], "remove-temp-files", ls.tempDir.String())
 	cmd.Dir = cwd
 	if err := cmd.Start(); err != nil {
 		logger.Logf("Error starting remove-temp-files process: %s", err)
@@ -1404,7 +1401,7 @@ func (ls *INOLanguageServer) removeTemporaryFiles(logger jsonrpc.FunctionLogger)
 	}
 
 	// The process is now started, we can reset the paths
-	ls.buildPath, ls.fullBuildPath = nil, nil
+	ls.buildPath, ls.fullBuildPath, ls.buildSketchRoot, ls.tempDir = nil, nil, nil, nil
 
 	// Detach the process so it can continue running even if the parent process exits
 	if err := cmd.Process.Release(); err != nil {
