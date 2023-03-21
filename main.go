@@ -20,6 +20,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "remove-temp-files" {
+		for _, tmpFile := range os.Args[2:] {
+			paths.New(tmpFile).RemoveAll()
+		}
+		return
+	}
+
 	clangdPath := flag.String(
 		"clangd", "",
 		"Path to clangd executable")

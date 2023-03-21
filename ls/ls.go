@@ -22,6 +22,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +51,7 @@ type INOLanguageServer struct {
 
 	progressHandler           *progressProxyHandler
 	closing                   chan bool
+	removeTempMutex           sync.Mutex
 	clangdStarted             *sync.Cond
 	dataMux                   sync.RWMutex
 	buildPath                 *paths.Path
@@ -387,6 +389,7 @@ func (ls *INOLanguageServer) shutdownReqFromIDE(ctx context.Context, logger json
 		close(done)
 	}()
 	_, _ = ls.Clangd.conn.Shutdown(context.Background())
+	ls.removeTemporaryFiles(logger)
 	<-done
 	return nil
 }
@@ -1371,6 +1374,45 @@ func (ls *INOLanguageServer) setTraceNotifFromIDE(logger jsonrpc.FunctionLogger,
 	ls.Clangd.conn.SetTrace(params)
 }
 
+func (ls *INOLanguageServer) removeTemporaryFiles(logger jsonrpc.FunctionLogger) {
+	ls.removeTempMutex.Lock()
+	defer ls.removeTempMutex.Unlock()
+
+	args := []string{"remove-temp-files"}
+	if ls.buildPath != nil {
+		args = append(args, ls.buildPath.String())
+	}
+	if ls.fullBuildPath != nil {
+		args = append(args, ls.fullBuildPath.String())
+	}
+	if len(args) == 1 {
+		// Nothing to remove
+		return
+	}
+
+	// Start a detached process to remove the temp files
+	cwd, err := os.Getwd()
+	if err != nil {
+		logger.Logf("Error getting current working directory: %s", err)
+		return
+	}
+	cmd := exec.Command(os.Args[0], args...)
+	cmd.Dir = cwd
+	if err := cmd.Start(); err != nil {
+		logger.Logf("Error starting remove-temp-files process: %s", err)
+		return
+	}
+
+	// The process is now started, we can reset the paths
+	ls.buildPath, ls.fullBuildPath = nil, nil
+
+	// Detach the process so it can continue running even if the parent process exits
+	if err := cmd.Process.Release(); err != nil {
+		logger.Logf("Error detaching remove-temp-files process: %s", err)
+		return
+	}
+}
+
 // Close closes all the json-rpc connections and clean-up temp folders.
 func (ls *INOLanguageServer) Close() {
 	if ls.Clangd != nil {
@@ -1380,14 +1422,6 @@ func (ls *INOLanguageServer) Close() {
 	if ls.closing != nil {
 		close(ls.closing)
 		ls.closing = nil
-	}
-	if ls.buildPath != nil {
-		ls.buildPath.RemoveAll()
-		ls.buildPath = nil
-	}
-	if ls.fullBuildPath != nil {
-		ls.fullBuildPath.RemoveAll()
-		ls.fullBuildPath = nil
 	}
 }
 
