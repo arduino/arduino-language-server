@@ -7,6 +7,7 @@ env:
 
 # See: https://docs.github.com/actions/using-workflows/events-that-trigger-workflows
 on:
+  create:
   push:
     paths:
       - ".github/workflows/check-taskfiles.ya?ml"
@@ -28,8 +29,33 @@ on:
   repository_dispatch:
 
 jobs:
+  run-determination:
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.determination.outputs.result }}
+    steps:
+      - name: Determine if the rest of the workflow should run
+        id: determination
+        run: |
+          RELEASE_BRANCH_REGEX="refs/heads/[0-9]+.[0-9]+.x"
+          # The `create` event trigger doesn't support `branches` filters, so it's necessary to use Bash instead.
+          if [[
+            "${{ github.event_name }}" != "create" ||
+            "${{ github.ref }}" =~ $RELEASE_BRANCH_REGEX
+          ]]; then
+            # Run the other jobs.
+            RESULT="true"
+          else
+            # There is no need to run the other jobs.
+            RESULT="false"
+          fi
+
+          echo "result=$RESULT" >> $GITHUB_OUTPUT
+
   validate:
     name: Validate ${{ matrix.file }}
+    needs: run-determination
+    if: needs.run-determination.outputs.result == 'true'
     runs-on: ubuntu-latest
 
     strategy:
@@ -53,8 +79,8 @@ jobs:
         id: download-schema
         uses: carlosperate/download-file-action@v2
         with:
-          # See: https://github.com/SchemaStore/schemastore/blob/master/src/schemas/json/taskfile.json
-          file-url: https://json.schemastore.org/taskfile.json
+          # Source: https://github.com/SchemaStore/schemastore/blob/master/src/schemas/json/taskfile.json
+          file-url: https://taskfile.dev/schema.json
           location: ${{ runner.temp }}/taskfile-schema
 
       - name: Install JSON schema validator
