@@ -1,7 +1,7 @@
 # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/sync-labels.md
 name: Sync Labels
 
-# See: https://docs.github.com/en/actions/reference/events-that-trigger-workflows
+# See: https://docs.github.com/actions/using-workflows/events-that-trigger-workflows
 on:
   push:
     paths:
@@ -86,7 +86,7 @@ jobs:
     steps:
       - name: Set environment variables
         run: |
-          # See: https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions#setting-an-environment-variable
+          # See: https://docs.github.com/actions/using-workflows/workflow-commands-for-github-actions#setting-an-environment-variable
           echo "MERGED_CONFIGURATION_PATH=${{ runner.temp }}/labels.yml" >> "$GITHUB_ENV"
 
       - name: Determine whether to dry run
@@ -103,7 +103,7 @@ jobs:
         run: |
           # Use of this flag in the github-label-sync command will cause it to only check the validity of the
           # configuration.
-          echo "::set-output name=flag::--dry-run"
+          echo "flag=--dry-run" >> $GITHUB_OUTPUT
 
       - name: Checkout repository
         uses: actions/checkout@v3
