@@ -176,7 +176,8 @@ tasks:
           # npx --call uses the native shell, which makes it too difficult to use npx for this application on Windows,
           # so the Windows user is required to have markdown-link-check installed and in PATH.
           if ! which markdown-link-check &>/dev/null; then
-            echo "markdown-link-check not found or not in PATH. Please install: https://github.com/tcort/markdown-link-check#readme"
+            echo "markdown-link-check not found or not in PATH."
+            echo "Please install: https://github.com/tcort/markdown-link-check#readme"
             exit 1
           fi
           # Default behavior of the task on Windows is to exit the task when the first broken link causes a non-zero
