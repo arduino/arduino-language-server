@@ -16,7 +16,7 @@ require (
 
 require (
 	github.com/arduino/go-properties-orderedmap v1.6.0 // indirect
-	github.com/arduino/go-win32-utils v0.0.0-20180330194947-ed041402e83b // indirect
+	github.com/arduino/go-win32-utils v1.0.0 // indirect
 	github.com/codeclysm/extract/v3 v3.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/djherbis/buffer v1.1.0 // indirect
@@ -48,7 +48,7 @@ require (
 	go.bug.st/relaxed-semver v0.9.0 // indirect
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
 	golang.org/x/net v0.0.0-20210505024714-0287a6fb4125 // indirect
-	golang.org/x/sys v0.0.0-20210823070655-63515b42dcdf // indirect
+	golang.org/x/sys v0.6.0 // indirect
 	golang.org/x/text v0.3.6 // indirect
 	google.golang.org/genproto v0.0.0-20210602131652-f16073e35f0c // indirect
 	google.golang.org/protobuf v1.26.0 // indirect
