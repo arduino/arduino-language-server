@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"os/user"
 	"path"
+	"strings"
 
 	"github.com/arduino/arduino-language-server/ls"
 	"github.com/arduino/arduino-language-server/streams"
@@ -22,6 +23,12 @@ import (
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "remove-temp-files" {
 		for _, tmpFile := range os.Args[2:] {
+			// SAFETY CHECK
+			if !strings.Contains(tmpFile, "arduino-language-server") {
+				fmt.Println("Could not remove extraneous temp folder:", tmpFile)
+				os.Exit(1)
+			}
+
 			paths.New(tmpFile).RemoveAll()
 		}
 		return
