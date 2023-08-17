@@ -303,8 +303,6 @@ func (server *IDELSPServer) WorkspaceDidChangeConfiguration(logger jsonrpc.Funct
 	//
 	// Since ALS doesn’t have any workspace configuration yet,
 	// ignore it.
-	return
-
 }
 
 // WorkspaceDidChangeWatchedFiles is not implemented
