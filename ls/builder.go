@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arduino/arduino-cli/arduino/libraries"
 	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1"
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
@@ -300,8 +299,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 
 		// Currently those values are not used, keeping here for future improvements
 		type cmdBuilderRes struct {
-			BuildPath     *paths.Path `json:"build_path"`
-			UsedLibraries []*libraries.Library
+			BuildPath *paths.Path `json:"build_path"`
 		}
 		type cmdRes struct {
 			CompilerOut   string        `json:"compiler_out"`
