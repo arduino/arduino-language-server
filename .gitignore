@@ -3,3 +3,4 @@ build.sh
 /arduino-language-server*
 !/arduino-language-server*/
 /node_modules/
+dist
