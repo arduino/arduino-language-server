@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/arduino/arduino-cli/executils"
 	"github.com/arduino/arduino-language-server/streams"
 	"github.com/arduino/go-paths-helper"
 	"github.com/fatih/color"
@@ -49,7 +48,6 @@ func newClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 
 	// Start clangd
 	args := []string{
-		ls.config.ClangdPath.String(),
 		"-log=verbose",
 		fmt.Sprintf(`--compile-commands-dir=%s`, ls.buildPath),
 	}
@@ -57,7 +55,7 @@ func newClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**").Canonical()))
 	}
 
-	logger.Logf("    Starting clangd: %s", strings.Join(args, " "))
+	logger.Logf("    Starting clangd: %s %s", ls.config.ClangdPath, strings.Join(args, " "))
 	var clangdStdin io.WriteCloser
 	var clangdStdout, clangdStderr io.ReadCloser
 	var extraEnv []string
@@ -65,7 +63,7 @@ func newClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 		extraEnv = append(extraEnv, "TMPDIR="+ls.tempDir.String()) // For unix-based systems
 		extraEnv = append(extraEnv, "TMP="+ls.tempDir.String())    // For Windows
 	}
-	if clangdCmd, err := executils.NewProcess(extraEnv, args...); err != nil {
+	if clangdCmd, err := paths.NewProcessFromPath(extraEnv, ls.config.ClangdPath, args...); err != nil {
 		panic("starting clangd: " + err.Error())
 	} else if cin, err := clangdCmd.StdinPipe(); err != nil {
 		panic("getting clangd stdin: " + err.Error())

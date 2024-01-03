@@ -27,7 +27,6 @@ import (
 
 	"github.com/arduino/arduino-cli/arduino/builder"
 	"github.com/arduino/arduino-cli/arduino/libraries"
-	"github.com/arduino/arduino-cli/executils"
 	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1"
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
@@ -275,7 +274,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 		}
 
 		// Run arduino-cli to perform the build
-		args := []string{config.CliPath.String(),
+		args := []string{
 			"--config-file", config.CliConfigPath.String(),
 			"compile",
 			"--fqbn", config.Fqbn,
@@ -289,7 +288,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 		}
 		args = append(args, sketchRoot.String())
 
-		cmd, err := executils.NewProcess(nil, args...)
+		cmd, err := paths.NewProcessFromPath(nil, config.CliPath, args...)
 		if err != nil {
 			return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 		}

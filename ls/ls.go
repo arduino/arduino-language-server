@@ -28,7 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arduino/arduino-cli/executils"
 	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/settings/v1"
 	"github.com/arduino/arduino-language-server/globals"
 	"github.com/arduino/arduino-language-server/sourcemapper"
@@ -1449,13 +1448,13 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 		}
 		logger.Logf("Arduino Data Dir -> %s", dataDir)
 	} else {
-		args := []string{ls.config.CliPath.String(),
+		args := []string{
 			"--config-file", ls.config.CliConfigPath.String(),
 			"config",
 			"dump",
 			"--format", "json",
 		}
-		cmd, err := executils.NewProcess(nil, args...)
+		cmd, err := paths.NewProcessFromPath(nil, ls.config.CliPath, args...)
 		if err != nil {
 			return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 		}
