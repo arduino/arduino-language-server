@@ -20,12 +20,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/arduino/arduino-cli/arduino/builder"
 	"github.com/arduino/arduino-cli/arduino/libraries"
 	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1"
 	"github.com/arduino/arduino-language-server/sourcemapper"
@@ -328,27 +326,4 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 	canonicalizeCompileCommandsJSON(buildPath.Join("compile_commands.json"))
 
 	return success, nil
-}
-
-func canonicalizeCompileCommandsJSON(compileCommandsJSONPath *paths.Path) {
-	compileCommands, err := builder.LoadCompilationDatabase(compileCommandsJSONPath)
-	if err != nil {
-		panic("could not find compile_commands.json")
-	}
-	for i, cmd := range compileCommands.Contents {
-		if len(cmd.Arguments) == 0 {
-			panic("invalid empty argument field in compile_commands.json")
-		}
-
-		// clangd requires full path to compiler (including extension .exe on Windows!)
-		compilerPath := paths.New(cmd.Arguments[0]).Canonical()
-		compiler := compilerPath.String()
-		if runtime.GOOS == "windows" && strings.ToLower(compilerPath.Ext()) != ".exe" {
-			compiler += ".exe"
-		}
-		compileCommands.Contents[i].Arguments[0] = compiler
-	}
-
-	// Save back compile_commands.json with OS native file separator and extension
-	compileCommands.SaveToFile()
 }
