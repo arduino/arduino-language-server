@@ -28,8 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arduino/arduino-cli/executils"
-	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/settings/v1"
+	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1"
 	"github.com/arduino/arduino-language-server/globals"
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
@@ -41,6 +40,7 @@ import (
 	"go.bug.st/lsp/jsonrpc"
 	"go.bug.st/lsp/textedits"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // INOLanguageServer is a JSON-RPC handler that delegates messages to clangd.
@@ -1431,14 +1431,17 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 	var dataDir string
 	if ls.config.CliPath == nil {
 		// Establish a connection with the arduino-cli gRPC server
-		conn, err := grpc.Dial(ls.config.CliDaemonAddress, grpc.WithInsecure(), grpc.WithBlock())
+		conn, err := grpc.Dial(
+			ls.config.CliDaemonAddress,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithBlock())
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
 		}
 		defer conn.Close()
-		client := rpc.NewSettingsServiceClient(conn)
+		client := rpc.NewArduinoCoreServiceClient(conn)
 
-		resp, err := client.GetValue(context.Background(), &rpc.GetValueRequest{
+		resp, err := client.SettingsGetValue(context.Background(), &rpc.SettingsGetValueRequest{
 			Key: "directories.data",
 		})
 		if err != nil {
@@ -1449,13 +1452,13 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 		}
 		logger.Logf("Arduino Data Dir -> %s", dataDir)
 	} else {
-		args := []string{ls.config.CliPath.String(),
+		args := []string{
 			"--config-file", ls.config.CliConfigPath.String(),
 			"config",
 			"dump",
 			"--format", "json",
 		}
-		cmd, err := executils.NewProcess(nil, args...)
+		cmd, err := paths.NewProcessFromPath(nil, ls.config.CliPath, args...)
 		if err != nil {
 			return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 		}

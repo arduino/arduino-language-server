@@ -20,14 +20,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/arduino/arduino-cli/arduino/builder"
-	"github.com/arduino/arduino-cli/arduino/libraries"
-	"github.com/arduino/arduino-cli/executils"
 	rpc "github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1"
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"github.com/arduino/arduino-language-server/streams"
@@ -275,7 +271,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 		}
 
 		// Run arduino-cli to perform the build
-		args := []string{config.CliPath.String(),
+		args := []string{
 			"--config-file", config.CliConfigPath.String(),
 			"compile",
 			"--fqbn", config.Fqbn,
@@ -289,7 +285,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 		}
 		args = append(args, sketchRoot.String())
 
-		cmd, err := executils.NewProcess(nil, args...)
+		cmd, err := paths.NewProcessFromPath(nil, config.CliPath, args...)
 		if err != nil {
 			return false, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 		}
@@ -303,8 +299,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 
 		// Currently those values are not used, keeping here for future improvements
 		type cmdBuilderRes struct {
-			BuildPath     *paths.Path `json:"build_path"`
-			UsedLibraries []*libraries.Library
+			BuildPath *paths.Path `json:"build_path"`
 		}
 		type cmdRes struct {
 			CompilerOut   string        `json:"compiler_out"`
@@ -329,27 +324,4 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 	canonicalizeCompileCommandsJSON(buildPath.Join("compile_commands.json"))
 
 	return success, nil
-}
-
-func canonicalizeCompileCommandsJSON(compileCommandsJSONPath *paths.Path) {
-	compileCommands, err := builder.LoadCompilationDatabase(compileCommandsJSONPath)
-	if err != nil {
-		panic("could not find compile_commands.json")
-	}
-	for i, cmd := range compileCommands.Contents {
-		if len(cmd.Arguments) == 0 {
-			panic("invalid empty argument field in compile_commands.json")
-		}
-
-		// clangd requires full path to compiler (including extension .exe on Windows!)
-		compilerPath := paths.New(cmd.Arguments[0]).Canonical()
-		compiler := compilerPath.String()
-		if runtime.GOOS == "windows" && strings.ToLower(compilerPath.Ext()) != ".exe" {
-			compiler += ".exe"
-		}
-		compileCommands.Contents[i].Arguments[0] = compiler
-	}
-
-	// Save back compile_commands.json with OS native file separator and extension
-	compileCommands.SaveToFile()
 }
