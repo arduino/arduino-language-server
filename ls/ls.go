@@ -1470,17 +1470,19 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 		}
 
 		type cmdRes struct {
-			Directories struct {
-				Data string `json:"data"`
-			} `json:"directories"`
+			Config struct {
+				Directories struct {
+					Data string `json:"data"`
+				} `json:"directories"`
+			} `json:"config"`
 		}
 		var res cmdRes
 		if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
 			return nil, errors.Errorf("parsing arduino-cli output: %s", err)
 		}
 		// Return only the build path
-		logger.Logf("Arduino Data Dir -> %s", res.Directories.Data)
-		dataDir = res.Directories.Data
+		logger.Logf("Arduino Data Dir -> %s", res.Config.Directories.Data)
+		dataDir = res.Config.Directories.Data
 	}
 
 	dataDirPath := paths.New(dataDir)
