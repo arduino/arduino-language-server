@@ -51,7 +51,16 @@ func newClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 	args := []string{
 		ls.config.ClangdPath.String(),
 		"-log=verbose",
+		"--pch-storage=memory",
 		fmt.Sprintf(`--compile-commands-dir=%s`, ls.buildPath),
+	}
+	if jobs := ls.config.Jobs; jobs == -1 {
+		// default: limit parallel build jobs to 1
+		args = append(args, "-j", "1")
+	} else if jobs == 0 {
+		// no args: clangd will max out the available cores
+	} else {
+		args = append(args, "-j", fmt.Sprintf("%d", jobs))
 	}
 	if dataFolder != nil {
 		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**").Canonical()))

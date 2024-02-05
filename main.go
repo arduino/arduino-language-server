@@ -70,6 +70,7 @@ func main() {
 	noRealTimeDiagnostics := flag.Bool(
 		"no-real-time-diagnostics", false,
 		"Disable real time diagnostics")
+	jobs := flag.Int("jobs", -1, "Max number of parallel jobs. Default is 1. Use 0 to match the number of available CPU cores.")
 	flag.Parse()
 
 	if *loggingBasePath != "" {
@@ -141,6 +142,7 @@ func main() {
 		CliInstanceNumber:               *cliDaemonInstanceNumber,
 		SkipLibrariesDiscoveryOnRebuild: *skipLibrariesDiscoveryOnRebuild,
 		DisableRealTimeDiagnostics:      *noRealTimeDiagnostics,
+		Jobs:                            *jobs,
 	}
 
 	stdio := streams.NewReadWriteCloser(os.Stdin, os.Stdout)
