@@ -51,6 +51,8 @@ func newClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 	args := []string{
 		ls.config.ClangdPath.String(),
 		"-log=verbose",
+		"-j", "1", // Limit parallel build jobs to 1
+		"--pch-storage=memory",
 		fmt.Sprintf(`--compile-commands-dir=%s`, ls.buildPath),
 	}
 	if dataFolder != nil {
