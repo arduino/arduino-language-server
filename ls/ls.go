@@ -80,6 +80,7 @@ type Config struct {
 	EnableLogging                   bool
 	SkipLibrariesDiscoveryOnRebuild bool
 	DisableRealTimeDiagnostics      bool
+	Jobs                            int
 }
 
 var yellow = color.New(color.FgHiYellow)
