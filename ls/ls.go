@@ -1486,6 +1486,9 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 
 	logger.Logf("Arduino Data Dir -> %s", dataDir)
 	dataDirPath := paths.New(dataDir)
+	if dataDirPath == nil {
+		return nil, errors.Errorf("error creating path from %s", dataDir)
+	}
 	return dataDirPath.Canonical(), nil
 }
 
