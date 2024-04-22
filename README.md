@@ -10,6 +10,17 @@
 
 The **Arduino Language Server** is the tool that powers the autocompletion of the new [Arduino IDE 2][arduino-ide-repo]. It implements the standard [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) so it can be used with other IDEs as well.
 
+## Use Outside of Arduino IDE
+
+The Arduino Language Server can be used with any editor that supports the Language Server Protocol. Depending on your IDE, you may need to manually manage its installation. You can do so using `go install`:
+
+```bash
+go install github.com/arduino/arduino-language-server@${VERSION}
+```
+
+> **NOTE** The `main` branch is **not** considered stable! It is *highly* recommended that you pin your installation (regardless of method) to a stable release. The latest release is
+[![Latest Release](https://img.shields.io/github/v/release/arduino/arduino-language-server)](https://github.com/arduino/arduino-language-server/releases/latest).
+
 ## Bugs & Issues
 
 High quality bug reports and feature requests are valuable contributions to the project.
