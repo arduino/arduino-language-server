@@ -1487,6 +1487,10 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 	}
 
 	dataDirPath := paths.New(dataDir)
+  if dataDirPath == nil {
+    return nil, nil
+  }
+
 	return dataDirPath.Canonical(), nil
 }
 
