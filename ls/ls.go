@@ -1455,9 +1455,8 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 	} else {
 		args := []string{
 			"--config-file", ls.config.CliConfigPath.String(),
-			"config",
-			"dump",
-			"--format", "json",
+			"config", "get", "directories.data",
+			"--json",
 		}
 		cmd, err := paths.NewProcessFromPath(nil, ls.config.CliPath, args...)
 		if err != nil {
@@ -1470,20 +1469,13 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 			return nil, errors.Errorf("running %s: %s", strings.Join(args, " "), err)
 		}
 
-		type cmdRes struct {
-			Config struct {
-				Directories struct {
-					Data string `json:"data"`
-				} `json:"directories"`
-			} `json:"config"`
-		}
-		var res cmdRes
+		var res string
 		if err := json.Unmarshal(cmdOutput.Bytes(), &res); err != nil {
 			return nil, errors.Errorf("parsing arduino-cli output: %s", err)
 		}
 		// Return only the build path
-		logger.Logf("Arduino Data Dir -> %s", res.Config.Directories.Data)
-		dataDir = res.Config.Directories.Data
+		logger.Logf("Arduino Data Dir -> %s", res)
+		dataDir = res
 	}
 
 	dataDirPath := paths.New(dataDir)
