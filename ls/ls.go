@@ -1448,7 +1448,7 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 		if err != nil {
 			return nil, fmt.Errorf("error getting arduino data dir: %w", err)
 		}
-		if err := json.Unmarshal([]byte(resp.JsonData), &dataDir); err != nil {
+		if err := json.Unmarshal([]byte(resp.GetEncodedValue()), &dataDir); err != nil {
 			return nil, fmt.Errorf("error getting arduino data dir: %w", err)
 		}
 		logger.Logf("Arduino Data Dir -> %s", dataDir)
