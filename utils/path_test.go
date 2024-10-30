@@ -33,7 +33,7 @@ func TestGetDefaultCliConfigPath(t *testing.T) {
 			name:     "windows path",
 			goos:     "windows",
 			user:     &user.User{HomeDir: "C:\\Users\\test"},
-			wantPath: path.Join("C:\\Users\\test", ".arduino15", "arduino-cli.yaml"),
+			wantPath: path.Join("C:\\Users\\test", "AppData\\Local\\Arduino15", "arduino-cli.yaml"),
 		},
 		{
 			name:     "nil user",

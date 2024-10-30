@@ -19,6 +19,8 @@ func GetDefaultCliConfigPath() string {
 			switch getGOOS {
 			case "darwin":
 				return "Library/Arduino15"
+			case "windows":
+				return "AppData\\Local\\Arduino15"
 			default:
 				return ".arduino15"
 			}
