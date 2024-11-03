@@ -1,8 +1,8 @@
 module github.com/arduino/arduino-language-server
 
-go 1.21
+go 1.22
 
-toolchain go1.21.5
+toolchain go1.22.8
 
 require (
 	github.com/arduino/arduino-cli v1.0.3
@@ -32,3 +32,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace go.bug.st/lsp => github.com/speelbarrow/go-lsp v0.1.3-0.20241103164431-cf1c00fb5806
