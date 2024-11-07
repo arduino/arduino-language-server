@@ -11,6 +11,9 @@ on:
     branches:
       - main
 
+env:
+  ARTIFACT_PREFIX: dist-
+
 jobs:
 
   build:
@@ -20,13 +23,16 @@ jobs:
     strategy:
       matrix:
         config:
-          - os: ubuntu-latest
+          - artifact-suffix: Linux_64bit
+            os: ubuntu-latest
             ExecutableSuffix: ''
             Exports: ''
-          - os: macos-latest
+          - artifact-suffix: macOS_ARM64
+            os: macos-latest
             ExecutableSuffix: ''
             Exports: 'CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=10.14 '
-          - os: windows-2019
+          - artifact-suffix: Windows_64bit
+            os: windows-2019
             ExecutableSuffix: '.exe'
             Exports: ''
     runs-on: ${{ matrix.config.os }}
@@ -50,7 +56,7 @@ jobs:
       - name: Upload Workflow Artifact [GitHub Actions]
         uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts
+          name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.config.artifact-suffix }}
           # this makes the artifact a .zip of the .zip archive, which is currently necessary to preserve the executable file permissions
           # see: https://github.com/actions/upload-artifact/issues/38
           path: ${{ env.BUILD_OUTPUT_DIRECTORY }}/archive/${{ env.EXECUTABLE_NAME }}_${{ runner.OS }}_amd64.zip
@@ -63,7 +69,8 @@ jobs:
       - name: Download Workflow Artifact [GitHub Actions]
         uses: actions/download-artifact@v4
         with:
-          name: build-artifacts
+          pattern: ${{ env.ARTIFACT_PREFIX }}*
+          merge-multiple: true
           path: build-artifacts
 
       - name: Publish Nightly [S3]
