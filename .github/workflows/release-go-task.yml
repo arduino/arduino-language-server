@@ -58,7 +58,7 @@ jobs:
         run: task dist:${{ matrix.task }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
           name: ${{ env.ARTIFACT_NAME }}
@@ -169,7 +169,7 @@ jobs:
           -C ../../ LICENSE.txt
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
           name: ${{ env.ARTIFACT_NAME }}
