@@ -8,7 +8,7 @@ env:
   DIST_DIR: dist
   # The project's folder on Arduino's download server for uploading builds
   AWS_PLUGIN_TARGET: /arduino-language-server/
-  ARTIFACT_NAME: dist
+  ARTIFACT_PREFIX: dist-
 
 on:
   push:
@@ -21,16 +21,25 @@ jobs:
 
     strategy:
       matrix:
-        task:
-          - Windows_32bit
-          - Windows_64bit
-          - Linux_32bit
-          - Linux_64bit
-          - Linux_ARMv6
-          - Linux_ARMv7
-          - Linux_ARM64
-          - macOS_64bit
-          - macOS_ARM64
+        os:
+          - task: Windows_32bit
+            artifact-suffix: Windows_32bit
+          - task: Windows_64bit
+            artifact-suffix: Windows_64bit
+          - task: Linux_32bit
+            artifact-suffix: Linux_32bit
+          - task: Linux_64bit
+            artifact-suffix: Linux_64bit
+          - task: Linux_ARMv6
+            artifact-suffix: Linux_ARMv6
+          - task: Linux_ARMv7
+            artifact-suffix: Linux_ARMv7
+          - task: Linux_ARM64
+            artifact-suffix: Linux_ARM64
+          - task: macOS_64bit
+            artifact-suffix: macOS_64bit
+          - task: macOS_ARM64
+            artifact-suffix: macOS_ARM64
 
     steps:
       - name: Checkout repository
@@ -40,7 +49,7 @@ jobs:
 
       - name: Create changelog
         # Avoid creating the same changelog for each os
-        if: matrix.task == 'Windows_32bit'
+        if: matrix.os.task == 'Windows_32bit'
         uses: arduino/create-changelog@v1
         with:
           tag-regex: '^[0-9]+\.[0-9]+\.[0-9]+.*$'
@@ -55,13 +64,13 @@ jobs:
           version: 3.x
 
       - name: Build
-        run: task dist:${{ matrix.task }}
+        run: task dist:${{ matrix.os.task }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.os.artifact-suffix }}
           path: ${{ env.DIST_DIR }}
 
   notarize-macos:
@@ -78,9 +87,11 @@ jobs:
     strategy:
       matrix:
         build:
-          - folder-suffix: darwin_amd64
+          - artifact-suffix: macOS_64bit
+            folder-suffix: darwin_amd64
             package-suffix: "macOS_64bit.tar.gz"
-          - folder-suffix: darwin_arm64
+          - artifact-suffix: macOS_ARM64
+            folder-suffix: darwin_arm64
             package-suffix: "macOS_ARM64.tar.gz"
 
     steps:
@@ -97,7 +108,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.build.artifact-suffix }}
           path: ${{ env.DIST_DIR }}
 
       - name: Import Code-Signing Certificates
@@ -168,11 +179,12 @@ jobs:
           -C "${{ env.BUILD_FOLDER }}/" "${{ env.PROJECT_NAME }}" \
           -C ../../ LICENSE.txt
 
-      - name: Upload artifact
+      - name: Replace artifact with notarized build
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.build.artifact-suffix }}
+          overwrite: true
           path: ${{ env.DIST_DIR }}/${{ env.PACKAGE_FILENAME }}
 
   create-release:
@@ -183,7 +195,8 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          pattern: ${{ env.ARTIFACT_PREFIX }}*
+          merge-multiple: true
           path: ${{ env.DIST_DIR }}
 
       - name: Create checksum file
