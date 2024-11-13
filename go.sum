@@ -1,7 +1,6 @@
 github.com/arduino/arduino-cli v1.0.3 h1:mzLXzobYQNe7oOBMXCYbnAq8eTaDHyEZ2J34AIXpkxs=
 github.com/arduino/arduino-cli v1.0.3/go.mod h1:lvfuOgY+4KNsPmRKR+AZC/x8sx6rzUWt4yGZFon7VLA=
 github.com/arduino/go-paths-helper v1.0.1/go.mod h1:HpxtKph+g238EJHq4geEPv9p+gl3v5YYu35Yb+w31Ck=
-github.com/arduino/go-paths-helper v1.6.1/go.mod h1:V82BWgAAp4IbmlybxQdk9Bpkz8M4Qyx+RAFKaG9NuvU=
 github.com/arduino/go-paths-helper v1.12.1 h1:WkxiVUxBjKWlLMiMuYy8DcmVrkxdP7aKxQOAq7r2lVM=
 github.com/arduino/go-paths-helper v1.12.1/go.mod h1:jcpW4wr0u69GlXhTYydsdsqAjLaYK5n7oWHfKqOG6LM=
 github.com/arduino/go-properties-orderedmap v1.8.1 h1:nU5S6cXPwMoxZs4ORw61wPTALNfriIduvNB4cxTmNYM=
@@ -37,15 +36,14 @@ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH
 github.com/rogpeppe/go-internal v1.9.0/go.mod h1:WtVeX8xhTBvf0smdhujwtBcq4Qrzq/fJaraNFVN+nFs=
 github.com/rogpeppe/go-internal v1.12.0 h1:exVL4IDcn6na9z1rAb56Vxr+CgyK3nn3O+epU5NdKM8=
 github.com/rogpeppe/go-internal v1.12.0/go.mod h1:E+RYuTGaKKdloAfM02xzb0FW3Paa99yedzYV+kq4uf4=
+github.com/speelbarrow/go-lsp v0.1.3-0.20241103164431-cf1c00fb5806 h1:qfnv3wigSjzcnsNHlLX0meKsU5H7IoRYcnaXPgReQm4=
+github.com/speelbarrow/go-lsp v0.1.3-0.20241103164431-cf1c00fb5806/go.mod h1:gAUjofIinATc1DRErYVSHgUpMeX3Vvxg8DH3qvb3mvM=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
-github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 go.bug.st/json v1.15.6 h1:pvSpotu6f5JoCbx1TnKn6asVH7o9Tg2/GKsZSVzBOsc=
 go.bug.st/json v1.15.6/go.mod h1:bh58F9adz5ePlNqtvbuXuXcf9k6IrDLKH6lJUsHP3TI=
-go.bug.st/lsp v0.1.2 h1:/n2kJ5yow53nJ7gICUKxeB2G6H+pcsh4x+MEmzxoqsk=
-go.bug.st/lsp v0.1.2/go.mod h1:oYTh1uf5hI1teV5crrWut41Pk8vD/NqIjs4zD+No5FE=
 go.bug.st/relaxed-semver v0.12.0 h1:se8v3lTdAAFp68+/RS/0Y/nFdnpdzkP5ICY04SPau4E=
 go.bug.st/relaxed-semver v0.12.0/go.mod h1:Cpcbiig6Omwlq6bS7i3MQWiqS7W7HDd8CAnZFC40Cl0=
 golang.org/x/net v0.25.0 h1:d/OCCoBEUq33pjydKrGQhw7IlUPI2Oylr+8qLx49kac=
@@ -65,6 +63,5 @@ google.golang.org/protobuf v1.34.2/go.mod h1:qYOHts0dSfpeUzUFpOMr/WGzszTmLH+DiWn
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
-gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
