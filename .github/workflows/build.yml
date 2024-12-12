@@ -12,7 +12,14 @@ on:
       - main
 
 env:
+  # As defined by the Taskfile's PROJECT_NAME variable
+  PROJECT_NAME: arduino-language-server
   ARTIFACT_PREFIX: dist-
+  AWS_REGION: "us-east-1"
+  # The project's folder on Arduino's download server for uploading builds
+  AWS_PLUGIN_TARGET: /arduino-language-server/nightly/
+  # As defined by the Taskfile's DIST_DIR variable
+  DIST_DIR: dist
 
 jobs:
 
@@ -65,20 +72,24 @@ jobs:
     needs: build
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write # This is required for requesting the JWT
     steps:
       - name: Download Workflow Artifact [GitHub Actions]
         uses: actions/download-artifact@v4
         with:
           pattern: ${{ env.ARTIFACT_PREFIX }}*
           merge-multiple: true
-          path: build-artifacts
+          path: ${{ env.DIST_DIR }}
 
-      - name: Publish Nightly [S3]
-        uses: docker://plugins/s3
-        env:
-          PLUGIN_SOURCE: "build-artifacts/*"
-          PLUGIN_TARGET: "/arduino-language-server/nightly"
-          PLUGIN_STRIP_PREFIX: "build-artifacts/"
-          PLUGIN_BUCKET: ${{ secrets.DOWNLOADS_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: "github_${{ env.PROJECT_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload release files on Arduino downloads servers
+        run: aws s3 sync ${{ env.DIST_DIR }} s3://${{ secrets.DOWNLOADS_BUCKET }}${{ env.AWS_PLUGIN_TARGET }}
