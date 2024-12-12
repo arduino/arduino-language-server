@@ -2,6 +2,8 @@ name: build
 
 on:
   push:
+    branches:
+      - main
   schedule:
     - cron: '0 4 * * MON-FRI' # run every weekday at 4AM (https://docs.github.com/en/actions/reference/events-that-trigger-workflows#scheduled-events-schedule)
   workflow_dispatch:
@@ -68,6 +70,7 @@ jobs:
 
   publish:
     needs: build
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     environment: production
     permissions:
