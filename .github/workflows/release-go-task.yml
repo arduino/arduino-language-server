@@ -8,6 +8,7 @@ env:
   DIST_DIR: dist
   # The project's folder on Arduino's download server for uploading builds
   AWS_PLUGIN_TARGET: /arduino-language-server/
+  AWS_REGION: "us-east-1"
   ARTIFACT_PREFIX: dist-
 
 on:
@@ -189,7 +190,11 @@ jobs:
 
   create-release:
     runs-on: ubuntu-latest
+    environment: production
     needs: notarize-macos
+    permissions:
+      contents: write
+      id-token: write # This is required for requesting the JWT
 
     steps:
       - name: Download artifact
@@ -233,12 +238,12 @@ jobs:
           # (all the files we need are in the DIST_DIR root)
           artifacts: ${{ env.DIST_DIR }}/*
 
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: "github_${{ env.PROJECT_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Upload release files on Arduino downloads servers
-        uses: docker://plugins/s3
-        env:
-          PLUGIN_SOURCE: "${{ env.DIST_DIR }}/*"
-          PLUGIN_TARGET: ${{ env.AWS_PLUGIN_TARGET }}
-          PLUGIN_STRIP_PREFIX: "${{ env.DIST_DIR }}/"
-          PLUGIN_BUCKET: ${{ secrets.DOWNLOADS_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: aws s3 sync ${{ env.DIST_DIR }} s3://${{ secrets.DOWNLOADS_BUCKET }}${{ env.AWS_PLUGIN_TARGET }}
