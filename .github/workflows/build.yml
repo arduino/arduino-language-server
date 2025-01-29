@@ -11,6 +11,16 @@ on:
     branches:
       - main
 
+env:
+  # As defined by the Taskfile's PROJECT_NAME variable
+  PROJECT_NAME: arduino-language-server
+  ARTIFACT_PREFIX: dist-
+  AWS_REGION: "us-east-1"
+  # The project's folder on Arduino's download server for uploading builds
+  AWS_PLUGIN_TARGET: /arduino-language-server/nightly/
+  # As defined by the Taskfile's DIST_DIR variable
+  DIST_DIR: dist
+
 jobs:
 
   build:
@@ -20,13 +30,16 @@ jobs:
     strategy:
       matrix:
         config:
-          - os: ubuntu-latest
+          - artifact-suffix: Linux_64bit
+            os: ubuntu-latest
             ExecutableSuffix: ''
             Exports: ''
-          - os: macos-latest
+          - artifact-suffix: macOS_ARM64
+            os: macos-latest
             ExecutableSuffix: ''
             Exports: 'CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=10.14 '
-          - os: windows-2019
+          - artifact-suffix: Windows_64bit
+            os: windows-2019
             ExecutableSuffix: '.exe'
             Exports: ''
     runs-on: ${{ matrix.config.os }}
@@ -48,9 +61,9 @@ jobs:
         run: 7z a "${{ github.workspace }}/${{ env.BUILD_OUTPUT_DIRECTORY }}/archive/${{ env.EXECUTABLE_NAME }}_${{ runner.OS }}_amd64.zip" "${{ github.workspace }}/${{ env.BUILD_OUTPUT_DIRECTORY }}/${{ runner.OS }}_amd64/*"
 
       - name: Upload Workflow Artifact [GitHub Actions]
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts
+          name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.config.artifact-suffix }}
           # this makes the artifact a .zip of the .zip archive, which is currently necessary to preserve the executable file permissions
           # see: https://github.com/actions/upload-artifact/issues/38
           path: ${{ env.BUILD_OUTPUT_DIRECTORY }}/archive/${{ env.EXECUTABLE_NAME }}_${{ runner.OS }}_amd64.zip
@@ -59,19 +72,24 @@ jobs:
     needs: build
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write # This is required for requesting the JWT
     steps:
       - name: Download Workflow Artifact [GitHub Actions]
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
-          name: build-artifacts
-          path: build-artifacts
+          pattern: ${{ env.ARTIFACT_PREFIX }}*
+          merge-multiple: true
+          path: ${{ env.DIST_DIR }}
 
-      - name: Publish Nightly [S3]
-        uses: docker://plugins/s3
-        env:
-          PLUGIN_SOURCE: "build-artifacts/*"
-          PLUGIN_TARGET: "/arduino-language-server/nightly"
-          PLUGIN_STRIP_PREFIX: "build-artifacts/"
-          PLUGIN_BUCKET: ${{ secrets.DOWNLOADS_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: "github_${{ env.PROJECT_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload release files on Arduino downloads servers
+        run: aws s3 sync ${{ env.DIST_DIR }} s3://${{ secrets.DOWNLOADS_BUCKET }}${{ env.AWS_PLUGIN_TARGET }}

@@ -8,7 +8,8 @@ env:
   DIST_DIR: dist
   # The project's folder on Arduino's download server for uploading builds
   AWS_PLUGIN_TARGET: /arduino-language-server/
-  ARTIFACT_NAME: dist
+  AWS_REGION: "us-east-1"
+  ARTIFACT_PREFIX: dist-
 
 on:
   push:
@@ -22,15 +23,24 @@ jobs:
     strategy:
       matrix:
         os:
-          - Windows_32bit
-          - Windows_64bit
-          - Linux_32bit
-          - Linux_64bit
-          - Linux_ARMv6
-          - Linux_ARMv7
-          - Linux_ARM64
-          - macOS_64bit
-          - macOS_ARM64
+          - task: Windows_32bit
+            artifact-suffix: Windows_32bit
+          - task: Windows_64bit
+            artifact-suffix: Windows_64bit
+          - task: Linux_32bit
+            artifact-suffix: Linux_32bit
+          - task: Linux_64bit
+            artifact-suffix: Linux_64bit
+          - task: Linux_ARMv6
+            artifact-suffix: Linux_ARMv6
+          - task: Linux_ARMv7
+            artifact-suffix: Linux_ARMv7
+          - task: Linux_ARM64
+            artifact-suffix: Linux_ARM64
+          - task: macOS_64bit
+            artifact-suffix: macOS_64bit
+          - task: macOS_ARM64
+            artifact-suffix: macOS_ARM64
 
     steps:
       - name: Checkout repository
@@ -40,7 +50,7 @@ jobs:
 
       - name: Create changelog
         # Avoid creating the same changelog for each os
-        if: matrix.os == 'Windows_32bit'
+        if: matrix.os.task == 'Windows_32bit'
         uses: arduino/create-changelog@v1
         with:
           tag-regex: '^[0-9]+\.[0-9]+\.[0-9]+.*$'
@@ -55,17 +65,17 @@ jobs:
           version: 3.x
 
       - name: Build
-        run: task dist:${{ matrix.os }}
+        run: task dist:${{ matrix.os.task }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.os.artifact-suffix }}
           path: ${{ env.DIST_DIR }}
 
   notarize-macos:
-    name: Notarize ${{ matrix.artifact.name }}
+    name: Notarize ${{ matrix.build.folder-suffix }}
     runs-on: macos-latest
     needs: create-release-artifacts
     outputs:
@@ -77,20 +87,29 @@ jobs:
 
     strategy:
       matrix:
-        artifact:
-          - name: darwin_amd64
-            path: "macOS_64bit.tar.gz"
-          - name: darwin_arm64
-            path: "macOS_ARM64.tar.gz"
+        build:
+          - artifact-suffix: macOS_64bit
+            folder-suffix: darwin_amd64
+            package-suffix: "macOS_64bit.tar.gz"
+          - artifact-suffix: macOS_ARM64
+            folder-suffix: darwin_arm64
+            package-suffix: "macOS_ARM64.tar.gz"
 
     steps:
+      - name: Set environment variables
+        run: |
+          # See: https://docs.github.com/actions/writing-workflows/choosing-what-your-workflow-does/workflow-commands-for-github-actions#setting-an-environment-variable
+          echo "BUILD_FOLDER=${{ env.PROJECT_NAME }}_osx_${{ matrix.build.folder-suffix }}" >> "$GITHUB_ENV"
+          TAG="${GITHUB_REF/refs\/tags\//}"
+          echo "PACKAGE_FILENAME=${{ env.PROJECT_NAME }}_${TAG}_${{ matrix.build.package-suffix }}" >> $GITHUB_ENV
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Download artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.build.artifact-suffix }}
           path: ${{ env.DIST_DIR }}
 
       - name: Import Code-Signing Certificates
@@ -127,7 +146,7 @@ jobs:
         run: |
           cat > "${{ env.GON_CONFIG_PATH }}" <<EOF
           # See: https://github.com/Bearer/gon#configuration-file
-          source = ["${{ env.DIST_DIR }}/${{ env.PROJECT_NAME }}_osx_${{ matrix.artifact.name }}/${{ env.PROJECT_NAME }}"]
+          source = ["${{ env.DIST_DIR }}/${{ env.BUILD_FOLDER }}/${{ env.PROJECT_NAME }}"]
           bundle_id = "cc.arduino.${{ env.PROJECT_NAME }}"
 
           sign {
@@ -156,30 +175,33 @@ jobs:
         run: |
           # GitHub's upload/download-artifact actions don't preserve file permissions,
           # so we need to add execution permission back until the action is made to do this.
-          chmod +x "${{ env.PROJECT_NAME }}_osx_${{ matrix.artifact.name }}/${{ env.PROJECT_NAME }}"
-          TAG="${GITHUB_REF/refs\/tags\//}"
-          PACKAGE_FILENAME="${{ env.PROJECT_NAME }}_${TAG}_${{ matrix.artifact.path }}"
-          tar -czvf "$PACKAGE_FILENAME" \
-          -C "${{ env.PROJECT_NAME }}_osx_${{ matrix.artifact.name }}/" "${{ env.PROJECT_NAME }}" \
+          chmod +x "${{ env.BUILD_FOLDER }}/${{ env.PROJECT_NAME }}"
+          tar -czvf "${{ env.PACKAGE_FILENAME }}" \
+          -C "${{ env.BUILD_FOLDER }}/" "${{ env.PROJECT_NAME }}" \
           -C ../../ LICENSE.txt
-          echo "PACKAGE_FILENAME=$PACKAGE_FILENAME" >> $GITHUB_ENV
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v3
+      - name: Replace artifact with notarized build
+        uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.build.artifact-suffix }}
+          overwrite: true
           path: ${{ env.DIST_DIR }}/${{ env.PACKAGE_FILENAME }}
 
   create-release:
     runs-on: ubuntu-latest
+    environment: production
     needs: notarize-macos
+    permissions:
+      contents: write
+      id-token: write # This is required for requesting the JWT
 
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          pattern: ${{ env.ARTIFACT_PREFIX }}*
+          merge-multiple: true
           path: ${{ env.DIST_DIR }}
 
       - name: Create checksum file
@@ -216,12 +238,12 @@ jobs:
           # (all the files we need are in the DIST_DIR root)
           artifacts: ${{ env.DIST_DIR }}/*
 
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-session-name: "github_${{ env.PROJECT_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Upload release files on Arduino downloads servers
-        uses: docker://plugins/s3
-        env:
-          PLUGIN_SOURCE: "${{ env.DIST_DIR }}/*"
-          PLUGIN_TARGET: ${{ env.AWS_PLUGIN_TARGET }}
-          PLUGIN_STRIP_PREFIX: "${{ env.DIST_DIR }}/"
-          PLUGIN_BUCKET: ${{ secrets.DOWNLOADS_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: aws s3 sync ${{ env.DIST_DIR }} s3://${{ secrets.DOWNLOADS_BUCKET }}${{ env.AWS_PLUGIN_TARGET }}
