@@ -4,8 +4,8 @@ version: v1.34.2
 type: go
 summary: Package editiondefaults contains the binary representation of the editions
   defaults.
-homepage: https://pkg.go.dev/google.golang.org/protobuf/internal/editiondefaults
-license: bsd-3-clause
+homepage: https://godoc.org/google.golang.org/protobuf/internal/editiondefaults
+license: other
 licenses:
 - sources: protobuf@v1.34.2/LICENSE
   text: |

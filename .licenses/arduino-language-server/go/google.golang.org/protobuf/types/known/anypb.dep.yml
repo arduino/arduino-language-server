@@ -3,8 +3,8 @@ name: google.golang.org/protobuf/types/known/anypb
 version: v1.34.2
 type: go
 summary: Package anypb contains generated types for google/protobuf/any.proto.
-homepage: https://pkg.go.dev/google.golang.org/protobuf/types/known/anypb
-license: bsd-3-clause
+homepage: https://godoc.org/google.golang.org/protobuf/types/known/anypb
+license: other
 licenses:
 - sources: protobuf@v1.34.2/LICENSE
   text: |

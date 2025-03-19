@@ -3,7 +3,7 @@ name: google.golang.org/grpc/grpclog
 version: v1.65.0
 type: go
 summary: Package grpclog defines logging for grpc.
-homepage: https://pkg.go.dev/google.golang.org/grpc/grpclog
+homepage: https://godoc.org/google.golang.org/grpc/grpclog
 license: apache-2.0
 licenses:
 - sources: grpc@v1.65.0/LICENSE

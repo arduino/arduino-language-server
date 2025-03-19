@@ -2,9 +2,9 @@
 name: github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1
 version: v1.0.3
 type: go
-summary: 
-homepage: https://pkg.go.dev/github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1
-license: gpl-3.0-only
+summary:
+homepage: https://godoc.org/github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1
+license: other
 licenses:
 - sources: rpc/LICENSE.txt
   text: |2

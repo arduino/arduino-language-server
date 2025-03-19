@@ -3,7 +3,7 @@ name: google.golang.org/grpc/connectivity
 version: v1.65.0
 type: go
 summary: Package connectivity defines connectivity semantics.
-homepage: https://pkg.go.dev/google.golang.org/grpc/connectivity
+homepage: https://godoc.org/google.golang.org/grpc/connectivity
 license: apache-2.0
 licenses:
 - sources: grpc@v1.65.0/LICENSE

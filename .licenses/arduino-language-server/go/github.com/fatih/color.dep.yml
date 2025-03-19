@@ -4,7 +4,7 @@ version: v1.17.0
 type: go
 summary: Package color is an ANSI color package to output colorized or SGR defined
   output to the standard output.
-homepage: https://pkg.go.dev/github.com/fatih/color
+homepage: https://godoc.org/github.com/fatih/color
 license: mit
 licenses:
 - sources: LICENSE.md

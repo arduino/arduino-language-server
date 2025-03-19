@@ -4,8 +4,8 @@ version: v1.34.2
 type: go
 summary: Package genid contains constants for declarations in descriptor.proto and
   the well-known types.
-homepage: https://pkg.go.dev/google.golang.org/protobuf/internal/genid
-license: bsd-3-clause
+homepage: https://godoc.org/google.golang.org/protobuf/internal/genid
+license: other
 licenses:
 - sources: protobuf@v1.34.2/LICENSE
   text: |

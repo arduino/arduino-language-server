@@ -3,7 +3,7 @@ name: google.golang.org/grpc/internal/buffer
 version: v1.65.0
 type: go
 summary: Package buffer provides an implementation of an unbounded buffer.
-homepage: https://pkg.go.dev/google.golang.org/grpc/internal/buffer
+homepage: https://godoc.org/google.golang.org/grpc/internal/buffer
 license: apache-2.0
 licenses:
 - sources: grpc@v1.65.0/LICENSE

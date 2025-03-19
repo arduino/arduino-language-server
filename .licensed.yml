@@ -5,6 +5,52 @@ sources:
 apps:
   - source_path: ./
 
+reviewed:
+  go:
+    - github.com/ProtonMail/go-crypto/bitcurves
+    - github.com/arduino/go-paths-helper
+    - github.com/arduino/go-properties-orderedmap
+    - go.bug.st/json
+    - golang.org/x/net/http2
+    - google.golang.org/protobuf
+    - golang.org/x/net/http2
+    - golang.org/x/net/internal/timeseries
+    - golang.org/x/net/trace
+    - golang.org/x/sys/unix
+    - google.golang.org/protobuf/encoding/protojson
+    - google.golang.org/protobuf/encoding/prototext
+    - google.golang.org/protobuf/encoding/protowire
+    - google.golang.org/protobuf/internal/descfmt
+    - google.golang.org/protobuf/internal/descopts
+    - google.golang.org/protobuf/internal/detrand
+    - google.golang.org/protobuf/internal/editiondefaults
+    - google.golang.org/protobuf/internal/encoding/defval
+    - google.golang.org/protobuf/internal/encoding/json
+    - google.golang.org/protobuf/internal/encoding/messageset
+    - google.golang.org/protobuf/internal/encoding/tag
+    - google.golang.org/protobuf/internal/encoding/text
+    - google.golang.org/protobuf/internal/errors
+    - google.golang.org/protobuf/internal/filedesc
+    - google.golang.org/protobuf/internal/filetype
+    - google.golang.org/protobuf/internal/flags
+    - google.golang.org/protobuf/internal/genid
+    - google.golang.org/protobuf/internal/impl
+    - google.golang.org/protobuf/internal/order
+    - google.golang.org/protobuf/internal/pragma
+    - google.golang.org/protobuf/internal/set
+    - google.golang.org/protobuf/internal/strs
+    - google.golang.org/protobuf/internal/version
+    - google.golang.org/protobuf/proto
+    - google.golang.org/protobuf/protoadapt
+    - google.golang.org/protobuf/reflect/protoreflect
+    - google.golang.org/protobuf/reflect/protoregistry
+    - google.golang.org/protobuf/runtime/protoiface
+    - google.golang.org/protobuf/runtime/protoimpl
+    - google.golang.org/protobuf/types/known/anypb
+    - google.golang.org/protobuf/types/known/durationpb
+    - google.golang.org/protobuf/types/known/timestamppb
+
+
 # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-dependencies/AGPL-3.0/.licensed.yml
 allowed:
   # The following are based on: https://www.gnu.org/licenses/license-list.html#GPLCompatibleLicenses

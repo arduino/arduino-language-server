@@ -3,8 +3,8 @@ name: google.golang.org/protobuf/internal/order
 version: v1.34.2
 type: go
 summary: Package order provides ordered access to messages and maps.
-homepage: https://pkg.go.dev/google.golang.org/protobuf/internal/order
-license: bsd-3-clause
+homepage: https://godoc.org/google.golang.org/protobuf/internal/order
+license: other
 licenses:
 - sources: protobuf@v1.34.2/LICENSE
   text: |

@@ -4,7 +4,7 @@ version: v1.65.0
 type: go
 summary: Package state declares grpclb types to be set by resolvers wishing to pass
   information to grpclb via resolver.State Attributes.
-homepage: https://pkg.go.dev/google.golang.org/grpc/balancer/grpclb/state
+homepage: https://godoc.org/google.golang.org/grpc/balancer/grpclb/state
 license: apache-2.0
 licenses:
 - sources: grpc@v1.65.0/LICENSE

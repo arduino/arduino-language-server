@@ -4,8 +4,8 @@ version: v1.34.2
 type: go
 summary: Package protojson marshals and unmarshals protocol buffer messages as JSON
   format.
-homepage: https://pkg.go.dev/google.golang.org/protobuf/encoding/protojson
-license: bsd-3-clause
+homepage: https://godoc.org/google.golang.org/protobuf/encoding/protojson
+license: other
 licenses:
 - sources: protobuf@v1.34.2/LICENSE
   text: |

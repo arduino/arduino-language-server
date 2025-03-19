@@ -2,8 +2,8 @@
 name: google.golang.org/grpc/binarylog/grpc_binarylog_v1
 version: v1.65.0
 type: go
-summary: 
-homepage: https://pkg.go.dev/google.golang.org/grpc/binarylog/grpc_binarylog_v1
+summary:
+homepage: https://godoc.org/google.golang.org/grpc/binarylog/grpc_binarylog_v1
 license: apache-2.0
 licenses:
 - sources: grpc@v1.65.0/LICENSE
