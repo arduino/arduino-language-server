@@ -3,7 +3,7 @@ name: google.golang.org/grpc/internal/resolver
 version: v1.65.0
 type: go
 summary: Package resolver provides internal resolver-related functionality.
-homepage: https://pkg.go.dev/google.golang.org/grpc/internal/resolver
+homepage: https://godoc.org/google.golang.org/grpc/internal/resolver
 license: apache-2.0
 licenses:
 - sources: grpc@v1.65.0/LICENSE

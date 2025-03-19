@@ -1,12 +1,12 @@
 ---
 name: go.bug.st/lsp/textedits
-version: v0.1.2
+version: v0.1.3
 type: go
 summary:
-homepage: https://pkg.go.dev/go.bug.st/lsp/textedits
+homepage: https://godoc.org/go.bug.st/lsp/textedits
 license: bsd-3-clause
 licenses:
-- sources: lsp@v0.1.2/LICENSE
+- sources: lsp@v0.1.3/LICENSE
   text: |2+
 
     Copyright (c) 2021, Cristian Maglie.

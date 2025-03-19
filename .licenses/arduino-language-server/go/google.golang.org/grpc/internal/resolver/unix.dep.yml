@@ -3,7 +3,7 @@ name: google.golang.org/grpc/internal/resolver/unix
 version: v1.65.0
 type: go
 summary: Package unix implements a resolver for unix targets.
-homepage: https://pkg.go.dev/google.golang.org/grpc/internal/resolver/unix
+homepage: https://godoc.org/google.golang.org/grpc/internal/resolver/unix
 license: apache-2.0
 licenses:
 - sources: grpc@v1.65.0/LICENSE

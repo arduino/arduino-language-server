@@ -3,8 +3,8 @@ name: google.golang.org/protobuf/types/known/durationpb
 version: v1.34.2
 type: go
 summary: Package durationpb contains generated types for google/protobuf/duration.proto.
-homepage: https://pkg.go.dev/google.golang.org/protobuf/types/known/durationpb
-license: bsd-3-clause
+homepage: https://godoc.org/google.golang.org/protobuf/types/known/durationpb
+license: other
 licenses:
 - sources: protobuf@v1.34.2/LICENSE
   text: |

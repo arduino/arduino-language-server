@@ -3,8 +3,8 @@ name: google.golang.org/protobuf/runtime/protoiface
 version: v1.34.2
 type: go
 summary: Package protoiface contains types referenced or implemented by messages.
-homepage: https://pkg.go.dev/google.golang.org/protobuf/runtime/protoiface
-license: bsd-3-clause
+homepage: https://godoc.org/google.golang.org/protobuf/runtime/protoiface
+license: other
 licenses:
 - sources: protobuf@v1.34.2/LICENSE
   text: |

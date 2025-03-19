@@ -3,8 +3,8 @@ name: golang.org/x/net/internal/timeseries
 version: v0.25.0
 type: go
 summary: Package timeseries implements a time series structure for stats collection.
-homepage: https://pkg.go.dev/golang.org/x/net/internal/timeseries
-license: bsd-3-clause
+homepage: https://godoc.org/golang.org/x/net/internal/timeseries
+license: other
 licenses:
 - sources: net@v0.25.0/LICENSE
   text: |

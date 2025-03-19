@@ -2,9 +2,9 @@
 name: github.com/arduino/go-paths-helper
 version: v1.12.1
 type: go
-summary: 
-homepage: https://pkg.go.dev/github.com/arduino/go-paths-helper
-license: gpl-2.0-or-later
+summary:
+homepage: https://godoc.org/github.com/arduino/go-paths-helper
+license: gpl-2.0
 licenses:
 - sources: LICENSE
   text: |2

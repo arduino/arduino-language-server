@@ -3,7 +3,7 @@ name: google.golang.org/grpc/balancer/pickfirst
 version: v1.65.0
 type: go
 summary: Package pickfirst contains the pick_first load balancing policy.
-homepage: https://pkg.go.dev/google.golang.org/grpc/balancer/pickfirst
+homepage: https://godoc.org/google.golang.org/grpc/balancer/pickfirst
 license: apache-2.0
 licenses:
 - sources: grpc@v1.65.0/LICENSE

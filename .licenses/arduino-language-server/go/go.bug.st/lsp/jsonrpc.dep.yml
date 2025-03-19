@@ -1,12 +1,13 @@
 ---
 name: go.bug.st/lsp/jsonrpc
-version: v0.1.2
+version: v0.1.3
 type: go
-summary:
-homepage: https://pkg.go.dev/go.bug.st/lsp/jsonrpc
+summary: Package jsonrpc is an implementation of a Language Server Protocol JSON-RPC
+  protocol.
+homepage: https://godoc.org/go.bug.st/lsp/jsonrpc
 license: bsd-3-clause
 licenses:
-- sources: lsp@v0.1.2/LICENSE
+- sources: lsp@v0.1.3/LICENSE
   text: |2+
 
     Copyright (c) 2021, Cristian Maglie.

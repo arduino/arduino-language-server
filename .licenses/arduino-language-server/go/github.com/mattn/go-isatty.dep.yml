@@ -3,7 +3,7 @@ name: github.com/mattn/go-isatty
 version: v0.0.20
 type: go
 summary: Package isatty implements interface to isatty
-homepage: https://pkg.go.dev/github.com/mattn/go-isatty
+homepage: https://godoc.org/github.com/mattn/go-isatty
 license: mit
 licenses:
 - sources: LICENSE

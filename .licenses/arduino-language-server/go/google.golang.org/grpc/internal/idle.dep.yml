@@ -4,7 +4,7 @@ version: v1.65.0
 type: go
 summary: Package idle contains a component for managing idleness (entering and exiting)
   based on RPC activity.
-homepage: https://pkg.go.dev/google.golang.org/grpc/internal/idle
+homepage: https://godoc.org/google.golang.org/grpc/internal/idle
 license: apache-2.0
 licenses:
 - sources: grpc@v1.65.0/LICENSE

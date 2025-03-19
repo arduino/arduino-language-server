@@ -4,8 +4,8 @@ version: v1.34.2
 type: go
 summary: Package prototext marshals and unmarshals protocol buffer messages as the
   textproto format.
-homepage: https://pkg.go.dev/google.golang.org/protobuf/encoding/prototext
-license: bsd-3-clause
+homepage: https://godoc.org/google.golang.org/protobuf/encoding/prototext
+license: other
 licenses:
 - sources: protobuf@v1.34.2/LICENSE
   text: |
