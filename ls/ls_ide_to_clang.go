@@ -17,13 +17,43 @@ package ls
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/arduino/arduino-language-server/sourcemapper"
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
 )
 
+func getFileType(filename string) string {
+	ext := filepath.Ext(filename)
+	if fileType, ok := extToFileType[ext]; ok {
+		return fileType
+	}
+	return "unknown"
+}
 func (ls *INOLanguageServer) idePathToIdeURI(logger jsonrpc.FunctionLogger, inoPath string) (lsp.DocumentURI, error) {
+	return ls.idePathToIdeURI2(logger, inoPath, nil)
+}
+
+func makeTextDocumentItem(logger jsonrpc.FunctionLogger, path string) (lsp.TextDocumentItem, bool, error) {
+	filetype := getFileType(path)
+	if filetype == "unknown" {
+		return lsp.TextDocumentItem{}, false, nil
+	}
+	uri := lsp.NewDocumentURI(path)
+	languageId := filetype
+	version := 0
+
+	text, err := os.ReadFile(path)
+	if err != nil {
+		logger.Logf("Could not read file: %v", err)
+		return lsp.TextDocumentItem{}, false, err
+	}
+	return lsp.TextDocumentItem{URI: uri, LanguageID: languageId, Version: version, Text: string(text)}, true, nil
+
+}
+func (ls *INOLanguageServer) idePathToIdeURI2(logger jsonrpc.FunctionLogger, inoPath string, opts *TranslationOpts) (lsp.DocumentURI, error) {
 	if inoPath == sourcemapper.NotIno.File {
 		return sourcemapper.NotInoURI, nil
 	}

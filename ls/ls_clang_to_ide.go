@@ -27,12 +27,16 @@ func (ls *INOLanguageServer) clangURIRefersToIno(clangURI lsp.DocumentURI) bool 
 	return clangURI.AsPath().EquivalentTo(ls.buildSketchCpp)
 }
 
+func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangRange lsp.Range) (lsp.DocumentURI, lsp.Range, bool, error) {
+	return ls.clang2IdeRangeAndDocumentURI2(logger, clangURI, clangRange, nil)
+}
+
 // Convert Range and DocumentURI from Clang to IDE.
 // Returns:
 // - The IDE DocumentURI and Range
 // - a boolean that is true if the clang range is in the preprocessed area of the sketch
 // - an error
-func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangRange lsp.Range) (lsp.DocumentURI, lsp.Range, bool, error) {
+func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI2(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangRange lsp.Range, opts *TranslationOpts) (lsp.DocumentURI, lsp.Range, bool, error) {
 	// Sketchbook/Sketch/Sketch.ino      <-> build-path/sketch/Sketch.ino.cpp
 	// Sketchbook/Sketch/AnotherTab.ino  <-> build-path/sketch/Sketch.ino.cpp  (different section from above)
 	if ls.clangURIRefersToIno(clangURI) {
@@ -80,7 +84,25 @@ func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.Functio
 		return lsp.NilURI, lsp.NilRange, false, err
 	}
 	idePath := ls.sketchRoot.JoinPath(rel).String()
-	ideURI, err := ls.idePathToIdeURI(logger, idePath)
+
+	var ideURI lsp.DocumentURI
+	if opts == nil || !opts.loadRelToIde {
+		ideURI, err = ls.idePathToIdeURI(logger, idePath)
+	} else {
+		doc, ok := ls.trackedIdeDocs[idePath]
+		if !ok {
+			var shouldOpen bool
+			doc, shouldOpen, err = makeTextDocumentItem(logger, idePath)
+			if err != nil {
+				logger.Logf("ERROR: could not open '%s': %s", idePath, err)
+			}
+			if shouldOpen {
+				ls.implTextDocumentDidOpenNotifFromIDE(logger, doc)
+			}
+
+		}
+		ideURI = doc.URI
+	}
 	if ideRange.End.Line > 0 {
 		ideRange.End.Line--
 	}
@@ -296,9 +318,12 @@ func (ls *INOLanguageServer) cland2IdeTextEdits(logger jsonrpc.FunctionLogger, c
 }
 
 func (ls *INOLanguageServer) clang2IdeLocationsArray(logger jsonrpc.FunctionLogger, clangLocations []lsp.Location) ([]lsp.Location, error) {
+	return ls.clang2IdeLocationsArray2(logger, clangLocations, nil)
+}
+func (ls *INOLanguageServer) clang2IdeLocationsArray2(logger jsonrpc.FunctionLogger, clangLocations []lsp.Location, opts *TranslationOpts) ([]lsp.Location, error) {
 	ideLocations := []lsp.Location{}
 	for _, clangLocation := range clangLocations {
-		ideLocation, inPreprocessed, err := ls.clang2IdeLocation(logger, clangLocation)
+		ideLocation, inPreprocessed, err := ls.clang2IdeLocation2(logger, clangLocation, opts)
 		if err != nil {
 			logger.Logf("ERROR converting location %s: %s", clangLocation, err)
 			return nil, err
@@ -313,7 +338,10 @@ func (ls *INOLanguageServer) clang2IdeLocationsArray(logger jsonrpc.FunctionLogg
 }
 
 func (ls *INOLanguageServer) clang2IdeLocation(logger jsonrpc.FunctionLogger, clangLocation lsp.Location) (lsp.Location, bool, error) {
-	ideURI, ideRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI(logger, clangLocation.URI, clangLocation.Range)
+	return ls.clang2IdeLocation2(logger, clangLocation, nil)
+}
+func (ls *INOLanguageServer) clang2IdeLocation2(logger jsonrpc.FunctionLogger, clangLocation lsp.Location, opts *TranslationOpts) (lsp.Location, bool, error) {
+	ideURI, ideRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI2(logger, clangLocation.URI, clangLocation.Range, opts)
 	return lsp.Location{
 		URI:   ideURI,
 		Range: ideRange,
