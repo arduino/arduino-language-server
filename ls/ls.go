@@ -83,6 +83,15 @@ type Config struct {
 	Jobs                            int
 }
 
+var extToFileType = map[string]string{
+	".h":   "cpp",
+	".hpp": "cpp",
+}
+
+type translationOpts struct {
+	loadRelToIde bool
+}
+
 var yellow = color.New(color.FgHiYellow)
 
 func (ls *INOLanguageServer) writeLock(logger jsonrpc.FunctionLogger, requireClangd bool) {
@@ -603,7 +612,8 @@ func (ls *INOLanguageServer) textDocumentDefinitionReqFromIDE(ctx context.Contex
 
 	var ideLocations []lsp.Location
 	if clangLocations != nil {
-		ideLocations, err = ls.clang2IdeLocationsArray(logger, clangLocations)
+		opts := translationOpts{loadRelToIde: true}
+		ideLocations, err = ls.clang2IdeLocationsArray2(logger, clangLocations, &opts)
 		if err != nil {
 			logger.Logf("Error: %v", err)
 			ls.Close()
@@ -989,15 +999,13 @@ func (ls *INOLanguageServer) exitNotifFromIDE(logger jsonrpc.FunctionLogger) {
 	ls.Close()
 }
 
-func (ls *INOLanguageServer) textDocumentDidOpenNotifFromIDE(logger jsonrpc.FunctionLogger, ideParam *lsp.DidOpenTextDocumentParams) {
-	ls.writeLock(logger, true)
-	defer ls.writeUnlock(logger)
+func (ls *INOLanguageServer) implTextDocumentDidOpenNotifFromIDE(logger jsonrpc.FunctionLogger, ideParam lsp.TextDocumentItem) *jsonrpc.ResponseError {
 
-	ideTextDocItem := ideParam.TextDocument
+	ideTextDocItem := ideParam
 	clangURI, _, err := ls.ide2ClangDocumentURI(logger, ideTextDocItem.URI)
 	if err != nil {
 		logger.Logf("Error: %s", err)
-		return
+		return &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
 	}
 
 	if ls.ideURIIsPartOfTheSketch(ideTextDocItem.URI) {
@@ -1017,7 +1025,7 @@ func (ls *INOLanguageServer) textDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 		// Notify clangd that sketchCpp has been opened only once
 		if ls.sketchTrackedFilesCount != 1 {
 			logger.Logf("Clang already notified, do not notify it anymore")
-			return
+			return nil
 		}
 	}
 
@@ -1045,7 +1053,17 @@ func (ls *INOLanguageServer) textDocumentDidOpenNotifFromIDE(logger jsonrpc.Func
 		logger.Logf("Error sending notification to clangd server: %v", err)
 		logger.Logf("Please restart the language server.")
 		ls.Close()
+		return &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+
 	}
+	return nil
+
+}
+
+func (ls *INOLanguageServer) textDocumentDidOpenNotifFromIDE(logger jsonrpc.FunctionLogger, ideParam *lsp.DidOpenTextDocumentParams) {
+	ls.writeLock(logger, true)
+	defer ls.writeUnlock(logger)
+	ls.implTextDocumentDidOpenNotifFromIDE(logger, ideParam.TextDocument)
 }
 
 func (ls *INOLanguageServer) textDocumentDidChangeNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.DidChangeTextDocumentParams) {
@@ -1619,6 +1637,16 @@ type UnknownURIError struct {
 	URI lsp.DocumentURI
 }
 
+// UnknownFileExtensionError when a file extension isn't recognized
+// and a file with it has to be opened.
+type UnknownFileExtensionError struct {
+	extension string
+}
+
 func (e *UnknownURIError) Error() string {
 	return "Document is not available: " + e.URI.String()
+}
+
+func (e *UnknownFileExtensionError) Error() string {
+	return "Unknown file extension " + e.extension
 }
