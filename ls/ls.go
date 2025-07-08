@@ -88,10 +88,8 @@ type Config struct {
 }
 
 var extToFileType = map[string]string{
-	".ino": "arduino",
-	".cpp": "cpp",
 	".h":   "cpp",
-	".c":   "c",
+	".hpp": "cpp",
 }
 
 var yellow = color.New(color.FgHiYellow)
@@ -1639,6 +1637,16 @@ type UnknownURIError struct {
 	URI lsp.DocumentURI
 }
 
+// UnknownFileExtensionError when a file extension isn't recognized
+// and a file with it has to be opened.
+type UnknownFileExtensionError struct {
+	extension string
+}
+
 func (e *UnknownURIError) Error() string {
 	return "Document is not available: " + e.URI.String()
+}
+
+func (e *UnknownFileExtensionError) Error() string {
+	return "Unknown file extension " + e.extension
 }

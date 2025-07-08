@@ -25,8 +25,7 @@ import (
 	"go.bug.st/lsp/jsonrpc"
 )
 
-func getFileType(filename string) string {
-	ext := filepath.Ext(filename)
+func getFileType(ext string) string {
 	if fileType, ok := extToFileType[ext]; ok {
 		return fileType
 	}
@@ -37,11 +36,12 @@ func (ls *INOLanguageServer) idePathToIdeURI(logger jsonrpc.FunctionLogger, inoP
 }
 
 func makeTextDocumentItem(logger jsonrpc.FunctionLogger, path string) (lsp.TextDocumentItem, bool, error) {
+	ext := filepath.Ext(path)
 	filetype := getFileType(path)
-	if filetype == "unknown" {
-		return lsp.TextDocumentItem{}, false, nil
-	}
 	uri := lsp.NewDocumentURI(path)
+	if filetype == "unknown" {
+		return lsp.TextDocumentItem{URI: uri, LanguageID: filetype}, false, &UnknownFileExtensionError{ext}
+	}
 	languageId := filetype
 	version := 0
 
