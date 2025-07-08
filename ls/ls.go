@@ -68,10 +68,6 @@ type INOLanguageServer struct {
 	sketchRebuilder           *sketchRebuilder
 }
 
-type TranslationOpts struct {
-	loadRelToIde bool
-}
-
 // Config describes the language server configuration.
 type Config struct {
 	Fqbn                            string
@@ -90,6 +86,10 @@ type Config struct {
 var extToFileType = map[string]string{
 	".h":   "cpp",
 	".hpp": "cpp",
+}
+
+type translationOpts struct {
+	loadRelToIde bool
 }
 
 var yellow = color.New(color.FgHiYellow)
@@ -612,7 +612,7 @@ func (ls *INOLanguageServer) textDocumentDefinitionReqFromIDE(ctx context.Contex
 
 	var ideLocations []lsp.Location
 	if clangLocations != nil {
-		opts := TranslationOpts{loadRelToIde: true}
+		opts := translationOpts{loadRelToIde: true}
 		ideLocations, err = ls.clang2IdeLocationsArray2(logger, clangLocations, &opts)
 		if err != nil {
 			logger.Logf("Error: %v", err)

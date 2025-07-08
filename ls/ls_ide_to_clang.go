@@ -42,7 +42,7 @@ func makeTextDocumentItem(logger jsonrpc.FunctionLogger, path string) (lsp.TextD
 	if filetype == "unknown" {
 		return lsp.TextDocumentItem{URI: uri, LanguageID: filetype}, false, &UnknownFileExtensionError{ext}
 	}
-	languageId := filetype
+	languageID := filetype
 	version := 0
 
 	text, err := os.ReadFile(path)
@@ -50,10 +50,10 @@ func makeTextDocumentItem(logger jsonrpc.FunctionLogger, path string) (lsp.TextD
 		logger.Logf("Could not read file: %v", err)
 		return lsp.TextDocumentItem{}, false, err
 	}
-	return lsp.TextDocumentItem{URI: uri, LanguageID: languageId, Version: version, Text: string(text)}, true, nil
+	return lsp.TextDocumentItem{URI: uri, LanguageID: languageID, Version: version, Text: string(text)}, true, nil
 
 }
-func (ls *INOLanguageServer) idePathToIdeURI2(logger jsonrpc.FunctionLogger, inoPath string, opts *TranslationOpts) (lsp.DocumentURI, error) {
+func (ls *INOLanguageServer) idePathToIdeURI2(logger jsonrpc.FunctionLogger, inoPath string) (lsp.DocumentURI, error) {
 	if inoPath == sourcemapper.NotIno.File {
 		return sourcemapper.NotInoURI, nil
 	}

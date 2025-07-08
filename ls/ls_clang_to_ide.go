@@ -36,7 +36,7 @@ func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI(logger jsonrpc.Functio
 // - The IDE DocumentURI and Range
 // - a boolean that is true if the clang range is in the preprocessed area of the sketch
 // - an error
-func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI2(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangRange lsp.Range, opts *TranslationOpts) (lsp.DocumentURI, lsp.Range, bool, error) {
+func (ls *INOLanguageServer) clang2IdeRangeAndDocumentURI2(logger jsonrpc.FunctionLogger, clangURI lsp.DocumentURI, clangRange lsp.Range, opts *translationOpts) (lsp.DocumentURI, lsp.Range, bool, error) {
 	// Sketchbook/Sketch/Sketch.ino      <-> build-path/sketch/Sketch.ino.cpp
 	// Sketchbook/Sketch/AnotherTab.ino  <-> build-path/sketch/Sketch.ino.cpp  (different section from above)
 	if ls.clangURIRefersToIno(clangURI) {
@@ -320,7 +320,7 @@ func (ls *INOLanguageServer) cland2IdeTextEdits(logger jsonrpc.FunctionLogger, c
 func (ls *INOLanguageServer) clang2IdeLocationsArray(logger jsonrpc.FunctionLogger, clangLocations []lsp.Location) ([]lsp.Location, error) {
 	return ls.clang2IdeLocationsArray2(logger, clangLocations, nil)
 }
-func (ls *INOLanguageServer) clang2IdeLocationsArray2(logger jsonrpc.FunctionLogger, clangLocations []lsp.Location, opts *TranslationOpts) ([]lsp.Location, error) {
+func (ls *INOLanguageServer) clang2IdeLocationsArray2(logger jsonrpc.FunctionLogger, clangLocations []lsp.Location, opts *translationOpts) ([]lsp.Location, error) {
 	ideLocations := []lsp.Location{}
 	for _, clangLocation := range clangLocations {
 		ideLocation, inPreprocessed, err := ls.clang2IdeLocation2(logger, clangLocation, opts)
@@ -340,7 +340,7 @@ func (ls *INOLanguageServer) clang2IdeLocationsArray2(logger jsonrpc.FunctionLog
 func (ls *INOLanguageServer) clang2IdeLocation(logger jsonrpc.FunctionLogger, clangLocation lsp.Location) (lsp.Location, bool, error) {
 	return ls.clang2IdeLocation2(logger, clangLocation, nil)
 }
-func (ls *INOLanguageServer) clang2IdeLocation2(logger jsonrpc.FunctionLogger, clangLocation lsp.Location, opts *TranslationOpts) (lsp.Location, bool, error) {
+func (ls *INOLanguageServer) clang2IdeLocation2(logger jsonrpc.FunctionLogger, clangLocation lsp.Location, opts *translationOpts) (lsp.Location, bool, error) {
 	ideURI, ideRange, inPreprocessed, err := ls.clang2IdeRangeAndDocumentURI2(logger, clangLocation.URI, clangLocation.Range, opts)
 	return lsp.Location{
 		URI:   ideURI,
