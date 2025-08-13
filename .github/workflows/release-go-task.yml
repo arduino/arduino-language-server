@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -104,7 +104,7 @@ jobs:
           echo "PACKAGE_FILENAME=${{ env.PROJECT_NAME }}_${TAG}_${{ matrix.build.package-suffix }}" >> $GITHUB_ENV
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download artifacts
         uses: actions/download-artifact@v5
