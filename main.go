@@ -10,12 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"os/user"
-	"path"
 	"strings"
 
 	"github.com/arduino/arduino-language-server/ls"
 	"github.com/arduino/arduino-language-server/streams"
+	"github.com/arduino/arduino-language-server/utils"
 	"github.com/arduino/go-paths-helper"
 	"github.com/mattn/go-isatty"
 )
@@ -101,8 +100,8 @@ func main() {
 		}
 	} else {
 		if *cliConfigPath == "" {
-			if user, _ := user.Current(); user != nil {
-				candidate := path.Join(user.HomeDir, ".arduino15/arduino-cli.yaml")
+			candidate := utils.GetDefaultCliConfigPath()
+			if candidate != "" {
 				if _, err := os.Stat(candidate); err == nil {
 					*cliConfigPath = candidate
 					log.Printf("ArduinoCLI config file found at %s\n", candidate)
