@@ -60,6 +60,10 @@ In order to ease code reviews and have your contributions merged faster, here is
 - Maintain clean commit history and use meaningful commit messages. PRs with messy commit history are difficult to review and require a lot of work to be merged.
 - Your PR must pass all CI tests before we will merge it. If you're seeing an error and don't think it's your fault, it may not be! The reviewer will help you if there are test failures that seem not related to the change you are making.
 
+### Support the project
+
+This open source code was written by the Arduino team and is maintained on a daily basis with the help of the community. We invest a considerable amount of time in development, testing and optimization. Please consider [buying original Arduino boards](https://store.arduino.cc/) to support our work on the project.
+
 ## Build
 
 To build the Arduino Language Server you need:
@@ -106,10 +110,6 @@ If you do not have an Arduino CLI config file, you can create one by running:
 ```
 arduino-cli config init
 ```
-
-## Donations
-
-This open source code was written by the Arduino team and is maintained on a daily basis with the help of the community. We invest a considerable amount of time in development, testing and optimization. Please consider [donating](https://www.arduino.cc/en/donate/) or [sponsoring](https://github.com/sponsors/arduino) to support our work, as well as [buying original Arduino boards](https://store.arduino.cc/) which is the best way to make sure our effort can continue in the long term.
 
 ## License
 
