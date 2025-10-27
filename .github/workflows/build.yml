@@ -78,7 +78,7 @@ jobs:
       id-token: write # This is required for requesting the JWT
     steps:
       - name: Download Workflow Artifact [GitHub Actions]
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           pattern: ${{ env.ARTIFACT_PREFIX }}*
           merge-multiple: true

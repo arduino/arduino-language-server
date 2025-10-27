@@ -107,7 +107,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.build.artifact-suffix }}
           path: ${{ env.DIST_DIR }}
@@ -198,7 +198,7 @@ jobs:
 
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           pattern: ${{ env.ARTIFACT_PREFIX }}*
           merge-multiple: true
