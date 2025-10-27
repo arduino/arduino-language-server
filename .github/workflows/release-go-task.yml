@@ -68,7 +68,7 @@ jobs:
         run: task dist:${{ matrix.os.task }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           if-no-files-found: error
           name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.os.artifact-suffix }}
@@ -181,7 +181,7 @@ jobs:
           -C ../../ LICENSE.txt
 
       - name: Replace artifact with notarized build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           if-no-files-found: error
           name: ${{ env.ARTIFACT_PREFIX }}${{ matrix.build.artifact-suffix }}
