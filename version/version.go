@@ -15,7 +15,10 @@
 
 package version
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 var (
 	defaultVersionString = "0.0.0-git"
@@ -44,6 +47,25 @@ func NewInfo(application string) *Info {
 
 func (i *Info) String() string {
 	return fmt.Sprintf("%[1]s Version: %[2]s Commit: %[3]s Date: %[4]s", i.Application, i.VersionString, i.Commit, i.Date)
+}
+
+// ShortString returns a string with the application name, version, commit and date
+func (i *Info) ShortString() string {
+	base := fmt.Sprintf("%s %s", i.Application, i.VersionString)
+	if i.Commit == "" && i.Date == "" {
+		return base
+	}
+
+	details := []string{}
+	if i.Commit != "" {
+		details = append(details, i.Commit)
+	}
+	if i.Date != "" {
+		shortDate := strings.Split(i.Date, "T")[0]
+		details = append(details, shortDate)
+	}
+
+	return fmt.Sprintf("%s (%s)", base, strings.Join(details, " "))
 }
 
 //nolint:gochecknoinits

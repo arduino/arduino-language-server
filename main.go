@@ -16,11 +16,24 @@ import (
 
 	"github.com/arduino/arduino-language-server/ls"
 	"github.com/arduino/arduino-language-server/streams"
+	"github.com/arduino/arduino-language-server/version"
 	"github.com/arduino/go-paths-helper"
 	"github.com/mattn/go-isatty"
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "Show version information")
+	flag.BoolVar(showVersion, "v", false, "Show version information")
+
+	// Parse flags early to handle version flag
+	flag.Parse()
+
+	if *showVersion {
+		info := version.NewInfo("arduino-language-server")
+		fmt.Println(info.ShortString())
+		os.Exit(0)
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "remove-temp-files" {
 		for _, tmpFile := range os.Args[2:] {
 			// SAFETY CHECK
