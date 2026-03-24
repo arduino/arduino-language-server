@@ -168,6 +168,10 @@ func (client *clangdLSPClient) WorkspaceCodeLensRefresh(context.Context, jsonrpc
 	panic("unimplemented")
 }
 
+func (client *clangdLSPClient) WorkspaceSemanticTokensRefresh(context.Context, jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
+	return nil
+}
+
 // Progress sends a Progress notification
 func (client *clangdLSPClient) Progress(logger jsonrpc.FunctionLogger, progress *lsp.ProgressParams) {
 	client.ls.progressNotifFromClangd(logger, progress)
