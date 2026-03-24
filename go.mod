@@ -34,5 +34,5 @@ require (
 )
 
 replace (
-	go.bug.st v0.1.3 => ../go-lsp
+	go.bug.st/lsp v0.1.3 => ../go-lsp
 )
