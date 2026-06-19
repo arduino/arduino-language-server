@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -186,6 +187,12 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 	ls.readLock(logger, false)
 	sketchRoot := ls.sketchRoot
 	config := ls.config
+
+	// Validate FQBN before attempting compilation
+	if config.Fqbn == "" {
+		ls.readUnlock(logger)
+		log.Fatal("FQBN (Fully Qualified Board Name) is required but not specified. Please restart the language server with the -fqbn flag or set default_fqbn in sketch.yaml")
+	}
 	type overridesFile struct {
 		Overrides map[string]string `json:"overrides"`
 	}
