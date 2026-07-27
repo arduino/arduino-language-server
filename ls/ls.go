@@ -387,7 +387,7 @@ func (ls *INOLanguageServer) initializeReqFromIDE(_ context.Context, logger json
 	return resp, nil
 }
 
-func (ls *INOLanguageServer) shutdownReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
+func (ls *INOLanguageServer) shutdownReqFromIDE(_ context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
 	done := make(chan bool)
 	go func() {
 		ls.progressHandler.Shutdown()
