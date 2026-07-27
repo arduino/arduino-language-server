@@ -117,7 +117,8 @@ func (p *progressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 		}
 
 	case progressProxyBegin:
-		if proxy.requiredStatus == progressProxyReport {
+		switch proxy.requiredStatus {
+		case progressProxyReport:
 			err := p.conn.Progress(&lsp.ProgressParams{
 				Token: lsp.EncodeMessage(id),
 				Value: lsp.EncodeMessage(proxy.reportReq),
@@ -130,7 +131,7 @@ func (p *progressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 				proxy.requiredStatus = progressProxyBegin
 			}
 
-		} else if proxy.requiredStatus == progressProxyEnd {
+		case progressProxyEnd:
 			err := p.conn.Progress(&lsp.ProgressParams{
 				Token: lsp.EncodeMessage(id),
 				Value: lsp.EncodeMessage(proxy.endReq),
@@ -142,7 +143,6 @@ func (p *progressProxyHandler) handleProxy(id string, proxy *progressProxy) {
 			} else {
 				proxy.currentStatus = progressProxyEnd
 			}
-
 		}
 	}
 }

@@ -207,7 +207,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 		if err != nil {
 			return false, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		client := rpc.NewArduinoCoreServiceClient(conn)
 
 		compileReq := &rpc.CompileRequest{
@@ -267,7 +267,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 			return false, errors.WithMessage(err, "dumping tracked files")
 		} else {
 			overridesJSON = tmp
-			defer tmp.Remove()
+			defer func() { _ = tmp.Remove() }()
 		}
 
 		// Run arduino-cli to perform the build

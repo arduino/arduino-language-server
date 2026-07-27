@@ -124,14 +124,6 @@ func (ls *INOLanguageServer) ide2ClangRange(logger jsonrpc.FunctionLogger, ideUR
 	}
 }
 
-func (ls *INOLanguageServer) ide2ClangVersionedTextDocumentIdentifier(logger jsonrpc.FunctionLogger, ideVersionedDoc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
-	clangURI, _, err := ls.ide2ClangDocumentURI(logger, ideVersionedDoc.URI)
-	return lsp.VersionedTextDocumentIdentifier{
-		TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: clangURI},
-		Version:                ideVersionedDoc.Version,
-	}, err
-}
-
 func (ls *INOLanguageServer) ide2ClangDiagnosticRelatedInformationArray(logger jsonrpc.FunctionLogger, ideInfos []lsp.DiagnosticRelatedInformation) ([]lsp.DiagnosticRelatedInformation, error) {
 	clangInfos := []lsp.DiagnosticRelatedInformation{}
 	for _, ideInfo := range ideInfos {

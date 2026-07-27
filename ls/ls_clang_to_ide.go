@@ -320,7 +320,7 @@ func (ls *INOLanguageServer) clang2IdeLocation(logger jsonrpc.FunctionLogger, cl
 	}, inPreprocessed, err
 }
 
-func (ls *INOLanguageServer) clang2IdeSymbolTags(logger jsonrpc.FunctionLogger, clangSymbolTags []lsp.SymbolTag) []lsp.SymbolTag {
+func (ls *INOLanguageServer) clang2IdeSymbolTags(_ jsonrpc.FunctionLogger, clangSymbolTags []lsp.SymbolTag) []lsp.SymbolTag {
 	if len(clangSymbolTags) == 0 || clangSymbolTags == nil {
 		return clangSymbolTags
 	}

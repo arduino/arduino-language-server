@@ -83,5 +83,5 @@ func canonicalizeCompileCommandsJSON(compileCommandsJSONPath *paths.Path) {
 	}
 
 	// Save back compile_commands.json with OS native file separator and extension
-	compileCommands.save()
+	_ = compileCommands.save()
 }

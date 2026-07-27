@@ -71,3 +71,11 @@ func (ls *INOLanguageServer) showMessage(logger jsonrpc.FunctionLogger, msgType 
 		logger.Logf("error sending showMessage notification: %s", err)
 	}
 }
+
+func (ls *INOLanguageServer) ide2ClangVersionedTextDocumentIdentifier(logger jsonrpc.FunctionLogger, ideVersionedDoc lsp.VersionedTextDocumentIdentifier) (lsp.VersionedTextDocumentIdentifier, error) {
+	clangURI, _, err := ls.ide2ClangDocumentURI(logger, ideVersionedDoc.URI)
+	return lsp.VersionedTextDocumentIdentifier{
+		TextDocumentIdentifier: lsp.TextDocumentIdentifier{URI: clangURI},
+		Version:                ideVersionedDoc.Version,
+	}, err
+}
