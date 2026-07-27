@@ -39,7 +39,11 @@ jobs:
             ExecutableSuffix: ''
             Exports: 'CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=10.14 '
           - artifact-suffix: Windows_64bit
-            os: windows-2019
+            os: windows-latest
+            ExecutableSuffix: '.exe'
+            Exports: ''
+          - artifact-suffix: Windows_ARM64
+            os: windows-latest
             ExecutableSuffix: '.exe'
             Exports: ''
     runs-on: ${{ matrix.config.os }}
@@ -50,7 +54,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22.0'
+          go-version-file: 'go.mod'
 
       - name: Build and Test
         run: |

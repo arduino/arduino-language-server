@@ -27,6 +27,8 @@ jobs:
             artifact-suffix: Windows_32bit
           - task: Windows_64bit
             artifact-suffix: Windows_64bit
+          - task: Windows_ARM64
+            artifact-suffix: Windows_ARM64
           - task: Linux_32bit
             artifact-suffix: Linux_32bit
           - task: Linux_64bit
