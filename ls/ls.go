@@ -943,12 +943,12 @@ func (ls *INOLanguageServer) textDocumentRangeFormattingReqFromIDE(ctx context.C
 		Range:                  clangRange,
 	}
 
-	cleanup, e := ls.createClangdFormatterConfig(logger, clangURI)
-	if e != nil {
+	if cleanup, err := ls.createClangdFormatterConfig(logger, clangURI); err != nil {
 		logger.Logf("cannot create formatter config file: %v", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	} else {
+		defer cleanup()
 	}
-	defer cleanup()
 
 	clangEdits, clangErr, err := ls.Clangd.conn.TextDocumentRangeFormatting(ctx, clangParams)
 	if err != nil {
