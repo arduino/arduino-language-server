@@ -70,7 +70,7 @@ type dumper struct {
 func (d *dumper) Read(buff []byte) (int, error) {
 	n, err := d.upstream.Read(buff)
 	if err != nil {
-		d.logfile.Write([]byte(fmt.Sprintf("<<< Read Error: %s\n", err)))
+		d.logfile.Write(fmt.Appendf(nil, "<<< Read Error: %s\n", err))
 	} else {
 		if !d.reading {
 			d.reading = true
@@ -85,7 +85,7 @@ func (d *dumper) Read(buff []byte) (int, error) {
 func (d *dumper) Write(buff []byte) (int, error) {
 	n, err := d.upstream.Write(buff)
 	if err != nil {
-		_, _ = d.logfile.Write([]byte(fmt.Sprintf(">>> Write Error: %s\n", err)))
+		_, _ = d.logfile.Write(fmt.Appendf(nil, ">>> Write Error: %s\n", err))
 	} else {
 		if !d.writing {
 			d.writing = true
@@ -99,7 +99,7 @@ func (d *dumper) Write(buff []byte) (int, error) {
 
 func (d *dumper) Close() error {
 	err := d.upstream.Close()
-	_, _ = d.logfile.Write([]byte(fmt.Sprintf("--- Stream closed, err=%s\n", err)))
+	_, _ = d.logfile.Write(fmt.Appendf(nil, "--- Stream closed, err=%s\n", err))
 	_ = d.logfile.Close()
 	return err
 }

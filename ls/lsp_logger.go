@@ -28,8 +28,8 @@ import (
 // Logger is a lsp logger
 type Logger struct {
 	IncomingPrefix, OutgoingPrefix string
-	HiColor, LoColor               func(format string, a ...interface{}) string
-	ErrorColor                     func(format string, a ...interface{}) string
+	HiColor, LoColor               func(format string, a ...any) string
+	ErrorColor                     func(format string, a ...any) string
 }
 
 func init() {
@@ -106,12 +106,12 @@ func (l *Logger) LogOutgoingDataDelay(delay time.Duration) {
 
 // FunctionLogger is a lsp function logger
 type FunctionLogger struct {
-	colorFunc func(format string, a ...interface{}) string
+	colorFunc func(format string, a ...any) string
 	prefix    string
 }
 
 // NewLSPFunctionLogger creates a new function logger
-func NewLSPFunctionLogger(colofFunction func(format string, a ...interface{}) string, prefix string) *FunctionLogger {
+func NewLSPFunctionLogger(colofFunction func(format string, a ...any) string, prefix string) *FunctionLogger {
 	color.NoColor = false
 	return &FunctionLogger{
 		colorFunc: colofFunction,
@@ -120,6 +120,6 @@ func NewLSPFunctionLogger(colofFunction func(format string, a ...interface{}) st
 }
 
 // Logf logs the given message
-func (l *FunctionLogger) Logf(format string, a ...interface{}) {
+func (l *FunctionLogger) Logf(format string, a ...any) {
 	log.Print(l.colorFunc(l.prefix+": "+format, a...))
 }
