@@ -27,8 +27,15 @@ vars:
   CGO_ENABLED: "1"
 
 tasks:
+  install-qemu:
+    internal: true
+    cmds:
+      - docker run --privileged --rm tonistiigi/binfmt --install all
+
   Windows_32bit:
     desc: Builds Windows 32 bit binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
@@ -53,6 +60,8 @@ tasks:
 
   Windows_64bit:
     desc: Builds Windows 64 bit binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
@@ -77,6 +86,8 @@ tasks:
 
   Windows_ARM64:
     desc: Builds Windows ARM64 binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
@@ -102,6 +113,8 @@ tasks:
 
   Linux_32bit:
     desc: Builds Linux 32 bit binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
@@ -126,6 +139,8 @@ tasks:
 
   Linux_64bit:
     desc: Builds Linux 64 bit binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
@@ -150,6 +165,8 @@ tasks:
 
   Linux_ARMv7:
     desc: Builds Linux ARMv7 binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
@@ -174,6 +191,8 @@ tasks:
 
   Linux_ARMv6:
     desc: Builds Linux ARMv6 binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
@@ -198,6 +217,8 @@ tasks:
 
   Linux_ARM64:
     desc: Builds Linux ARM64 binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
@@ -223,6 +244,8 @@ tasks:
 
   macOS_64bit:
     desc: Builds Mac OS X 64 bit binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
@@ -260,6 +283,8 @@ tasks:
 
   macOS_ARM64:
     desc: Builds Mac OS X ARM64 binaries
+    deps:
+      - task: install-qemu
     dir: "{{.DIST_DIR}}"
     cmds:
       - |
