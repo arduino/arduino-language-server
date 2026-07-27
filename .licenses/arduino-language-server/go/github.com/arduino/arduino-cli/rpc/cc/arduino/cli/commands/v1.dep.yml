@@ -4,7 +4,7 @@ version: v1.0.3
 type: go
 summary:
 homepage: https://godoc.org/github.com/arduino/arduino-cli/rpc/cc/arduino/cli/commands/v1
-license: other
+license: apache-2.0
 licenses:
 - sources: rpc/LICENSE.txt
   text: |2

@@ -61,13 +61,16 @@ tasks:
       - task: general:prepare-deps
     cmds:
       - |
-        if ! which licensed &>/dev/null; then
+        if
+          ! which licensed \
+          &>/dev/null
+        then
           if [[ {{OS}} == "windows" ]]; then
             echo "Licensed does not have Windows support."
             echo "Please use Linux/macOS or download the dependencies cache from the GitHub Actions workflow artifact."
           else
             echo "licensed not found or not in PATH."
-            echo "Please install: https://github.com/github/licensed#as-an-executable"
+            echo "Please install: https://github.com/licensee/licensed#installation"
           fi
           exit 1
         fi
@@ -79,6 +82,27 @@ tasks:
     deps:
       - task: general:cache-dep-licenses
     cmds:
+      - |
+        MATCHES="$(
+          find \
+            .licenses \
+            -regex '.+\.yml' \
+            -type f \
+            -print0 \
+          | \
+            xargs \
+              --null \
+              go tool \
+                github.com/mikefarah/yq/v4 \
+                  'select(.license == "other") | filename'
+        )"
+        if [[ "$MATCHES" != "" ]]; then
+          printf "%s" "$MATCHES"
+          echo
+          echo "The license cache files above have the license set to 'other'. Please manually define the license type and retry."
+          echo "See: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/check-go-dependencies-task.md#unrecognized-licenses"
+          exit 1
+        fi
       - licensed status
 
   # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-prettier-formatting-task/Taskfile.yml
