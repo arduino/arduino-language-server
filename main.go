@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"path"
 	"strings"
+	"syscall"
 
 	"github.com/arduino/arduino-language-server/ls"
 	"github.com/arduino/arduino-language-server/streams"
@@ -29,7 +30,10 @@ func main() {
 				os.Exit(1)
 			}
 
-			paths.New(tmpFile).RemoveAll()
+			if err := paths.New(tmpFile).RemoveAll(); err != nil {
+				fmt.Println("Could not remove temp folder:", tmpFile, err)
+				os.Exit(1)
+			}
 		}
 		return
 	}
@@ -164,7 +168,7 @@ https://microsoft.github.io/language-server-protocol/
 
 	// Intercept kill signal
 	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, os.Kill)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 	select {
 	case <-inoHandler.CloseNotify():

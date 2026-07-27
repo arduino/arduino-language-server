@@ -224,8 +224,8 @@ func unquoteCppString(str string) string {
 	if len(str) >= 2 && strings.HasPrefix(str, `"`) && strings.HasSuffix(str, `"`) {
 		str = strings.TrimSuffix(str, `"`)[1:]
 	}
-	str = strings.Replace(str, "\\\"", "\"", -1)
-	str = strings.Replace(str, "\\\\", "\\", -1)
+	str = strings.ReplaceAll(str, "\\\"", "\"")
+	str = strings.ReplaceAll(str, "\\\\", "\\")
 	return str
 }
 
@@ -402,7 +402,7 @@ func (s *SketchMapper) DebugLogAll() {
 	log.Printf("  > Current sketchmapper content:")
 	for l, cppLine := range cpp {
 		inoFile, inoLine := s.CppToInoLine(l)
-		cppLine = strings.Replace(cppLine, "\t", "  ", -1)
+		cppLine = strings.ReplaceAll(cppLine, "\t", "  ")
 		if len(cppLine) > 60 {
 			cppLine = cppLine[:60]
 		}

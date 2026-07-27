@@ -242,7 +242,7 @@ WhitespaceSensitiveMacros:
 	}
 	targetFile = targetFile.Join(".clang-format")
 	cleanup := func() {
-		targetFile.Remove()
+		_ = targetFile.Remove()
 		logger.Logf("    formatter config cleaned")
 	}
 	logger.Logf("    writing formatter config in: %s", targetFile)

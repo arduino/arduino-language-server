@@ -984,7 +984,7 @@ func (ls *INOLanguageServer) initializedNotifFromIDE(logger jsonrpc.FunctionLogg
 }
 
 func (ls *INOLanguageServer) exitNotifFromIDE(logger jsonrpc.FunctionLogger) {
-	ls.Clangd.conn.Exit()
+	_ = ls.Clangd.conn.Exit()
 	logger.Logf("Arduino Language Server is exiting.")
 	ls.Close()
 }
@@ -1376,7 +1376,9 @@ func (ls *INOLanguageServer) windowWorkDoneProgressCreateReqFromClangd(_ context
 
 func (ls *INOLanguageServer) setTraceNotifFromIDE(logger jsonrpc.FunctionLogger, params *lsp.SetTraceParams) {
 	logger.Logf("Notification level set to: %s", params.Value)
-	ls.Clangd.conn.SetTrace(params)
+	if err := ls.Clangd.conn.SetTrace(params); err != nil {
+		logger.Logf("error setting notification level: %s", err)
+	}
 }
 
 func (ls *INOLanguageServer) removeTemporaryFiles(logger jsonrpc.FunctionLogger) {
@@ -1439,7 +1441,7 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		client := rpc.NewArduinoCoreServiceClient(conn)
 
 		resp, err := client.SettingsGetValue(context.Background(), &rpc.SettingsGetValueRequest{
