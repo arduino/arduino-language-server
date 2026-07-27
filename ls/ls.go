@@ -1434,10 +1434,7 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 	var dataDir string
 	if ls.config.CliPath == nil {
 		// Establish a connection with the arduino-cli gRPC server
-		conn, err := grpc.Dial(
-			ls.config.CliDaemonAddress,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithBlock())
+		conn, err := grpc.NewClient(ls.config.CliDaemonAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
 		}

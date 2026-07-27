@@ -34,6 +34,7 @@ import (
 	"go.bug.st/lsp"
 	"go.bug.st/lsp/jsonrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type sketchRebuilder struct {
@@ -203,7 +204,7 @@ func (ls *INOLanguageServer) generateBuildEnvironment(ctx context.Context, fullB
 	var success bool
 	if config.CliPath == nil {
 		// Establish a connection with the arduino-cli gRPC server
-		conn, err := grpc.Dial(config.CliDaemonAddress, grpc.WithInsecure(), grpc.WithBlock())
+		conn, err := grpc.NewClient(config.CliDaemonAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			return false, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
 		}
