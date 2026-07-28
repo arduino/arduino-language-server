@@ -56,7 +56,7 @@ func OpenLogFileAs(filename string) *os.File {
 		abs, _ := path.Abs()
 		log.Printf("logging to %s", abs)
 	}
-	res.WriteString("\n\n\n\n\n\n\nStarted logging.\n")
+	_, _ = res.WriteString("\n\n\n\n\n\n\nStarted logging.\n")
 	return res
 }
 
@@ -70,14 +70,20 @@ type dumper struct {
 func (d *dumper) Read(buff []byte) (int, error) {
 	n, err := d.upstream.Read(buff)
 	if err != nil {
-		d.logfile.Write([]byte(fmt.Sprintf("<<< Read Error: %s\n", err)))
+		if _, werr := d.logfile.Write(fmt.Appendf(nil, "<<< Read Error: %s\n", err)); werr != nil {
+			return 0, werr
+		}
 	} else {
 		if !d.reading {
 			d.reading = true
 			d.writing = false
-			d.logfile.Write([]byte("\n<<<\n"))
+			if _, err := d.logfile.Write([]byte("\n<<<\n")); err != nil {
+				return 0, err
+			}
 		}
-		d.logfile.Write(buff[:n])
+		if _, err := d.logfile.Write(buff[:n]); err != nil {
+			return 0, err
+		}
 	}
 	return n, err
 }
@@ -85,21 +91,25 @@ func (d *dumper) Read(buff []byte) (int, error) {
 func (d *dumper) Write(buff []byte) (int, error) {
 	n, err := d.upstream.Write(buff)
 	if err != nil {
-		_, _ = d.logfile.Write([]byte(fmt.Sprintf(">>> Write Error: %s\n", err)))
+		_, _ = d.logfile.Write(fmt.Appendf(nil, ">>> Write Error: %s\n", err))
 	} else {
 		if !d.writing {
 			d.writing = true
 			d.reading = false
-			d.logfile.Write([]byte("\n>>>\n"))
+			if _, err := d.logfile.Write([]byte("\n>>>\n")); err != nil {
+				return 0, err
+			}
 		}
-		_, _ = d.logfile.Write(buff[:n])
+		if _, err := d.logfile.Write(buff[:n]); err != nil {
+			return 0, err
+		}
 	}
 	return n, err
 }
 
 func (d *dumper) Close() error {
 	err := d.upstream.Close()
-	_, _ = d.logfile.Write([]byte(fmt.Sprintf("--- Stream closed, err=%s\n", err)))
+	_, _ = d.logfile.Write(fmt.Appendf(nil, "--- Stream closed, err=%s\n", err))
 	_ = d.logfile.Close()
 	return err
 }

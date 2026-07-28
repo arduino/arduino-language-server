@@ -34,7 +34,7 @@ vars:
     -X {{.CONFIGURATION_PACKAGE}}.date={{.TIMESTAMP}}
     '
   # test vars
-  GOFLAGS: "-timeout 10m -v -coverpkg=./... -covermode=atomic"
+  GO_TEST_FLAGS: "-timeout 10m -v -coverpkg=./... -covermode=atomic"
   TEST_VERSION: "0.0.0-test.preview"
   TEST_COMMIT: "deadbeef"
   TEST_LDFLAGS: >-
@@ -61,13 +61,16 @@ tasks:
       - task: general:prepare-deps
     cmds:
       - |
-        if ! which licensed &>/dev/null; then
+        if
+          ! which licensed \
+          &>/dev/null
+        then
           if [[ {{OS}} == "windows" ]]; then
             echo "Licensed does not have Windows support."
             echo "Please use Linux/macOS or download the dependencies cache from the GitHub Actions workflow artifact."
           else
             echo "licensed not found or not in PATH."
-            echo "Please install: https://github.com/github/licensed#as-an-executable"
+            echo "Please install: https://github.com/licensee/licensed#installation"
           fi
           exit 1
         fi
@@ -79,6 +82,27 @@ tasks:
     deps:
       - task: general:cache-dep-licenses
     cmds:
+      - |
+        MATCHES="$(
+          find \
+            .licenses \
+            -regex '.+\.yml' \
+            -type f \
+            -print0 \
+          | \
+            xargs \
+              --null \
+              go tool \
+                github.com/mikefarah/yq/v4 \
+                  'select(.license == "other") | filename'
+        )"
+        if [[ "$MATCHES" != "" ]]; then
+          printf "%s" "$MATCHES"
+          echo
+          echo "The license cache files above have the license set to 'other'. Please manually define the license type and retry."
+          echo "See: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/check-go-dependencies-task.md#unrecognized-licenses"
+          exit 1
+        fi
       - licensed status
 
   # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-prettier-formatting-task/Taskfile.yml
@@ -106,32 +130,44 @@ tasks:
 
   # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-go-task/Taskfile.yml
   go:fix:
-    desc: Modernize usages of outdated APIs
+    desc: |
+      Modernize usages of outdated APIs.
+      Environment variable parameters:
+      - GO_MODULE_PATH: Path of the Go module root (default: {{.DEFAULT_GO_MODULE_PATH}}).
+      - GO_PACKAGES: List of Go packages to modernize (default: all packages of the module).
     dir: "{{default .DEFAULT_GO_MODULE_PATH .GO_MODULE_PATH}}"
     cmds:
       - go fix {{default .DEFAULT_GO_PACKAGES .GO_PACKAGES}}
 
   # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-go-task/Taskfile.yml
   go:format:
-    desc: Format Go code
+    desc: |
+      Format Go code.
+      Environment variable parameters:
+      - GO_MODULE_PATH: Path of the Go module root (default: {{.DEFAULT_GO_MODULE_PATH}}).
+      - GO_PACKAGES: List of Go packages to modernize (default: all packages of the module).
     dir: "{{default .DEFAULT_GO_MODULE_PATH .GO_MODULE_PATH}}"
     cmds:
       - go fmt {{default .DEFAULT_GO_PACKAGES .GO_PACKAGES}}
 
   # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-go-task/Taskfile.yml
   go:lint:
-    desc: Lint Go code
+    desc: |
+      Lint Go code
+      Environment variable parameters:
+      - GO_MODULE_PATH: Path of the Go module root (default: {{.DEFAULT_GO_MODULE_PATH}}).
     dir: "{{default .DEFAULT_GO_MODULE_PATH .GO_MODULE_PATH}}"
     cmds:
       - |
-        if ! which golint &>/dev/null; then
-          echo "golint not installed or not in PATH. Please install: https://github.com/golang/lint#installation"
+        if
+          ! which golangci-lint \
+          &>/dev/null
+        then
+          echo "golangci-lint not installed or not in PATH."
+          echo "Please install: https://golangci-lint.run/usage/install/#local-installation"
           exit 1
         fi
-      - |
-        golint \
-          {{default "-min_confidence 0.8 -set_exit_status" .GO_LINT_FLAGS}} \
-          {{default .DEFAULT_GO_PACKAGES .GO_PACKAGES}}
+      - golangci-lint run
 
   # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/test-go-task/Taskfile.yml
   go:test:

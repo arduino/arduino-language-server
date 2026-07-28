@@ -26,7 +26,7 @@ import (
 func CatchAndLogPanic() {
 	if r := recover(); r != nil {
 		reason := fmt.Sprintf("%v", r)
-		log.Println(fmt.Sprintf("Panic: %s\n\n%s", reason, string(debug.Stack())))
+		log.Printf("Panic: %s\n\n%s", reason, string(debug.Stack()))
 		panic(reason)
 	}
 }

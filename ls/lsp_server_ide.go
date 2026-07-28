@@ -55,12 +55,12 @@ func (server *IDELSPServer) Run() {
 
 // Initialize sends an initilize request
 func (server *IDELSPServer) Initialize(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
-	return server.ls.initializeReqFromIDE(ctx, logger, params)
+	return server.ls.initializeReqFromIDE(logger, params)
 }
 
 // Shutdown sends a shutdown request
 func (server *IDELSPServer) Shutdown(ctx context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
-	return server.ls.shutdownReqFromIDE(ctx, logger)
+	return server.ls.shutdownReqFromIDE(logger)
 }
 
 // WorkspaceSymbol is not implemented

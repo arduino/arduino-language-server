@@ -91,9 +91,13 @@ func newClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 	clangdStdio := streams.NewReadWriteCloser(clangdStdout, clangdStdin)
 	if ls.config.EnableLogging {
 		clangdStdio = streams.LogReadWriteCloserAs(clangdStdio, "inols-clangd.log")
-		go io.Copy(streams.OpenLogFileAs("inols-clangd-err.log"), clangdStderr)
+		go func() {
+			_, _ = io.Copy(streams.OpenLogFileAs("inols-clangd-err.log"), clangdStderr)
+		}()
 	} else {
-		go io.Copy(os.Stderr, clangdStderr)
+		go func() {
+			_, _ = io.Copy(os.Stderr, clangdStderr)
+		}()
 	}
 
 	client := &clangdLSPClient{
@@ -117,7 +121,7 @@ func (client *clangdLSPClient) Run() {
 
 // Close sends an Exit notification to Clangd
 func (client *clangdLSPClient) Close() {
-	client.conn.Exit() // send "exit" notification to Clangd
+	_ = client.conn.Exit() // send "exit" notification to Clangd
 	// TODO: kill client.conn
 }
 
@@ -135,7 +139,7 @@ func (client *clangdLSPClient) WindowShowDocument(context.Context, jsonrpc.Funct
 
 // WindowWorkDoneProgressCreate is not implemented
 func (client *clangdLSPClient) WindowWorkDoneProgressCreate(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
-	return client.ls.windowWorkDoneProgressCreateReqFromClangd(ctx, logger, params)
+	return client.ls.windowWorkDoneProgressCreateReqFromClangd(logger, params)
 }
 
 // ClientRegisterCapability is not implemented

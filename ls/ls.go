@@ -179,7 +179,7 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	return ls
 }
 
-func (ls *INOLanguageServer) initializeReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) initializeReqFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
 	ls.writeLock(logger, false)
 	ls.sketchRoot = ideParams.RootURI.AsPath()
 	ls.sketchName = ls.sketchRoot.Base()
@@ -387,7 +387,7 @@ func (ls *INOLanguageServer) initializeReqFromIDE(ctx context.Context, logger js
 	return resp, nil
 }
 
-func (ls *INOLanguageServer) shutdownReqFromIDE(ctx context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
+func (ls *INOLanguageServer) shutdownReqFromIDE(logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
 	done := make(chan bool)
 	go func() {
 		ls.progressHandler.Shutdown()
@@ -943,12 +943,12 @@ func (ls *INOLanguageServer) textDocumentRangeFormattingReqFromIDE(ctx context.C
 		Range:                  clangRange,
 	}
 
-	cleanup, e := ls.createClangdFormatterConfig(logger, clangURI)
-	if e != nil {
+	if cleanup, err := ls.createClangdFormatterConfig(logger, clangURI); err != nil {
 		logger.Logf("cannot create formatter config file: %v", err)
 		return nil, &jsonrpc.ResponseError{Code: jsonrpc.ErrorCodesInternalError, Message: err.Error()}
+	} else {
+		defer cleanup()
 	}
-	defer cleanup()
 
 	clangEdits, clangErr, err := ls.Clangd.conn.TextDocumentRangeFormatting(ctx, clangParams)
 	if err != nil {
@@ -979,12 +979,12 @@ func (ls *INOLanguageServer) textDocumentRangeFormattingReqFromIDE(ctx context.C
 	return inoEdits, nil
 }
 
-func (ls *INOLanguageServer) initializedNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.InitializedParams) {
+func (ls *INOLanguageServer) initializedNotifFromIDE(logger jsonrpc.FunctionLogger, _ /*ideParams*/ *lsp.InitializedParams) {
 	logger.Logf("Notification is not propagated to clangd")
 }
 
 func (ls *INOLanguageServer) exitNotifFromIDE(logger jsonrpc.FunctionLogger) {
-	ls.Clangd.conn.Exit()
+	_ = ls.Clangd.conn.Exit()
 	logger.Logf("Arduino Language Server is exiting.")
 	ls.Close()
 }
@@ -1144,7 +1144,7 @@ func (ls *INOLanguageServer) textDocumentDidChangeNotifFromIDE(logger jsonrpc.Fu
 	}
 }
 
-func (ls *INOLanguageServer) textDocumentDidSaveNotifFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.DidSaveTextDocumentParams) {
+func (ls *INOLanguageServer) textDocumentDidSaveNotifFromIDE(logger jsonrpc.FunctionLogger, _ /*ideParams*/ *lsp.DidSaveTextDocumentParams) {
 	ls.writeLock(logger, true)
 	defer ls.writeUnlock(logger)
 
@@ -1364,7 +1364,7 @@ func (ls *INOLanguageServer) progressNotifFromClangd(logger jsonrpc.FunctionLogg
 	}
 }
 
-func (ls *INOLanguageServer) windowWorkDoneProgressCreateReqFromClangd(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
+func (ls *INOLanguageServer) windowWorkDoneProgressCreateReqFromClangd(logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
 	var token string
 	if err := json.Unmarshal(params.Token, &token); err != nil {
 		logger.Logf("error decoding progress token: %s", err)
@@ -1376,7 +1376,9 @@ func (ls *INOLanguageServer) windowWorkDoneProgressCreateReqFromClangd(ctx conte
 
 func (ls *INOLanguageServer) setTraceNotifFromIDE(logger jsonrpc.FunctionLogger, params *lsp.SetTraceParams) {
 	logger.Logf("Notification level set to: %s", params.Value)
-	ls.Clangd.conn.SetTrace(params)
+	if err := ls.Clangd.conn.SetTrace(params); err != nil {
+		logger.Logf("error setting notification level: %s", err)
+	}
 }
 
 func (ls *INOLanguageServer) removeTemporaryFiles(logger jsonrpc.FunctionLogger) {
@@ -1432,14 +1434,11 @@ func (ls *INOLanguageServer) extractDataFolderFromArduinoCLI(logger jsonrpc.Func
 	var dataDir string
 	if ls.config.CliPath == nil {
 		// Establish a connection with the arduino-cli gRPC server
-		conn, err := grpc.Dial(
-			ls.config.CliDaemonAddress,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithBlock())
+		conn, err := grpc.NewClient(ls.config.CliDaemonAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to arduino-cli rpc server: %w", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		client := rpc.NewArduinoCoreServiceClient(conn)
 
 		resp, err := client.SettingsGetValue(context.Background(), &rpc.SettingsGetValueRequest{
