@@ -139,7 +139,7 @@ func (client *clangdLSPClient) WindowShowDocument(context.Context, jsonrpc.Funct
 
 // WindowWorkDoneProgressCreate is not implemented
 func (client *clangdLSPClient) WindowWorkDoneProgressCreate(ctx context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
-	return client.ls.windowWorkDoneProgressCreateReqFromClangd(ctx, logger, params)
+	return client.ls.windowWorkDoneProgressCreateReqFromClangd(logger, params)
 }
 
 // ClientRegisterCapability is not implemented

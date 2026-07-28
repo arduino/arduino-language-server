@@ -179,7 +179,7 @@ func NewINOLanguageServer(stdin io.Reader, stdout io.Writer, config *Config) *IN
 	return ls
 }
 
-func (ls *INOLanguageServer) initializeReqFromIDE(_ context.Context, logger jsonrpc.FunctionLogger, ideParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
+func (ls *INOLanguageServer) initializeReqFromIDE(logger jsonrpc.FunctionLogger, ideParams *lsp.InitializeParams) (*lsp.InitializeResult, *jsonrpc.ResponseError) {
 	ls.writeLock(logger, false)
 	ls.sketchRoot = ideParams.RootURI.AsPath()
 	ls.sketchName = ls.sketchRoot.Base()
@@ -387,7 +387,7 @@ func (ls *INOLanguageServer) initializeReqFromIDE(_ context.Context, logger json
 	return resp, nil
 }
 
-func (ls *INOLanguageServer) shutdownReqFromIDE(_ context.Context, logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
+func (ls *INOLanguageServer) shutdownReqFromIDE(logger jsonrpc.FunctionLogger) *jsonrpc.ResponseError {
 	done := make(chan bool)
 	go func() {
 		ls.progressHandler.Shutdown()
@@ -1364,7 +1364,7 @@ func (ls *INOLanguageServer) progressNotifFromClangd(logger jsonrpc.FunctionLogg
 	}
 }
 
-func (ls *INOLanguageServer) windowWorkDoneProgressCreateReqFromClangd(_ context.Context, logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
+func (ls *INOLanguageServer) windowWorkDoneProgressCreateReqFromClangd(logger jsonrpc.FunctionLogger, params *lsp.WorkDoneProgressCreateParams) *jsonrpc.ResponseError {
 	var token string
 	if err := json.Unmarshal(params.Token, &token); err != nil {
 		logger.Logf("error decoding progress token: %s", err)
