@@ -38,6 +38,9 @@ func NewIDELSPServer(logger jsonrpc.FunctionLogger, in io.Reader, out io.Writer,
 	}
 	server.conn = lsp.NewServer(in, out, server)
 	server.conn.RegisterCustomNotification("ino/didCompleteBuild", server.ArduinoBuildCompleted)
+	server.conn.RegisterCustomRequest("textDocument/inlayHint", func(context.Context, jsonrpc.FunctionLogger, json.RawMessage) (interface{}, *jsonrpc.ResponseError) {
+		return nil, nil
+	})
 	server.conn.SetLogger(&Logger{
 		IncomingPrefix: "IDE --> LS",
 		OutgoingPrefix: "IDE <-- LS",
