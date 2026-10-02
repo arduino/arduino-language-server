@@ -61,7 +61,9 @@ func newClangdLSPClient(logger jsonrpc.FunctionLogger, dataFolder *paths.Path, l
 		args = append(args, "-j", fmt.Sprintf("%d", jobs))
 	}
 	if dataFolder != nil {
-		args = append(args, fmt.Sprintf("-query-driver=%s", dataFolder.Join("packages", "**").Canonical()))
+		defaultPlatformDir := dataFolder.Join("packages", "**").Canonical()
+		profilePlatformDir := dataFolder.Join("internal", "**").Canonical()
+		args = append(args, fmt.Sprintf("-query-driver=%s,%s", defaultPlatformDir, profilePlatformDir))
 	}
 
 	logger.Logf("    Starting clangd: %s %s", ls.config.ClangdPath, strings.Join(args, " "))
