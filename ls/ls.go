@@ -843,7 +843,7 @@ func (ls *INOLanguageServer) textDocumentCodeActionReqFromIDE(ctx context.Contex
 
 	// TODO: Create a function for this one?
 	ideCommandsOrCodeActions := []lsp.CommandOrCodeAction{}
-	if clangCommandsOrCodeActions != nil {
+	if clangCommandsOrCodeActions == nil {
 		return ideCommandsOrCodeActions, nil
 	}
 	logger.Logf("    <-- codeAction(%d elements)", len(clangCommandsOrCodeActions))
@@ -852,11 +852,24 @@ func (ls *INOLanguageServer) textDocumentCodeActionReqFromIDE(ctx context.Contex
 		switch i := clangItem.Get().(type) {
 		case lsp.Command:
 			logger.Logf("        > Command: %s", i.Title)
-			ideCommand := ls.clang2IdeCommand(logger, i)
-			if ideCommand == nil {
-				continue // Skip unsupported command
+			if i.Command == "clangd.applyFix" && len(i.Arguments) > 0 {
+				var clangWorkspaceEdit lsp.WorkspaceEdit
+				if err := json.Unmarshal(i.Arguments[0], &clangWorkspaceEdit); err != nil {
+					logger.Logf("ERROR: could not unmarshal clangd.applyFix arguments: %v", err)
+					continue
+				}
+				ideItem.Set(lsp.CodeAction{
+					Title: i.Title,
+					Kind:  lsp.CodeActionKindQuickFix,
+					Edit:  ls.cpp2inoWorkspaceEdit(logger, &clangWorkspaceEdit),
+				})
+			} else {
+				ideCommand := ls.clang2IdeCommand(logger, i)
+				if ideCommand == nil {
+					continue // Skip unsupported command
+				}
+				ideItem.Set(*ideCommand)
 			}
-			ideItem.Set(*ideCommand)
 		case lsp.CodeAction:
 			logger.Logf("        > CodeAction: %s", i.Title)
 			ideCodeAction := ls.clang2IdeCodeAction(logger, i, ideURI)
