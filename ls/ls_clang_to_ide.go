@@ -154,7 +154,6 @@ func (ls *INOLanguageServer) clang2IdeDiagnostics(logger jsonrpc.FunctionLogger,
 		}
 		allIdeDiagsParams[ideURI] = &lsp.PublishDiagnosticsParams{
 			URI:         ideURI,
-			Version:     clangDiagsParams.Version,
 			Diagnostics: []lsp.Diagnostic{},
 		}
 		return allIdeDiagsParams, nil
